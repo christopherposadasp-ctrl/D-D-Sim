@@ -12,6 +12,12 @@ It should be updated whenever one of these changes:
 - content inclusion plan
 - repository structure
 
+## Related Docs
+
+- [V4 Architecture](V4_ARCHITECTURE.md)
+- [Content Backlog](CONTENT_BACKLOG.md)
+- [Reference PDFs](reference/)
+
 ## Current Snapshot
 
 ### Live Proof of Concept

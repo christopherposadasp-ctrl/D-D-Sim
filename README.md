@@ -17,7 +17,11 @@ The long-term direction is:
 - Non-Python user interface
 - Final target scope: broader class, monster, and spell support
 
-The working roadmap and design decisions are tracked in [docs/MASTER_NOTES.md](docs/MASTER_NOTES.md).
+The working roadmap and design decisions are tracked in:
+
+- [docs/MASTER_NOTES.md](docs/MASTER_NOTES.md)
+- [docs/V4_ARCHITECTURE.md](docs/V4_ARCHITECTURE.md)
+- [docs/CONTENT_BACKLOG.md](docs/CONTENT_BACKLOG.md)
 
 ## Repository Layout
 
