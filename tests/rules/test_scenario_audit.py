@@ -22,6 +22,8 @@ def test_active_scenario_ids_exclude_giant_toad_solo() -> None:
         "orc_push",
         "wolf_harriers",
         "marsh_predators",
+        "hobgoblin_kill_box",
+        "predator_rampage",
     )
     assert "giant_toad_solo" not in get_active_scenario_ids()
 

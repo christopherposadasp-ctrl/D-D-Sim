@@ -59,6 +59,20 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         enemy_preset_id="marsh_predators",
         audit_expectation_ids=("crocodile_grapple", "toad_swallow"),
     ),
+    "hobgoblin_kill_box": ScenarioDefinition(
+        scenario_id="hobgoblin_kill_box",
+        display_name="Hobgoblin Kill Box",
+        description=ENEMY_PRESETS["hobgoblin_kill_box"].description,
+        enemy_preset_id="hobgoblin_kill_box",
+        audit_expectation_ids=("hobgoblin_longsword_attack", "hobgoblin_longbow_attack", "goblin_boss_multiattack"),
+    ),
+    "predator_rampage": ScenarioDefinition(
+        scenario_id="predator_rampage",
+        display_name="Predator Rampage",
+        description=ENEMY_PRESETS["predator_rampage"].description,
+        enemy_preset_id="predator_rampage",
+        audit_expectation_ids=("dire_wolf_prone_rider", "worg_harry_target", "rampage_follow_up"),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS

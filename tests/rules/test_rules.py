@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import backend.engine.rules.combat_rules as combat_rules_module
 from backend.content.feature_definitions import unit_has_granted_bonus_action
 from backend.engine import create_encounter, run_encounter, step_encounter, summarize_encounter
 from backend.engine.ai.decision import MovementPlan, TurnDecision, choose_turn_decision
@@ -10,6 +11,7 @@ from backend.engine.combat.engine import (
     expire_turn_end_effects,
     get_opportunity_attack_weapon_id,
     get_total_movement_budget,
+    resolve_cast_spell_action,
     resolve_action_surge,
     resolve_bonus_action,
     resolve_bonus_attack_action,
@@ -24,8 +26,10 @@ from backend.engine.models.state import (
     DamageCandidate,
     DamageComponentResult,
     EncounterConfig,
+    GrappledEffect,
     GridPosition,
     HiddenEffect,
+    RageEffect,
     RecklessAttackEffect,
     SlowEffect,
     WeaponRange,
@@ -89,6 +93,15 @@ def build_level2_monk_config(seed: str, *, player_behavior: str = "smart") -> En
     )
 
 
+def build_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="wizard_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
 def defeat_other_enemies(encounter, *active_enemy_ids: str) -> None:
     active_ids = set(active_enemy_ids)
     for unit in encounter.units.values():
@@ -96,6 +109,14 @@ def defeat_other_enemies(encounter, *active_enemy_ids: str) -> None:
             continue
         unit.current_hp = 0
         unit.conditions.dead = True
+
+
+def build_monster_benchmark_config(seed: str, variant_id: str) -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id=f"{variant_id}_benchmark",
+        player_preset_id="monster_benchmark_duo",
+    )
 
 
 def test_great_weapon_fighting_replaces_ones_and_twos() -> None:
@@ -166,6 +187,91 @@ def test_barbarian_unarmored_defense_uses_dex_plus_con() -> None:
     encounter = create_encounter(build_barbarian_config("barbarian-unarmored-defense"))
 
     assert encounter.units["F1"].ac == 14
+
+
+def test_fire_bolt_uses_attack_roll_logic_and_applies_cover() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-fire-bolt-cover"))
+    defeat_other_enemies(encounter, "E4")
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E4"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[6]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "fire_bolt"
+    assert attack_event.resolved_totals["coverAcBonus"] == 2
+    assert attack_event.resolved_totals["attackMode"] == "normal"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.damage_details.total_damage == 6
+
+
+def test_fire_bolt_picks_up_adjacent_enemy_disadvantage() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-fire-bolt-adjacent"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[4, 17], damage_rolls=[6]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["attackMode"] == "disadvantage"
+    assert "adjacent_enemy" in attack_event.raw_rolls["disadvantageSources"]
+    assert attack_event.resolved_totals["selectedRoll"] == 4
+
+
+def test_magic_missile_auto_hits_and_spends_a_level1_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-magic-missile"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "magic_missile", "target_id": "E1"},
+        overrides=AttackRollOverrides(damage_rolls=[1, 2, 3]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "magic_missile"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.raw_rolls["damageRolls"] == [1, 2, 3]
+    assert attack_event.damage_details.total_damage == 9
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+
+
+def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-magic-missile-empty"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "magic_missile", "target_id": "E1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+
+
+def test_wizard_sample_trio_smoke_run_completes() -> None:
+    result = run_encounter(build_wizard_config("wizard-smoke-run"))
+
+    assert result.final_state.terminal_state == "complete"
+    assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
 
 
 def test_monk_unarmored_defense_uses_dex_plus_wis() -> None:
@@ -480,6 +586,726 @@ def test_rage_resistance_and_temp_hp_reduce_weapon_damage_before_hp_loss() -> No
     assert damage_result.final_damage_to_hp == 2
     assert encounter.units["F1"].current_hp == 13
     assert encounter.units["F1"].temporary_hit_points == 0
+
+
+def test_skeleton_bludgeoning_vulnerability_doubles_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("skeleton-bludgeoning", "skeleton"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="bludgeoning",
+                raw_rolls=[5],
+                adjusted_rolls=[5],
+                subtotal=5,
+                flat_modifier=0,
+                total_damage=5,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 0
+    assert damage_result.amplified_damage == 5
+    assert damage_result.final_total_damage == 10
+    assert encounter.units["E1"].current_hp == 3
+
+
+def test_skeleton_poison_immunity_prevents_all_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("skeleton-poison", "skeleton"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="poison",
+                raw_rolls=[5],
+                adjusted_rolls=[5],
+                subtotal=5,
+                flat_modifier=0,
+                total_damage=5,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 5
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 0
+    assert encounter.units["E1"].current_hp == 13
+
+
+def test_zombie_poison_immunity_prevents_all_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-poison", "zombie"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="poison",
+                raw_rolls=[5],
+                adjusted_rolls=[5],
+                subtotal=5,
+                flat_modifier=0,
+                total_damage=5,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 5
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 0
+    assert encounter.units["E1"].current_hp == 15
+
+
+def test_zombie_undead_fortitude_failure_removes_it_normally(monkeypatch: pytest.MonkeyPatch) -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-fortitude-fail", "zombie"))
+    monkeypatch.setattr(combat_rules_module, "pull_die", lambda state, sides, override=None: 2)
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="bludgeoning",
+                raw_rolls=[15],
+                adjusted_rolls=[15],
+                subtotal=15,
+                flat_modifier=0,
+                total_damage=15,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.undead_fortitude_triggered is True
+    assert damage_result.undead_fortitude_success is False
+    assert damage_result.undead_fortitude_dc == 20
+    assert damage_result.undead_fortitude_bypass_reason is None
+    assert encounter.units["E1"].current_hp == 0
+    assert encounter.units["E1"].conditions.dead is True
+    assert "E1's Undead Fortitude fails against DC 20." in damage_result.condition_deltas
+    assert "E1 is removed from combat at 0 HP." in damage_result.condition_deltas
+
+
+def test_zombie_undead_fortitude_success_leaves_it_at_one_hp(monkeypatch: pytest.MonkeyPatch) -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-fortitude-success", "zombie"))
+    encounter.units["E1"].temporary_effects.append(SlowEffect(kind="slow", source_id="F1", expires_at_turn_start_of="F1", penalty=10))
+    monkeypatch.setattr(combat_rules_module, "pull_die", lambda state, sides, override=None: 20)
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="slashing",
+                raw_rolls=[15],
+                adjusted_rolls=[15],
+                subtotal=15,
+                flat_modifier=0,
+                total_damage=15,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.undead_fortitude_triggered is True
+    assert damage_result.undead_fortitude_success is True
+    assert damage_result.undead_fortitude_dc == 20
+    assert damage_result.undead_fortitude_bypass_reason is None
+    assert encounter.units["E1"].current_hp == 1
+    assert encounter.units["E1"].conditions.dead is False
+    assert any(effect.kind == "slow" for effect in encounter.units["E1"].temporary_effects) is True
+    assert "E1's Undead Fortitude succeeds (DC 20); it remains at 1 HP." in damage_result.condition_deltas
+
+
+def test_zombie_undead_fortitude_is_bypassed_by_radiant_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-fortitude-radiant", "zombie"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="radiant",
+                raw_rolls=[15],
+                adjusted_rolls=[15],
+                subtotal=15,
+                flat_modifier=0,
+                total_damage=15,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.undead_fortitude_triggered is True
+    assert damage_result.undead_fortitude_success is None
+    assert damage_result.undead_fortitude_dc is None
+    assert damage_result.undead_fortitude_bypass_reason == "radiant"
+    assert encounter.units["E1"].conditions.dead is True
+    assert "E1's Undead Fortitude is bypassed by radiant damage." in damage_result.condition_deltas
+
+
+def test_zombie_undead_fortitude_is_bypassed_by_critical_hit() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-fortitude-critical", "zombie"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="bludgeoning",
+                raw_rolls=[15],
+                adjusted_rolls=[15],
+                subtotal=15,
+                flat_modifier=0,
+                total_damage=15,
+            )
+        ],
+        True,
+    )
+
+    assert damage_result.undead_fortitude_triggered is True
+    assert damage_result.undead_fortitude_success is None
+    assert damage_result.undead_fortitude_dc is None
+    assert damage_result.undead_fortitude_bypass_reason == "critical"
+    assert encounter.units["E1"].conditions.dead is True
+    assert "E1's Undead Fortitude is bypassed by a critical hit." in damage_result.condition_deltas
+
+
+def test_zombie_undead_fortitude_dc_uses_final_damage_to_hp_after_temp_hp(monkeypatch: pytest.MonkeyPatch) -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-fortitude-dc", "zombie"))
+    encounter.units["E1"].current_hp = 10
+    encounter.units["E1"].temporary_hit_points = 4
+    monkeypatch.setattr(combat_rules_module, "pull_die", lambda state, sides, override=None: 2)
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="bludgeoning",
+                raw_rolls=[15],
+                adjusted_rolls=[15],
+                subtotal=15,
+                flat_modifier=0,
+                total_damage=15,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.temporary_hp_absorbed == 4
+    assert damage_result.final_damage_to_hp == 11
+    assert damage_result.undead_fortitude_dc == 16
+    assert damage_result.undead_fortitude_success is False
+
+
+def test_zombie_attack_event_reports_undead_fortitude_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    encounter = create_encounter(build_monster_benchmark_config("zombie-fortitude-event", "zombie"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 5
+    melee_weapon_id = next(weapon_id for weapon_id, weapon in encounter.units["F1"].attacks.items() if weapon.kind == "melee")
+    monkeypatch.setattr(
+        combat_rules_module,
+        "pull_die",
+        lambda state, sides, override=None: override if override is not None else 20,
+    )
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id=melee_weapon_id,
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[6, 6, 6]),
+        ),
+    )
+
+    assert attack.resolved_totals["undeadFortitudeTriggered"] is True
+    assert attack.resolved_totals["undeadFortitudeSuccess"] is True
+    assert attack.resolved_totals["undeadFortitudeDc"] == attack.damage_details.final_damage_to_hp + 5
+    assert "Undead Fortitude succeeds" in " ".join(attack.condition_deltas)
+
+
+def test_giant_fire_beetle_fire_resistance_halves_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("fire-beetle-defense", "giant_fire_beetle"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="fire",
+                raw_rolls=[7],
+                adjusted_rolls=[7],
+                subtotal=7,
+                flat_modifier=0,
+                total_damage=7,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 4
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 3
+    assert encounter.units["E1"].current_hp == 1
+
+
+def test_giant_badger_poison_resistance_halves_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("giant-badger-defense", "giant_badger"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="poison",
+                raw_rolls=[7],
+                adjusted_rolls=[7],
+                subtotal=7,
+                flat_modifier=0,
+                total_damage=7,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 4
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 3
+    assert encounter.units["E1"].current_hp == 12
+
+
+def test_polar_bear_cold_resistance_halves_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("polar-bear-defense", "polar_bear"))
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="cold",
+                raw_rolls=[7],
+                adjusted_rolls=[7],
+                subtotal=7,
+                flat_modifier=0,
+                total_damage=7,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 4
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 3
+    assert encounter.units["E1"].current_hp == 39
+
+
+def test_animated_armor_poison_and_psychic_immunities_prevent_damage() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("animated-armor-defense", "animated_armor"))
+
+    poison_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="poison",
+                raw_rolls=[8],
+                adjusted_rolls=[8],
+                subtotal=8,
+                flat_modifier=0,
+                total_damage=8,
+            )
+        ],
+        False,
+    )
+    psychic_result = apply_damage(
+        encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="psychic",
+                raw_rolls=[8],
+                adjusted_rolls=[8],
+                subtotal=8,
+                flat_modifier=0,
+                total_damage=8,
+            )
+        ],
+        False,
+    )
+
+    assert poison_result.resisted_damage == 8
+    assert poison_result.final_total_damage == 0
+    assert psychic_result.resisted_damage == 8
+    assert psychic_result.final_total_damage == 0
+    assert encounter.units["E1"].current_hp == 33
+
+
+def test_lemure_damage_defenses_apply_by_type() -> None:
+    cold_encounter = create_encounter(build_monster_benchmark_config("lemure-cold", "lemure"))
+    fire_encounter = create_encounter(build_monster_benchmark_config("lemure-fire", "lemure"))
+    poison_encounter = create_encounter(build_monster_benchmark_config("lemure-poison", "lemure"))
+
+    cold_result = apply_damage(
+        cold_encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="cold",
+                raw_rolls=[7],
+                adjusted_rolls=[7],
+                subtotal=7,
+                flat_modifier=0,
+                total_damage=7,
+            )
+        ],
+        False,
+    )
+    fire_result = apply_damage(
+        fire_encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="fire",
+                raw_rolls=[7],
+                adjusted_rolls=[7],
+                subtotal=7,
+                flat_modifier=0,
+                total_damage=7,
+            )
+        ],
+        False,
+    )
+    poison_result = apply_damage(
+        poison_encounter,
+        "E1",
+        [
+            DamageComponentResult(
+                damage_type="poison",
+                raw_rolls=[7],
+                adjusted_rolls=[7],
+                subtotal=7,
+                flat_modifier=0,
+                total_damage=7,
+            )
+        ],
+        False,
+    )
+
+    assert cold_result.resisted_damage == 4
+    assert cold_result.final_total_damage == 3
+    assert fire_result.resisted_damage == 7
+    assert fire_result.final_total_damage == 0
+    assert poison_result.resisted_damage == 7
+    assert poison_result.final_total_damage == 0
+
+
+def test_static_resistance_and_vulnerability_cancel_each_other() -> None:
+    encounter = create_encounter(build_barbarian_config("static-defense-cancel"))
+    target = encounter.units["F1"]
+    target.damage_resistances = ("fire",)
+    target.damage_vulnerabilities = ("fire",)
+
+    damage_result = apply_damage(
+        encounter,
+        "F1",
+        [
+            DamageComponentResult(
+                damage_type="fire",
+                raw_rolls=[9],
+                adjusted_rolls=[9],
+                subtotal=9,
+                flat_modifier=0,
+                total_damage=9,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 0
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 9
+    assert encounter.units["F1"].current_hp == 6
+
+
+def test_rage_and_static_resistance_do_not_stack_beyond_one_halving() -> None:
+    encounter = create_encounter(build_barbarian_config("rage-static-resistance"))
+    target = encounter.units["F1"]
+    target.damage_resistances = ("slashing",)
+    target.temporary_hit_points = 0
+    target.temporary_effects.append(RageEffect(kind="rage", source_id="F1", damage_bonus=2, remaining_rounds=99))
+
+    damage_result = apply_damage(
+        encounter,
+        "F1",
+        [
+            DamageComponentResult(
+                damage_type="slashing",
+                raw_rolls=[9],
+                adjusted_rolls=[9],
+                subtotal=9,
+                flat_modifier=0,
+                total_damage=9,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 5
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 4
+    assert encounter.units["F1"].current_hp == 11
+
+
+def test_rage_resistance_and_static_vulnerability_cancel_each_other() -> None:
+    encounter = create_encounter(build_barbarian_config("rage-static-vulnerability"))
+    target = encounter.units["F1"]
+    target.damage_vulnerabilities = ("slashing",)
+    target.temporary_hit_points = 0
+    target.temporary_effects.append(RageEffect(kind="rage", source_id="F1", damage_bonus=2, remaining_rounds=99))
+
+    damage_result = apply_damage(
+        encounter,
+        "F1",
+        [
+            DamageComponentResult(
+                damage_type="slashing",
+                raw_rolls=[9],
+                adjusted_rolls=[9],
+                subtotal=9,
+                flat_modifier=0,
+                total_damage=9,
+            )
+        ],
+        False,
+    )
+
+    assert damage_result.resisted_damage == 0
+    assert damage_result.amplified_damage == 0
+    assert damage_result.final_total_damage == 9
+    assert encounter.units["F1"].current_hp == 6
+
+
+def test_prone_on_hit_honors_max_target_size() -> None:
+    large_encounter = create_encounter(build_monster_benchmark_config("brown-bear-prone-large", "brown_bear"))
+    large_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    large_encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    large_attack, _ = resolve_attack(
+        large_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="claw",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2]),
+        ),
+    )
+
+    huge_encounter = create_encounter(build_monster_benchmark_config("brown-bear-prone-huge", "brown_bear"))
+    huge_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    huge_encounter.units["F1"].position = GridPosition(x=7, y=5)
+    huge_encounter.units["F1"].size_category = "huge"
+
+    huge_attack, _ = resolve_attack(
+        huge_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="claw",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2]),
+        ),
+    )
+
+    assert large_attack.damage_details.attack_riders_applied == ["prone_on_hit"]
+    assert large_encounter.units["F1"].conditions.prone is True
+    assert huge_attack.damage_details.attack_riders_applied is None
+    assert huge_encounter.units["F1"].conditions.prone is False
+
+
+def test_advantage_against_self_grappled_target_requires_the_same_attacker() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("bugbear-self-grapple-advantage", "bugbear_warrior"))
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+    encounter.units["F1"].temporary_effects.append(GrappledEffect(kind="grappled_by", source_id="E1", escape_dc=12))
+
+    advantaged_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="light_hammer",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[2, 17], damage_rolls=[2, 3, 2]),
+        ),
+    )
+
+    encounter.units["F1"].temporary_effects = [GrappledEffect(kind="grappled_by", source_id="E2", escape_dc=12)]
+    normal_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="light_hammer",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[17], damage_rolls=[2, 3, 2]),
+        ),
+    )
+
+    assert advantaged_attack.resolved_totals["attackMode"] == "advantage"
+    assert "self_grappled_target" in advantaged_attack.raw_rolls["advantageSources"]
+    assert normal_attack.resolved_totals["attackMode"] == "normal"
+    assert "self_grappled_target" not in normal_attack.raw_rolls["advantageSources"]
+
+
+def test_parry_only_triggers_when_plus_two_ac_changes_a_melee_hit_to_a_miss() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("bandit-captain-parry", "bandit_captain"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    melee_weapon_id = next(weapon_id for weapon_id, weapon in encounter.units["F1"].attacks.items() if weapon.kind == "melee")
+    hit_roll = encounter.units["E1"].ac - encounter.units["F1"].attacks[melee_weapon_id].attack_bonus
+
+    melee_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": melee_weapon_id},
+        step_overrides=[AttackRollOverrides(attack_rolls=[hit_roll], damage_rolls=[6])],
+    )
+    melee_attack = next(event for event in melee_events if event.event_type == "attack")
+
+    assert melee_events[0].event_type == "phase_change"
+    assert melee_events[0].resolved_totals["reaction"] == "parry"
+    assert melee_attack.resolved_totals["attackReaction"] == "parry"
+    assert melee_attack.resolved_totals["targetAc"] == encounter.units["E1"].ac + 2
+    assert melee_attack.resolved_totals["hit"] is False
+    assert encounter.units["E1"].reaction_available is False
+
+    ranged_encounter = create_encounter(build_monster_benchmark_config("bandit-captain-no-parry", "bandit_captain"))
+    ranged_weapon_id = next(
+        weapon_id for weapon_id, weapon in ranged_encounter.units["F3"].attacks.items() if weapon.kind == "ranged"
+    )
+    ranged_encounter.units["F3"].position = GridPosition(x=5, y=5)
+    ranged_encounter.units["E1"].position = GridPosition(x=8, y=5)
+    ranged_hit_roll = ranged_encounter.units["E1"].ac - ranged_encounter.units["F3"].attacks[ranged_weapon_id].attack_bonus
+
+    ranged_events = resolve_attack_action(
+        ranged_encounter,
+        "F3",
+        {"kind": "attack", "target_id": "E1", "weapon_id": ranged_weapon_id},
+        step_overrides=[AttackRollOverrides(attack_rolls=[ranged_hit_roll], damage_rolls=[4])],
+    )
+    ranged_attack = next(event for event in ranged_events if event.event_type == "attack")
+
+    assert not any(event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "parry" for event in ranged_events)
+    assert ranged_attack.resolved_totals["attackReaction"] is None
+    assert ranged_encounter.units["E1"].reaction_available is True
+
+
+def test_redirect_attack_swaps_targets_rechecks_ac_and_does_not_chain() -> None:
+    encounter = create_encounter(build_monster_benchmark_config("goblin-boss-redirect", "goblin_boss"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=6)
+    encounter.units["E2"].ac = 19
+    melee_weapon_id = next(weapon_id for weapon_id, weapon in encounter.units["F1"].attacks.items() if weapon.kind == "melee")
+    hit_roll = encounter.units["E1"].ac - encounter.units["F1"].attacks[melee_weapon_id].attack_bonus
+
+    events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": melee_weapon_id},
+        step_overrides=[AttackRollOverrides(attack_rolls=[hit_roll], damage_rolls=[6])],
+    )
+    attack = next(event for event in events if event.event_type == "attack")
+
+    assert events[0].event_type == "phase_change"
+    assert events[0].resolved_totals["reaction"] == "redirect_attack"
+    assert events[0].resolved_totals["redirectedTargetId"] == "E2"
+    assert attack.target_ids == ["E2"]
+    assert attack.resolved_totals["originalTargetId"] == "E1"
+    assert attack.resolved_totals["reactionActorId"] == "E1"
+    assert attack.resolved_totals["attackReaction"] == "redirect_attack"
+    assert attack.resolved_totals["targetAc"] == 19
+    assert attack.resolved_totals["hit"] is False
+    assert encounter.units["E1"].position == GridPosition(x=6, y=6)
+    assert encounter.units["E2"].position == GridPosition(x=6, y=5)
+    assert encounter.units["E1"].reaction_available is False
+    assert encounter.units["E2"].reaction_available is True
+    assert sum(
+        1 for event in events if event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "redirect_attack"
+    ) == 1
+
+
+def test_rampage_requires_a_bloodied_target_and_respects_its_one_use_limit() -> None:
+    blocked_encounter = create_encounter(build_monster_benchmark_config("gnoll-rampage-blocked", "gnoll_warrior"))
+    blocked_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    blocked_encounter.units["F1"].position = GridPosition(x=6, y=5)
+    blocked_encounter.units["F1"].max_hp = 10
+    blocked_encounter.units["F1"].current_hp = 6
+    blocked_encounter.units["F3"].position = GridPosition(x=8, y=5)
+
+    blocked_events = resolve_attack_action(
+        blocked_encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F1", "weapon_id": "rend"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[15], damage_rolls=[3])],
+    )
+
+    assert not any(
+        event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "rampage"
+        for event in blocked_events
+    )
+    assert blocked_encounter.units["E1"].resource_pools["rampage_uses"] == 1
+
+    encounter = create_encounter(build_monster_benchmark_config("gnoll-rampage-fired", "gnoll_warrior"))
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].max_hp = 10
+    encounter.units["F1"].current_hp = 5
+    encounter.units["F3"].position = GridPosition(x=8, y=5)
+
+    events = resolve_attack_action(
+        encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F1", "weapon_id": "rend"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[15], damage_rolls=[3])],
+    )
+    follow_up_attacks = [event for event in events if event.event_type == "attack"]
+
+    assert any(
+        event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "rampage"
+        for event in events
+    )
+    assert len(follow_up_attacks) == 2
+    assert follow_up_attacks[0].target_ids == ["F1"]
+    assert follow_up_attacks[1].target_ids == ["F3"]
+    assert encounter.units["E1"].resource_pools["rampage_uses"] == 0
+
+    encounter.units["F3"].max_hp = 10
+    encounter.units["F3"].current_hp = 5
+    second_events = resolve_attack_action(
+        encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F3", "weapon_id": "rend"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[15], damage_rolls=[3])],
+    )
+
+    assert not any(
+        event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "rampage"
+        for event in second_events
+    )
 
 
 def test_rage_bonus_damage_applies_to_strength_based_greataxe_and_handaxe_attacks() -> None:

@@ -40,6 +40,28 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
             "if at least one conscious ally is within 5 feet of the target."
         ),
     ),
+    "bloodied_frenzy": MonsterTraitDefinition(
+        trait_id="bloodied_frenzy",
+        display_name="Bloodied Frenzy",
+        description="While Bloodied, this creature has advantage on attack rolls and saving throws.",
+    ),
+    "rampage": MonsterTraitDefinition(
+        trait_id="rampage",
+        display_name="Rampage",
+        description=(
+            "Immediately after dealing damage to a creature that is already Bloodied, "
+            "this creature can move up to half its Speed and make one melee attack."
+        ),
+        granted_bonus_action_ids=("rampage",),
+    ),
+    "undead_fortitude": MonsterTraitDefinition(
+        trait_id="undead_fortitude",
+        display_name="Undead Fortitude",
+        description=(
+            "When this undead would be reduced to 0 Hit Points, it can attempt a Constitution "
+            "save to remain at 1 Hit Point unless the damage was radiant or from a critical hit."
+        ),
+    ),
 }
 
 

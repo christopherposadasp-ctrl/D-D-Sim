@@ -6,7 +6,12 @@ from backend.content.enemies import (
     BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT,
     BENCHMARK_MONSTER_COUNTS,
     MONSTER_DEFINITIONS,
+    create_enemy,
     get_enemy_preset,
+    get_unit_bonus_action_ids,
+    get_unit_reaction_ids,
+    unit_has_creature_tag,
+    unit_is_undead,
 )
 from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
@@ -37,8 +42,10 @@ def serialize_weapon_profile(weapon: WeaponProfile) -> dict[str, object]:
         "reach": weapon.reach,
         "range": None if weapon.range is None else (weapon.range.normal, weapon.range.long),
         "damage_dice": tuple((die.count, die.sides) for die in weapon.damage_dice),
+        "advantage_damage_dice": tuple((die.count, die.sides) for die in weapon.advantage_damage_dice or ()),
         "damage_components": serialize_damage_components(weapon.damage_components),
         "advantage_damage_components": serialize_damage_components(weapon.advantage_damage_components),
+        "advantage_against_self_grappled_target": bool(weapon.advantage_against_self_grappled_target),
     }
 
 
@@ -66,6 +73,16 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert (definition.footprint.width, definition.footprint.height) == expectation.footprint
     assert definition.ability_mods.model_dump() == expectation.ability_mods
     assert tuple(definition.trait_ids) == expectation.trait_ids
+    assert tuple(definition.damage_resistances) == expectation.damage_resistances
+    assert tuple(definition.damage_immunities) == expectation.damage_immunities
+    assert tuple(definition.damage_vulnerabilities) == expectation.damage_vulnerabilities
+    assert tuple(definition.creature_tags) == expectation.creature_tags
+    runtime_unit = create_enemy("E1", variant_id)
+    assert tuple(get_unit_bonus_action_ids(runtime_unit)) == expectation.bonus_action_ids
+    assert tuple(get_unit_reaction_ids(runtime_unit)) == expectation.reaction_ids
+    assert tuple(runtime_unit.creature_tags) == expectation.creature_tags
+    assert unit_has_creature_tag(runtime_unit, "undead") is ("undead" in expectation.creature_tags)
+    assert unit_is_undead(runtime_unit) is ("undead" in expectation.creature_tags)
 
     assert set(definition.attacks) == set(expectation.attacks)
     for weapon_id, attack_expectation in expectation.attacks.items():
@@ -78,6 +95,7 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
             "reach": attack_expectation.reach,
             "range": attack_expectation.range,
             "damage_dice": attack_expectation.damage_dice,
+            "advantage_damage_dice": attack_expectation.advantage_damage_dice,
             "damage_components": tuple(
                 (component.damage_type, component.damage_dice, component.damage_modifier)
                 for component in attack_expectation.damage_components
@@ -86,6 +104,7 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
                 (component.damage_type, component.damage_dice, component.damage_modifier)
                 for component in attack_expectation.advantage_damage_components
             ),
+            "advantage_against_self_grappled_target": attack_expectation.advantage_against_self_grappled_target,
         }
 
     if "pack_tactics" in expectation.special_mechanics:
@@ -95,9 +114,77 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         longbow = definition.attacks["longbow"]
         assert serialize_damage_components(longbow.advantage_damage_components) == (("poison", ((3, 4),), 0),)
 
+    if "advantage_damage" in expectation.special_mechanics:
+        for weapon_id in ("scimitar", "shortbow"):
+            weapon = definition.attacks[weapon_id]
+            assert tuple((die.count, die.sides) for die in weapon.advantage_damage_dice or ()) == ((1, 4),)
+
     if "split_damage" in expectation.special_mechanics:
         ritual_sickle = definition.attacks["ritual_sickle"]
         assert serialize_damage_components(ritual_sickle.damage_components) == (
             ("slashing", ((1, 4),), 1),
             ("necrotic", (), 1),
         )
+
+    if "harry_target" in expectation.special_mechanics:
+        bite = definition.attacks["bite"]
+        assert bite.on_hit_effects is not None
+        assert [effect.kind for effect in bite.on_hit_effects] == ["harry_target"]
+
+    if "prone_on_hit" in expectation.special_mechanics:
+        weapon_id = "bite"
+        if variant_id == "brown_bear":
+            weapon_id = "claw"
+        elif variant_id == "tiger":
+            weapon_id = "rend"
+        weapon = definition.attacks[weapon_id]
+        assert weapon.on_hit_effects is not None
+        assert [effect.kind for effect in weapon.on_hit_effects] == ["prone_on_hit"]
+
+    if "multiattack" in expectation.special_mechanics:
+        multiattack = next(action for action in definition.attack_actions if action.action_id == "multiattack")
+        assert definition.default_melee_attack_action_id == "multiattack"
+        assert len(multiattack.steps) == 2
+
+    if "parry" in expectation.special_mechanics:
+        assert tuple(get_unit_reaction_ids(runtime_unit)) == ("opportunity_attack", "parry")
+
+    if "redirect_attack" in expectation.special_mechanics:
+        assert tuple(get_unit_reaction_ids(runtime_unit)) == ("opportunity_attack", "redirect_attack")
+
+    if "bloodied_frenzy" in expectation.special_mechanics:
+        assert "bloodied_frenzy" in definition.trait_ids
+
+    if "rampage" in expectation.special_mechanics:
+        assert tuple(get_unit_bonus_action_ids(runtime_unit)) == ("rampage",)
+        assert runtime_unit.resource_pools.get("rampage_uses") == 1
+
+    if "nimble_escape" in expectation.special_mechanics:
+        assert tuple(get_unit_bonus_action_ids(runtime_unit)) == ("disengage",)
+
+    if "undead_fortitude" in expectation.special_mechanics:
+        assert "undead_fortitude" in definition.trait_ids
+
+    if "grappled_target_advantage" in expectation.special_mechanics:
+        hammer = definition.attacks["light_hammer"]
+        thrown_hammer = definition.attacks["light_hammer_throw"]
+        assert hammer.advantage_against_self_grappled_target is True
+        assert thrown_hammer.advantage_against_self_grappled_target is True
+
+    if "grapple_on_hit" in expectation.special_mechanics:
+        weapon_id = "grab" if variant_id == "bugbear_warrior" else "claw"
+        expected_escape_dc = 12 if variant_id == "bugbear_warrior" else 11
+        weapon = definition.attacks[weapon_id]
+        assert weapon.on_hit_effects is not None
+        assert [(effect.kind, effect.max_target_size, effect.escape_dc) for effect in weapon.on_hit_effects] == [
+            ("grapple_on_hit", "medium", expected_escape_dc)
+        ]
+
+    if "prone_on_hit" in expectation.special_mechanics and variant_id in {"brown_bear", "tiger", "mastiff"}:
+        weapon_id = "claw" if variant_id == "brown_bear" else "rend" if variant_id == "tiger" else "bite"
+        expected_size = "large" if variant_id in {"brown_bear", "tiger"} else "medium"
+        weapon = definition.attacks[weapon_id]
+        assert weapon.on_hit_effects is not None
+        assert [(effect.kind, effect.max_target_size) for effect in weapon.on_hit_effects] == [
+            ("prone_on_hit", expected_size)
+        ]

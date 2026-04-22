@@ -110,11 +110,29 @@ COMBAT_ACTIONS: dict[str, CombatActionDefinition] = {
         description="Gain an extra full-speed movement budget that must be used to close with an enemy.",
         extra_movement_multiplier=1,
     ),
+    "rampage": CombatActionDefinition(
+        action_id="rampage",
+        display_name="Rampage",
+        timing="bonus_action",
+        description="Move up to half Speed and make one melee attack after wounding a Bloodied target.",
+    ),
     "opportunity_attack": CombatActionDefinition(
         action_id="opportunity_attack",
         display_name="Opportunity Attack",
         timing="reaction",
         description="Make a reaction melee attack when an enemy leaves reach.",
+    ),
+    "parry": CombatActionDefinition(
+        action_id="parry",
+        display_name="Parry",
+        timing="reaction",
+        description="Add 2 AC against one melee attack that would otherwise hit.",
+    ),
+    "redirect_attack": CombatActionDefinition(
+        action_id="redirect_attack",
+        display_name="Redirect Attack",
+        timing="reaction",
+        description="Swap with an adjacent ally and redirect an incoming attack to that ally.",
     ),
 }
 

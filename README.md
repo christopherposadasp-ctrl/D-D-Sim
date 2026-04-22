@@ -44,6 +44,8 @@ Active enemy presets:
 - `orc_push`
 - `wolf_harriers`
 - `marsh_predators`
+- `hobgoblin_kill_box`
+- `predator_rampage`
 
 ## Planned Direction
 

@@ -34,7 +34,7 @@ AttackId: TypeAlias = str
 SizeCategory: TypeAlias = Literal["tiny", "small", "medium", "large", "huge", "gargantuan"]
 TerrainFeatureKind: TypeAlias = Literal["rock"]
 MasteryType: TypeAlias = Literal["graze", "sap", "slow", "cleave", "vex"]
-AttackRiderType: TypeAlias = Literal["prone_on_hit", "grapple_on_hit", "grapple_and_restrain"]
+AttackRiderType: TypeAlias = Literal["prone_on_hit", "grapple_on_hit", "grapple_and_restrain", "harry_target"]
 AttackMode: TypeAlias = Literal["normal", "advantage", "disadvantage"]
 EventType: TypeAlias = Literal[
     "turn_start",
@@ -94,6 +94,7 @@ RESOURCE_FIELD_BY_POOL = {
     "action_surge": "action_surge_uses",
     "focus_points": "focus_points",
     "uncanny_metabolism": "uncanny_metabolism_uses",
+    "spell_slots_level_1": "spell_slots_level_1",
 }
 
 
@@ -105,6 +106,7 @@ class ResourceState(CamelModel):
     action_surge_uses: int
     focus_points: int
     uncanny_metabolism_uses: int
+    spell_slots_level_1: int
 
     def get_pool(self, pool_id: str) -> int:
         field_name = RESOURCE_FIELD_BY_POOL.get(pool_id)
@@ -166,6 +168,7 @@ class WeaponProfile(CamelModel):
     range: WeaponRange | None = None
     advantage_damage_dice: list[DiceSpec] | None = None
     advantage_damage_components: list[WeaponDamageComponent] | None = None
+    advantage_against_self_grappled_target: bool | None = None
     on_hit_effects: list[OnHitEffect] | None = None
     locks_to_grappled_target: bool | None = None
     resource_pool_id: str | None = None
@@ -252,6 +255,13 @@ class VexEffect(CamelModel):
     expires_at_round: int
 
 
+class HarriedEffect(CamelModel):
+    kind: Literal["harried_by"]
+    source_id: str
+    target_id: str
+    expires_at_turn_start_of: str
+
+
 TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
@@ -265,6 +275,7 @@ TemporaryEffect: TypeAlias = (
     | RecklessAttackEffect
     | SwallowedEffect
     | VexEffect
+    | HarriedEffect
 )
 
 
@@ -296,6 +307,10 @@ class UnitState(CamelModel):
     reaction_available: bool
     attacks: dict[AttackId, WeaponProfile]
     medicine_modifier: int
+    damage_resistances: tuple[str, ...] = Field(default=(), exclude=True)
+    damage_immunities: tuple[str, ...] = Field(default=(), exclude=True)
+    damage_vulnerabilities: tuple[str, ...] = Field(default=(), exclude=True)
+    creature_tags: tuple[str, ...] = Field(default=(), exclude=True)
     # These player-build fields are runtime-only for now. They are kept out of
     # the live API payload until the UI is ready to select classes/loadouts
     # directly, but the engine can already use them internally.
@@ -306,6 +321,11 @@ class UnitState(CamelModel):
     resource_pools: dict[str, int] = Field(default_factory=dict, exclude=True)
     behavior_profile: str | None = Field(default=None, exclude=True)
     combat_skill_modifiers: dict[str, int] = Field(default_factory=dict, exclude=True)
+    combat_cantrip_ids: list[str] = Field(default_factory=list, exclude=True)
+    prepared_combat_spell_ids: list[str] = Field(default_factory=list, exclude=True)
+    cantrips_known: int = Field(default=0, exclude=True)
+    spellbook_spells: int = Field(default=0, exclude=True)
+    prepared_spells: int = Field(default=0, exclude=True)
     # This is runtime-only AI memory. It is intentionally kept out of the
     # serialized API shape so the frontend and old parity fixtures do not gain
     # extra state fields just to support local monster behavior.
@@ -353,6 +373,7 @@ class DamageDetails(CamelModel):
     attack_riders_applied: list[AttackRiderType] | None = None
     total_damage: int
     resisted_damage: int
+    amplified_damage: int | None = None
     temporary_hp_absorbed: int
     final_damage_to_hp: int
     hp_delta: int
@@ -362,6 +383,8 @@ class DamageDetails(CamelModel):
         data = handler(self)
         if data.get("attackRidersApplied") is None:
             data.pop("attackRidersApplied", None)
+        if data.get("amplifiedDamage") is None:
+            data.pop("amplifiedDamage", None)
         return data
 
 

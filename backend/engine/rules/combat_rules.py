@@ -7,7 +7,9 @@ from backend.content.class_progressions import (
     get_monk_martial_arts_die_sides,
     get_progression_scalar,
 )
+from backend.content.enemies import unit_has_reaction, unit_has_trait
 from backend.content.feature_definitions import unit_has_feature
+from backend.content.spell_definitions import get_spell_definition
 from backend.engine.models.state import (
     AttackId,
     AttackMode,
@@ -19,6 +21,7 @@ from backend.engine.models.state import (
     DodgingEffect,
     EncounterState,
     GrappledEffect,
+    HarriedEffect,
     HiddenEffect,
     MasteryType,
     MovementDetails,
@@ -32,10 +35,12 @@ from backend.engine.models.state import (
     VexEffect,
     WeaponDamageComponent,
     WeaponProfile,
+    WeaponRange,
 )
 from backend.engine.rules.spatial import (
     build_position_index,
     can_attempt_hide_from_position,
+    find_advance_path,
     get_attack_context,
     get_hide_passive_perception_dc,
     get_min_chebyshev_distance_between_footprints,
@@ -65,9 +70,14 @@ class DamageApplicationResult:
     hp_delta: int
     condition_deltas: list[str]
     resisted_damage: int
+    amplified_damage: int
     temporary_hp_absorbed: int
     final_damage_to_hp: int
     final_total_damage: int
+    undead_fortitude_triggered: bool = False
+    undead_fortitude_success: bool | None = None
+    undead_fortitude_dc: int | None = None
+    undead_fortitude_bypass_reason: str | None = None
 
 
 class ResolveAttackArgs:
@@ -188,6 +198,24 @@ def consume_vex_effect(attacker: UnitState, target_id: str) -> bool:
     return consumed
 
 
+def has_harried_effect(target: UnitState) -> bool:
+    return any(effect.kind == "harried_by" for effect in target.temporary_effects)
+
+
+def consume_harried_effect(target: UnitState) -> bool:
+    consumed = False
+    remaining_effects: list[TemporaryEffect] = []
+
+    for effect in target.temporary_effects:
+        if not consumed and effect.kind == "harried_by":
+            consumed = True
+            continue
+        remaining_effects.append(effect)
+
+    target.temporary_effects = remaining_effects
+    return consumed
+
+
 def clear_invalid_hidden_effects(state: EncounterState) -> list[str]:
     position_index = build_position_index(state)
     condition_deltas: list[str] = []
@@ -225,6 +253,26 @@ def get_ability_modifier(unit: UnitState, ability: str) -> int:
         raise ValueError(f"Unsupported ability '{ability}' for a saving throw.") from error
 
 
+def unit_has_combat_spell(unit: UnitState, spell_id: str) -> bool:
+    return spell_id in unit.combat_cantrip_ids or spell_id in unit.prepared_combat_spell_ids
+
+
+def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProfile:
+    spell = get_spell_definition(spell_id)
+    spell_attack_bonus = 2 + get_ability_modifier(attacker, spell.attack_ability or "int")
+    return WeaponProfile(
+        id=spell_id,
+        display_name=spell.display_name,
+        attack_bonus=spell_attack_bonus,
+        ability_modifier=0,
+        damage_dice=list(spell.damage_dice),
+        damage_modifier=spell.damage_modifier,
+        damage_type=spell.damage_type,
+        kind="ranged",
+        range=WeaponRange(normal=spell.range_feet, long=spell.range_feet),
+    )
+
+
 def has_danger_sense(unit: UnitState) -> bool:
     return (
         unit_has_feature(unit, "danger_sense")
@@ -232,6 +280,10 @@ def has_danger_sense(unit: UnitState) -> bool:
         and not unit.conditions.dead
         and not unit.conditions.unconscious
     )
+
+
+def unit_is_bloodied(unit: UnitState) -> bool:
+    return unit.max_hp > 0 and unit.current_hp > 0 and unit.current_hp <= unit.max_hp // 2
 
 
 def apply_great_weapon_fighting(rolls: list[int]) -> list[int]:
@@ -529,6 +581,9 @@ def get_saving_throw_mode(
 
     if ability == "dex" and has_danger_sense(actor):
         advantage_sources.append("danger_sense")
+
+    if actor.faction == "goblins" and unit_has_trait(actor, "bloodied_frenzy") and unit_is_bloodied(actor):
+        advantage_sources.append("bloodied_frenzy")
 
     if advantage_sources and disadvantage_sources:
         return "normal", advantage_sources, disadvantage_sources
@@ -884,6 +939,68 @@ def consume_sap_effects(actor: UnitState) -> int:
     return sap_count
 
 
+def get_damage_defense_flags(target: UnitState, damage_type: str) -> tuple[bool, bool, bool]:
+    damage_key = damage_type.lower()
+    immune = damage_key in target.damage_immunities
+    resistant = damage_key in target.damage_resistances
+    vulnerable = damage_key in target.damage_vulnerabilities
+
+    if unit_is_raging(target) and damage_key in {"bludgeoning", "piercing", "slashing"}:
+        resistant = True
+
+    return immune, resistant, vulnerable
+
+
+def resolve_damage_component_against_target(
+    target: UnitState,
+    component: DamageComponentResult,
+) -> tuple[int, int, int]:
+    if component.total_damage <= 0:
+        return 0, 0, 0
+
+    component_damage = component.total_damage
+    immune, resistant, vulnerable = get_damage_defense_flags(target, component.damage_type)
+
+    if immune:
+        return 0, component_damage, 0
+    if resistant and vulnerable:
+        return component_damage, 0, 0
+    if resistant:
+        reduced_damage = component_damage // 2
+        return reduced_damage, component_damage - reduced_damage, 0
+    if vulnerable:
+        amplified_damage = component_damage * 2
+        return amplified_damage, 0, amplified_damage - component_damage
+
+    return component_damage, 0, 0
+
+
+def resolve_undead_fortitude(
+    state: EncounterState,
+    target: UnitState,
+    target_id: str,
+    damage_components: list[DamageComponentResult],
+    final_damage_to_hp: int,
+    is_critical: bool,
+) -> tuple[bool, bool | None, int | None, str | None]:
+    if (
+        target.faction != "goblins"
+        or final_damage_to_hp <= 0
+        or not unit_has_trait(target, "undead_fortitude")
+    ):
+        return False, None, None, None
+
+    if any(component.damage_type == "radiant" and component.total_damage > 0 for component in damage_components):
+        return True, None, None, "radiant"
+
+    if is_critical:
+        return True, None, None, "critical"
+
+    save_dc = 5 + final_damage_to_hp
+    save_total = pull_die(state, 20) + get_ability_modifier(target, "con")
+    return True, save_total >= save_dc, save_dc, None
+
+
 def apply_damage(
     state: EncounterState,
     target_id: str,
@@ -894,30 +1011,37 @@ def apply_damage(
     previous_hp = target.current_hp
     condition_deltas: list[str] = []
     resisted_damage = 0
+    amplified_damage = 0
     temporary_hp_absorbed = 0
     final_damage_to_hp = 0
     final_total_damage = 0
+    undead_fortitude_triggered = False
+    undead_fortitude_success: bool | None = None
+    undead_fortitude_dc: int | None = None
+    undead_fortitude_bypass_reason: str | None = None
 
     if target.conditions.dead:
         return DamageApplicationResult(
             hp_delta=0,
             condition_deltas=[],
             resisted_damage=0,
+            amplified_damage=0,
             temporary_hp_absorbed=0,
             final_damage_to_hp=0,
             final_total_damage=0,
+            undead_fortitude_triggered=False,
+            undead_fortitude_success=None,
+            undead_fortitude_dc=None,
+            undead_fortitude_bypass_reason=None,
         )
 
     for component in damage_components:
-        if component.total_damage <= 0:
-            continue
-
-        component_damage = component.total_damage
-        if unit_is_raging(target) and component.damage_type in {"bludgeoning", "piercing", "slashing"}:
-            reduced_damage = component_damage // 2
-            resisted_damage += component_damage - reduced_damage
-            component_damage = reduced_damage
-
+        component_damage, component_resisted_damage, component_amplified_damage = resolve_damage_component_against_target(
+            target,
+            component,
+        )
+        resisted_damage += component_resisted_damage
+        amplified_damage += component_amplified_damage
         final_total_damage += component_damage
 
     if final_total_damage <= 0:
@@ -925,9 +1049,14 @@ def apply_damage(
             hp_delta=0,
             condition_deltas=condition_deltas,
             resisted_damage=resisted_damage,
+            amplified_damage=amplified_damage,
             temporary_hp_absorbed=0,
             final_damage_to_hp=0,
             final_total_damage=0,
+            undead_fortitude_triggered=False,
+            undead_fortitude_success=None,
+            undead_fortitude_dc=None,
+            undead_fortitude_bypass_reason=None,
         )
 
     condition_deltas.extend(end_hidden(target, reason=f"{target_id} is no longer hidden after taking damage."))
@@ -950,9 +1079,14 @@ def apply_damage(
                 hp_delta=0,
                 condition_deltas=condition_deltas,
                 resisted_damage=resisted_damage,
+                amplified_damage=amplified_damage,
                 temporary_hp_absorbed=temporary_hp_absorbed,
                 final_damage_to_hp=0,
                 final_total_damage=final_total_damage,
+                undead_fortitude_triggered=False,
+                undead_fortitude_success=None,
+                undead_fortitude_dc=None,
+                undead_fortitude_bypass_reason=None,
             )
 
         if final_damage_to_hp >= target.max_hp:
@@ -965,9 +1099,14 @@ def apply_damage(
                 hp_delta=0,
                 condition_deltas=condition_deltas,
                 resisted_damage=resisted_damage,
+                amplified_damage=amplified_damage,
                 temporary_hp_absorbed=temporary_hp_absorbed,
                 final_damage_to_hp=final_damage_to_hp,
                 final_total_damage=final_total_damage,
+                undead_fortitude_triggered=False,
+                undead_fortitude_success=None,
+                undead_fortitude_dc=None,
+                undead_fortitude_bypass_reason=None,
             )
 
         target.death_save_failures += 2 if is_critical else 1
@@ -986,9 +1125,14 @@ def apply_damage(
             hp_delta=0,
             condition_deltas=condition_deltas,
             resisted_damage=resisted_damage,
+            amplified_damage=amplified_damage,
             temporary_hp_absorbed=temporary_hp_absorbed,
             final_damage_to_hp=final_damage_to_hp,
             final_total_damage=final_total_damage,
+            undead_fortitude_triggered=False,
+            undead_fortitude_success=None,
+            undead_fortitude_dc=None,
+            undead_fortitude_bypass_reason=None,
         )
 
     temporary_hp_absorbed = min(target.temporary_hit_points, final_total_damage)
@@ -1001,20 +1145,54 @@ def apply_damage(
             hp_delta=0,
             condition_deltas=condition_deltas,
             resisted_damage=resisted_damage,
+            amplified_damage=amplified_damage,
             temporary_hp_absorbed=temporary_hp_absorbed,
             final_damage_to_hp=0,
             final_total_damage=final_total_damage,
+            undead_fortitude_triggered=False,
+            undead_fortitude_success=None,
+            undead_fortitude_dc=None,
+            undead_fortitude_bypass_reason=None,
         )
 
     target.current_hp = max(0, target.current_hp - final_damage_to_hp)
 
     if target.faction == "goblins" and target.current_hp == 0:
-        target.conditions.dead = True
-        target.conditions.unconscious = False
-        target.conditions.prone = False
-        target.temporary_effects = []
-        target.effective_speed = 0
-        condition_deltas.append(f"{target_id} is removed from combat at 0 HP.")
+        (
+            undead_fortitude_triggered,
+            undead_fortitude_success,
+            undead_fortitude_dc,
+            undead_fortitude_bypass_reason,
+        ) = resolve_undead_fortitude(
+            state,
+            target,
+            target_id,
+            damage_components,
+            final_damage_to_hp,
+            is_critical,
+        )
+
+        if undead_fortitude_triggered and undead_fortitude_success is True:
+            target.current_hp = 1
+            condition_deltas.append(
+                f"{target_id}'s Undead Fortitude succeeds (DC {undead_fortitude_dc}); it remains at 1 HP."
+            )
+        else:
+            if undead_fortitude_bypass_reason == "radiant":
+                condition_deltas.append(f"{target_id}'s Undead Fortitude is bypassed by radiant damage.")
+            elif undead_fortitude_bypass_reason == "critical":
+                condition_deltas.append(f"{target_id}'s Undead Fortitude is bypassed by a critical hit.")
+            elif undead_fortitude_triggered and undead_fortitude_success is False:
+                condition_deltas.append(
+                    f"{target_id}'s Undead Fortitude fails against DC {undead_fortitude_dc}."
+                )
+
+            target.conditions.dead = True
+            target.conditions.unconscious = False
+            target.conditions.prone = False
+            target.temporary_effects = []
+            target.effective_speed = 0
+            condition_deltas.append(f"{target_id} is removed from combat at 0 HP.")
     elif target.faction == "fighters" and target.current_hp == 0:
         overflow = final_damage_to_hp - previous_hp
         if overflow >= target.max_hp:
@@ -1036,9 +1214,14 @@ def apply_damage(
         hp_delta=target.current_hp - previous_hp,
         condition_deltas=condition_deltas,
         resisted_damage=resisted_damage,
+        amplified_damage=amplified_damage,
         temporary_hp_absorbed=temporary_hp_absorbed,
         final_damage_to_hp=final_damage_to_hp,
         final_total_damage=final_total_damage,
+        undead_fortitude_triggered=undead_fortitude_triggered,
+        undead_fortitude_success=undead_fortitude_success,
+        undead_fortitude_dc=undead_fortitude_dc,
+        undead_fortitude_bypass_reason=undead_fortitude_bypass_reason,
     )
 
 
@@ -1143,9 +1326,9 @@ def apply_on_hit_effects(
 
     for effect in weapon.on_hit_effects:
         if effect.kind == "prone_on_hit":
-            # The current roster only needs the simple wolf-style prone rider.
-            # The target must still be conscious and standing after the bite.
             if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious or target.conditions.prone:
+                continue
+            if not is_within_max_target_size(target.size_category, effect.max_target_size):
                 continue
 
             target.conditions.prone = True
@@ -1181,8 +1364,77 @@ def apply_on_hit_effects(
             condition_deltas.append(f"{target_id} is grappled by {attacker_id} (escape DC {escape_dc}).")
             if effect.kind == "grapple_and_restrain":
                 condition_deltas.append(f"{target_id} is restrained by {attacker_id} (escape DC {escape_dc}).")
+            continue
+
+        if effect.kind == "harry_target":
+            if target.conditions.dead or target.current_hp <= 0:
+                continue
+
+            target.temporary_effects = [
+                active_effect
+                for active_effect in target.temporary_effects
+                if not (active_effect.kind == "harried_by" and active_effect.source_id == attacker_id)
+            ]
+            target.temporary_effects.append(
+                HarriedEffect(
+                    kind="harried_by",
+                    source_id=attacker_id,
+                    target_id=target_id,
+                    expires_at_turn_start_of=attacker_id,
+                )
+            )
+            applied_riders.append("harry_target")
+            condition_deltas.append(
+                f"{target_id} is harried by {attacker_id}; the next attack roll against it has advantage."
+            )
 
     return applied_riders, condition_deltas
+
+
+def target_is_grappled_by_attacker(target: UnitState, attacker_id: str) -> bool:
+    return any(effect.kind == "grappled_by" and effect.source_id == attacker_id for effect in target.temporary_effects)
+
+
+def can_trigger_attack_reaction(unit: UnitState, reaction_id: str) -> bool:
+    return (
+        unit.faction == "goblins"
+        and
+        unit.current_hp > 0
+        and not unit.conditions.dead
+        and not unit.conditions.unconscious
+        and unit.reaction_available
+        and unit_has_reaction(unit, reaction_id)
+    )
+
+
+def choose_redirect_attack_ally(state: EncounterState, reactor_id: str) -> UnitState | None:
+    reactor = state.units[reactor_id]
+    if not reactor.position:
+        return None
+
+    eligible_allies = [
+        unit
+        for unit in state.units.values()
+        if unit.id != reactor_id
+        and unit.faction == reactor.faction
+        and unit.position
+        and unit.current_hp > 0
+        and not unit.conditions.dead
+        and not unit.conditions.unconscious
+        and unit.size_category in {"small", "medium"}
+        and get_min_chebyshev_distance_between_footprints(
+            reactor.position,
+            get_unit_footprint(reactor),
+            unit.position,
+            get_unit_footprint(unit),
+        )
+        <= 1
+    ]
+
+    if not eligible_allies:
+        return None
+
+    return sorted(eligible_allies, key=lambda unit: (-unit.ac, -unit.current_hp, unit_sort_key(unit.id)))[0]
 
 
 def get_attack_mode(
@@ -1229,6 +1481,15 @@ def get_attack_mode(
 
     if has_vex_effect(attacker, target_id):
         advantage_sources.append("vex")
+
+    if has_harried_effect(target):
+        advantage_sources.append("harried_target")
+
+    if weapon.advantage_against_self_grappled_target and target_is_grappled_by_attacker(target, attacker_id):
+        advantage_sources.append("self_grappled_target")
+
+    if attacker.faction == "goblins" and unit_has_trait(attacker, "bloodied_frenzy") and unit_is_bloodied(attacker):
+        advantage_sources.append("bloodied_frenzy")
 
     if unit_has_reckless_attack_effect(attacker) and weapon.attack_ability == "str":
         advantage_sources.append("reckless_attack")
@@ -1286,9 +1547,271 @@ def build_final_damage_components(
     return components
 
 
+def build_spell_skip_event(state: EncounterState, actor_id: str, spell_id: str, reason: str) -> CombatEvent:
+    spell = get_spell_definition(spell_id)
+    return build_skip_event(state, actor_id, f"{spell.display_name}: {reason}")
+
+
+def resolve_ranged_spell_attack(
+    state: EncounterState,
+    attacker_id: str,
+    target_id: str,
+    spell_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> CombatEvent:
+    attacker = state.units[attacker_id]
+    target = state.units[target_id]
+    spell = get_spell_definition(spell_id)
+    weapon = build_spell_attack_profile(attacker, spell_id)
+
+    attack_context = get_attack_context(state, attacker_id, target_id, weapon)
+    if not attack_context.legal or not attack_context.within_normal_range:
+        return build_spell_skip_event(state, attacker_id, spell_id, "is not in range.")
+
+    overrides = AttackRollOverrides(
+        attack_rolls=list(overrides.attack_rolls if overrides else []),
+        damage_rolls=list(overrides.damage_rolls if overrides else []),
+    )
+
+    vex_available = has_vex_effect(attacker, target_id)
+    harried_available = has_harried_effect(target)
+    mode, advantage_sources, disadvantage_sources = get_attack_mode(state, attacker, attacker_id, target, target_id, weapon)
+
+    if mode == "normal":
+        attack_rolls = [pull_die(state, 20, overrides.attack_rolls.pop(0) if overrides.attack_rolls else None)]
+    else:
+        attack_rolls = [
+            pull_die(state, 20, overrides.attack_rolls.pop(0) if overrides.attack_rolls else None),
+            pull_die(state, 20, overrides.attack_rolls.pop(0) if overrides.attack_rolls else None),
+        ]
+
+    if mode == "advantage":
+        selected_roll = max(attack_rolls)
+    elif mode == "disadvantage":
+        selected_roll = min(attack_rolls)
+    else:
+        selected_roll = attack_rolls[0]
+
+    vex_consumed = consume_vex_effect(attacker, target_id) if vex_available else False
+    harried_consumed = consume_harried_effect(target) if harried_available else False
+    sap_consumed = consume_sap_effects(attacker)
+    attack_total = selected_roll + weapon.attack_bonus
+    natural_one = selected_roll == 1
+    natural_twenty = selected_roll == 20
+    resolved_target_id = target_id
+    reaction_actor_id: str | None = None
+    attack_reaction: str | None = None
+    target_ac = target.ac + attack_context.cover_ac_bonus
+    hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+
+    if hit and can_trigger_attack_reaction(target, "redirect_attack"):
+        redirect_target = choose_redirect_attack_ally(state, target_id)
+        if redirect_target:
+            original_position = target.position.model_copy(deep=True) if target.position else None
+            redirect_position = redirect_target.position.model_copy(deep=True) if redirect_target.position else None
+            target.reaction_available = False
+            if original_position and redirect_position:
+                target.position = redirect_position
+                redirect_target.position = original_position
+            resolved_target_id = redirect_target.id
+            target = redirect_target
+            attack_context = get_attack_context(state, attacker_id, resolved_target_id, weapon)
+            target_ac = target.ac + attack_context.cover_ac_bonus
+            hit = attack_context.legal and (natural_twenty or (not natural_one and attack_total >= target_ac))
+            reaction_actor_id = target_id
+            attack_reaction = "redirect_attack"
+
+    critical = hit and natural_twenty
+    primary_candidate: DamageCandidate | None = None
+    final_damage_components: list[DamageComponentResult] = []
+    total_damage = 0
+    resisted_damage = 0
+    amplified_damage = 0
+    temporary_hp_absorbed = 0
+    final_damage_to_hp = 0
+    hp_delta = 0
+    condition_deltas: list[str] = []
+
+    if attack_reaction == "redirect_attack":
+        condition_deltas.append(f"{target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
+
+    condition_deltas.extend(end_hidden(attacker, reason=f"{attacker_id} is no longer hidden after attacking."))
+
+    if hit:
+        primary_candidate = roll_damage_candidate(state, weapon, overrides.damage_rolls)
+        critical_multiplier = 2 if critical else 1
+        final_damage_components = build_final_damage_components(primary_candidate, None, critical_multiplier)
+        damage_result = apply_damage(state, resolved_target_id, final_damage_components, critical)
+        total_damage = sum(component.total_damage for component in final_damage_components)
+        resisted_damage = damage_result.resisted_damage
+        amplified_damage = damage_result.amplified_damage
+        temporary_hp_absorbed = damage_result.temporary_hp_absorbed
+        final_damage_to_hp = damage_result.final_damage_to_hp
+        hp_delta = damage_result.hp_delta
+        condition_deltas.extend(damage_result.condition_deltas)
+
+    if sap_consumed > 0:
+        condition_deltas.append(f"{attacker_id}'s sap disadvantage is consumed on this attack roll.")
+    if vex_consumed:
+        condition_deltas.append(f"{attacker_id}'s vex advantage is consumed on this attack roll.")
+    if harried_consumed:
+        condition_deltas.append(f"{target_id}'s harried defense is consumed on this attack roll.")
+
+    critical_multiplier = 2 if critical else 1
+    hit_label = "critical hit" if critical else "hit" if hit else "miss"
+    return CombatEvent(
+        **event_base(state, attacker_id),
+        target_ids=[resolved_target_id],
+        event_type="attack",
+        raw_rolls={
+            "attackRolls": attack_rolls,
+            "advantageSources": advantage_sources,
+            "disadvantageSources": disadvantage_sources,
+        },
+        resolved_totals={
+            "spellId": spell_id,
+            "attackMode": mode,
+            "selectedRoll": selected_roll,
+            "attackTotal": attack_total,
+            "targetAc": target_ac,
+            "coverAcBonus": attack_context.cover_ac_bonus,
+            "distanceSquares": attack_context.distance_squares,
+            "distanceFeet": attack_context.distance_feet,
+            "hit": hit,
+            "critical": critical,
+            "sapConsumed": sap_consumed,
+            "opportunityAttack": False,
+            "originalTargetId": target_id,
+            "attackReaction": attack_reaction,
+            "reactionActorId": reaction_actor_id,
+        },
+        movement_details=None,
+        damage_details=DamageDetails(
+            weapon_id=spell_id,
+            weapon_name=spell.display_name,
+            damage_components=final_damage_components,
+            primary_candidate=primary_candidate,
+            savage_candidate=None,
+            chosen_candidate="primary" if primary_candidate else None,
+            critical_applied=critical,
+            critical_multiplier=critical_multiplier,
+            flat_modifier=sum(component.flat_modifier for component in final_damage_components),
+            advantage_bonus_candidate=None,
+            mastery_applied=None,
+            mastery_notes=None,
+            attack_riders_applied=None,
+            total_damage=total_damage,
+            resisted_damage=resisted_damage,
+            amplified_damage=amplified_damage or None,
+            temporary_hp_absorbed=temporary_hp_absorbed,
+            final_damage_to_hp=final_damage_to_hp,
+            hp_delta=hp_delta,
+        ),
+        condition_deltas=condition_deltas,
+        text_summary=(
+            f"{attacker_id} casts {spell.display_name} at {resolved_target_id}: "
+            f"{hit_label}"
+            f"{f' for {total_damage} damage' if total_damage > 0 else ''}"
+            f"{f' ({resisted_damage} resisted)' if resisted_damage > 0 else ''}"
+            f"{f' (+{amplified_damage} vulnerability)' if amplified_damage > 0 else ''}."
+        ),
+    )
+
+
+def resolve_magic_missile(
+    state: EncounterState,
+    attacker_id: str,
+    target_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> CombatEvent:
+    attacker = state.units[attacker_id]
+    spell = get_spell_definition("magic_missile")
+    weapon = build_spell_attack_profile(attacker, "magic_missile")
+    attack_context = get_attack_context(state, attacker_id, target_id, weapon)
+
+    if not attack_context.legal or not attack_context.within_normal_range:
+        return build_spell_skip_event(state, attacker_id, "magic_missile", "is not in range.")
+    if not attacker.resources.spend_pool("spell_slots_level_1", 1):
+        return build_spell_skip_event(state, attacker_id, "magic_missile", "No level 1 spell slots remain.")
+
+    damage_overrides = AttackRollOverrides(damage_rolls=list(overrides.damage_rolls if overrides else []))
+    primary_candidate = roll_damage_candidate(state, weapon, damage_overrides.damage_rolls)
+    final_damage_components = build_final_damage_components(primary_candidate, None, 1)
+    damage_result = apply_damage(state, target_id, final_damage_components, False)
+    total_damage = sum(component.total_damage for component in final_damage_components)
+    condition_deltas = list(damage_result.condition_deltas)
+
+    return CombatEvent(
+        **event_base(state, attacker_id),
+        target_ids=[target_id],
+        event_type="attack",
+        raw_rolls={"damageRolls": primary_candidate.raw_rolls},
+        resolved_totals={
+            "spellId": "magic_missile",
+            "spellLevel": 1,
+            "hit": True,
+            "critical": False,
+            "distanceSquares": attack_context.distance_squares,
+            "distanceFeet": attack_context.distance_feet,
+            "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+        },
+        movement_details=None,
+        damage_details=DamageDetails(
+            weapon_id="magic_missile",
+            weapon_name=spell.display_name,
+            damage_components=final_damage_components,
+            primary_candidate=primary_candidate,
+            savage_candidate=None,
+            chosen_candidate="primary",
+            critical_applied=False,
+            critical_multiplier=1,
+            flat_modifier=sum(component.flat_modifier for component in final_damage_components),
+            advantage_bonus_candidate=None,
+            mastery_applied=None,
+            mastery_notes=None,
+            attack_riders_applied=None,
+            total_damage=total_damage,
+            resisted_damage=damage_result.resisted_damage,
+            amplified_damage=damage_result.amplified_damage or None,
+            temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+            final_damage_to_hp=damage_result.final_damage_to_hp,
+            hp_delta=damage_result.hp_delta,
+        ),
+        condition_deltas=condition_deltas,
+        text_summary=(
+            f"{attacker_id} casts {spell.display_name} at {target_id} for {total_damage} damage"
+            f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+            f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+        ),
+    )
+
+
+def resolve_cast_spell(
+    state: EncounterState,
+    actor_id: str,
+    spell_id: str,
+    target_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> CombatEvent:
+    actor = state.units[actor_id]
+    spell = get_spell_definition(spell_id)
+
+    if not unit_has_combat_spell(actor, spell_id):
+        return build_spell_skip_event(state, actor_id, spell_id, "is not prepared.")
+
+    if spell.level > 0 and spell_id in actor.prepared_combat_spell_ids and spell.level == 1 and actor.resources.spell_slots_level_1 <= 0:
+        return build_spell_skip_event(state, actor_id, spell_id, "No level 1 spell slots remain.")
+
+    if spell.targeting_mode == "ranged_spell_attack":
+        return resolve_ranged_spell_attack(state, actor_id, target_id, spell_id, overrides)
+    if spell.targeting_mode == "auto_hit_single_target":
+        return resolve_magic_missile(state, actor_id, target_id, overrides)
+
+    return build_spell_skip_event(state, actor_id, spell_id, "cannot be resolved by the live simulator.")
+
+
 def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[CombatEvent, bool]:
     attacker = state.units[args.attacker_id]
-    target = state.units[args.target_id]
     weapon = attacker.attacks.get(args.weapon_id)
 
     if not weapon:
@@ -1310,7 +1833,9 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         advantage_damage_rolls=list(args.overrides.advantage_damage_rolls if args.overrides else []),
     )
 
+    target = state.units[args.target_id]
     vex_available = has_vex_effect(attacker, args.target_id)
+    harried_available = has_harried_effect(target)
     mode, advantage_sources, disadvantage_sources = get_attack_mode(
         state, attacker, args.attacker_id, target, args.target_id, weapon
     )
@@ -1334,13 +1859,50 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         attacker._rage_qualified_since_turn_end = True
 
     vex_consumed = consume_vex_effect(attacker, args.target_id) if vex_available else False
+    harried_consumed = consume_harried_effect(target) if harried_available else False
 
     sap_consumed = consume_sap_effects(attacker)
     attack_total = selected_roll + weapon.attack_bonus
     natural_one = selected_roll == 1
     natural_twenty = selected_roll == 20
+    resolved_target_id = args.target_id
+    reaction_actor_id: str | None = None
+    attack_reaction: str | None = None
     target_ac = target.ac + attack_context.cover_ac_bonus
     hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+
+    if hit and can_trigger_attack_reaction(target, "redirect_attack"):
+        redirect_target = choose_redirect_attack_ally(state, args.target_id)
+        if redirect_target:
+            original_position = target.position.model_copy(deep=True) if target.position else None
+            redirect_position = redirect_target.position.model_copy(deep=True) if redirect_target.position else None
+            target.reaction_available = False
+            if original_position and redirect_position:
+                target.position = redirect_position
+                redirect_target.position = original_position
+            resolved_target_id = redirect_target.id
+            target = redirect_target
+            attack_context = get_attack_context(state, args.attacker_id, resolved_target_id, weapon)
+            target_ac = target.ac + attack_context.cover_ac_bonus
+            hit = attack_context.legal and (natural_twenty or (not natural_one and attack_total >= target_ac))
+            reaction_actor_id = args.target_id
+            attack_reaction = "redirect_attack"
+
+    if (
+        not attack_reaction
+        and hit
+        and weapon.kind == "melee"
+        and can_trigger_attack_reaction(target, "parry")
+        and not natural_twenty
+        and attack_total < (target_ac + 2)
+    ):
+        target.reaction_available = False
+        target_ac += 2
+        hit = False
+        reaction_actor_id = target.id
+        attack_reaction = "parry"
+
+    target_was_bloodied_before_hit = unit_is_bloodied(target)
     automatic_critical = weapon.kind == "melee" and target.conditions.unconscious
     critical = hit and (natural_twenty or automatic_critical)
 
@@ -1354,12 +1916,22 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     sneak_attack_component: DamageComponentResult | None = None
     total_damage = 0
     resisted_damage = 0
+    amplified_damage = 0
     temporary_hp_absorbed = 0
     final_damage_to_hp = 0
     hp_delta = 0
+    undead_fortitude_triggered = False
+    undead_fortitude_success: bool | None = None
+    undead_fortitude_dc: int | None = None
+    undead_fortitude_bypass_reason: str | None = None
     condition_deltas: list[str] = []
     savage_attacker_consumed = False
     final_damage_components: list[DamageComponentResult] = []
+
+    if attack_reaction == "redirect_attack":
+        condition_deltas.append(f"{args.target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
+    elif attack_reaction == "parry" and reaction_actor_id:
+        condition_deltas.append(f"{reaction_actor_id} uses Parry and adds 2 AC against this attack.")
 
     condition_deltas.extend(end_hidden(attacker, reason=f"{args.attacker_id} is no longer hidden after attacking."))
 
@@ -1424,21 +1996,26 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                 )
         total_damage = sum(component.total_damage for component in final_damage_components)
 
-        damage_result = apply_damage(state, args.target_id, final_damage_components, critical)
+        damage_result = apply_damage(state, resolved_target_id, final_damage_components, critical)
         hp_delta = damage_result.hp_delta
         resisted_damage = damage_result.resisted_damage
+        amplified_damage = damage_result.amplified_damage
         temporary_hp_absorbed = damage_result.temporary_hp_absorbed
         final_damage_to_hp = damage_result.final_damage_to_hp
+        undead_fortitude_triggered = damage_result.undead_fortitude_triggered
+        undead_fortitude_success = damage_result.undead_fortitude_success
+        undead_fortitude_dc = damage_result.undead_fortitude_dc
+        undead_fortitude_bypass_reason = damage_result.undead_fortitude_bypass_reason
         condition_deltas.extend(damage_result.condition_deltas)
 
         mastery_applied, mastery_notes, mastery_condition_deltas = apply_mastery(
-            state, args.attacker_id, args.target_id, weapon.mastery, True, damage_result.final_total_damage
+            state, args.attacker_id, resolved_target_id, weapon.mastery, True, damage_result.final_total_damage
         )
         condition_deltas.extend(mastery_condition_deltas)
         attack_riders_applied, attack_rider_condition_deltas = apply_on_hit_effects(
             state,
             args.attacker_id,
-            args.target_id,
+            resolved_target_id,
             weapon,
             True,
         )
@@ -1459,43 +2036,62 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                 total_damage=total_damage,
             )
         ]
-        damage_result = apply_damage(state, args.target_id, final_damage_components, False)
+        damage_result = apply_damage(state, resolved_target_id, final_damage_components, False)
         hp_delta = damage_result.hp_delta
         resisted_damage = damage_result.resisted_damage
+        amplified_damage = damage_result.amplified_damage
         temporary_hp_absorbed = damage_result.temporary_hp_absorbed
         final_damage_to_hp = damage_result.final_damage_to_hp
+        undead_fortitude_triggered = damage_result.undead_fortitude_triggered
+        undead_fortitude_success = damage_result.undead_fortitude_success
+        undead_fortitude_dc = damage_result.undead_fortitude_dc
+        undead_fortitude_bypass_reason = damage_result.undead_fortitude_bypass_reason
         condition_deltas.extend(damage_result.condition_deltas)
 
     if sap_consumed > 0:
         condition_deltas.append(f"{args.attacker_id}'s sap disadvantage is consumed on this attack roll.")
     if vex_consumed:
         condition_deltas.append(f"{args.attacker_id}'s vex advantage is consumed on this attack roll.")
+    if harried_consumed:
+        condition_deltas.append(f"{args.target_id}'s harried defense is consumed on this attack roll.")
 
     critical_multiplier = 2 if critical else 1
     hit_label = "critical hit" if critical else "hit" if hit else "miss"
+    resolved_totals = {
+        "attackMode": mode,
+        "selectedRoll": selected_roll,
+        "attackTotal": attack_total,
+        "targetAc": target_ac,
+        "coverAcBonus": attack_context.cover_ac_bonus,
+        "distanceSquares": attack_context.distance_squares,
+        "distanceFeet": attack_context.distance_feet,
+        "hit": hit,
+        "critical": critical,
+        "sapConsumed": sap_consumed,
+        "opportunityAttack": args.is_opportunity_attack or False,
+        "originalTargetId": args.target_id,
+        "attackReaction": attack_reaction,
+        "reactionActorId": reaction_actor_id,
+        "targetWasBloodiedBeforeHit": target_was_bloodied_before_hit,
+    }
+    if undead_fortitude_triggered:
+        resolved_totals["undeadFortitudeTriggered"] = True
+        resolved_totals["undeadFortitudeSuccess"] = undead_fortitude_success
+        if undead_fortitude_dc is not None:
+            resolved_totals["undeadFortitudeDc"] = undead_fortitude_dc
+        if undead_fortitude_bypass_reason is not None:
+            resolved_totals["undeadFortitudeBypassReason"] = undead_fortitude_bypass_reason
 
     event = CombatEvent(
         **event_base(state, args.attacker_id),
-        target_ids=[args.target_id],
+        target_ids=[resolved_target_id],
         event_type="attack",
         raw_rolls={
             "attackRolls": attack_rolls,
             "advantageSources": advantage_sources,
             "disadvantageSources": disadvantage_sources,
         },
-        resolved_totals={
-            "attackMode": mode,
-            "selectedRoll": selected_roll,
-            "attackTotal": attack_total,
-            "targetAc": target_ac,
-            "coverAcBonus": attack_context.cover_ac_bonus,
-            "distanceSquares": attack_context.distance_squares,
-            "distanceFeet": attack_context.distance_feet,
-            "hit": hit,
-            "critical": critical,
-            "sapConsumed": sap_consumed,
-            "opportunityAttack": args.is_opportunity_attack or False,
-        },
+        resolved_totals=resolved_totals,
         movement_details=args.movement_details,
         damage_details=DamageDetails(
             weapon_id=args.weapon_id,
@@ -1513,6 +2109,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             attack_riders_applied=attack_riders_applied,
             total_damage=total_damage,
             resisted_damage=resisted_damage,
+            amplified_damage=amplified_damage or None,
             temporary_hp_absorbed=temporary_hp_absorbed,
             final_damage_to_hp=final_damage_to_hp,
             hp_delta=hp_delta,
@@ -1520,10 +2117,11 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         condition_deltas=condition_deltas,
         text_summary=(
             f"{'Opportunity attack: ' if args.is_opportunity_attack else ''}"
-            f"{args.attacker_id} attacks {args.target_id} with {weapon.display_name}: "
+            f"{args.attacker_id} attacks {resolved_target_id} with {weapon.display_name}: "
             f"{hit_label}"
             f"{f' for {total_damage} damage' if total_damage > 0 else ''}"
             f"{f' ({resisted_damage} resisted)' if resisted_damage > 0 else ''}"
+            f"{f' (+{amplified_damage} vulnerability)' if amplified_damage > 0 else ''}"
             f"{f' ({temporary_hp_absorbed} temp HP absorbed)' if temporary_hp_absorbed > 0 else ''}."
         ),
     )

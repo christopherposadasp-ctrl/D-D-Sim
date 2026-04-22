@@ -17,14 +17,30 @@ def assert_primary_benchmark_behavior(variant_id: str, attack_events: list) -> N
     expectation = MONSTER_EXPECTATIONS[variant_id]
     weapon_ids = [event.damage_details.weapon_id for event in attack_events]
 
+    if variant_id == "ogre":
+        assert set(weapon_ids).issubset({"javelin_throw", "greatclub"})
+        if "javelin_throw" in weapon_ids and "greatclub" in weapon_ids:
+            assert weapon_ids.index("javelin_throw") < weapon_ids.index("greatclub")
+        return
+
     if expectation.ai_profile_id == "ranged_skirmisher":
         assert attack_events[0].damage_details.weapon_id == expectation.opening_weapon_id
         if expectation.melee_fallback_weapon_id in weapon_ids:
             assert weapon_ids.index(expectation.opening_weapon_id) < weapon_ids.index(expectation.melee_fallback_weapon_id)
         return
 
+    if variant_id == "brown_bear":
+        assert attack_events[0].damage_details.weapon_id == "bite"
+        assert "claw" in weapon_ids
+        return
+
+    if variant_id == "bugbear_warrior":
+        assert attack_events[0].damage_details.weapon_id == "grab"
+        assert set(weapon_ids).issubset({"grab", "light_hammer"})
+        return
+
     assert set(weapon_ids) == {expectation.opening_weapon_id}
-    if variant_id in {"warrior_infantry", "hyena"}:
+    if variant_id in {"warrior_infantry", "hyena", "giant_rat", "dire_wolf"}:
         assert any(event.resolved_totals.get("attackMode") == "advantage" for event in attack_events)
 
 

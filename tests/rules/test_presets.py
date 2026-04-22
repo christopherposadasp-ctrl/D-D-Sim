@@ -45,6 +45,15 @@ def test_bandit_ambush_uses_mixed_roles() -> None:
     assert "longbow" in encounter.units["E5"].attacks
 
 
+def test_hobgoblin_kill_box_builds_eight_enemy_units() -> None:
+    encounter = create_encounter(EncounterConfig(seed="hobgoblin-kill-box", enemy_preset_id="hobgoblin_kill_box"))
+
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4"]
+    assert encounter.units["E1"].combat_role == "hobgoblin_melee"
+    assert encounter.units["E5"].combat_role == "hobgoblin_archer"
+    assert encounter.units["E8"].combat_role == "goblin_boss"
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(
@@ -102,6 +111,21 @@ def test_marsh_predators_preset_runs_in_combined_batch_mode() -> None:
         EncounterConfig(
             seed="marsh-predators-combined-batch",
             enemy_preset_id="marsh_predators",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_predator_rampage_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="predator-rampage-combined-batch",
+            enemy_preset_id="predator_rampage",
             batch_size=1,
             player_behavior="balanced",
             monster_behavior="combined",

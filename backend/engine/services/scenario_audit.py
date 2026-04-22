@@ -150,6 +150,18 @@ def has_scout_multiattack(result: RunEncounterResult) -> bool:
     return False
 
 
+def has_role_multiattack(result: RunEncounterResult, actor_roles: set[str]) -> bool:
+    attacks_by_turn: dict[tuple[int, str], int] = {}
+    for event in iter_events(result, "attack"):
+        if not actor_has_role(result, event.actor_id, *actor_roles):
+            continue
+        key = (event.round, event.actor_id)
+        attacks_by_turn[key] = attacks_by_turn.get(key, 0) + 1
+        if attacks_by_turn[key] >= 2:
+            return True
+    return False
+
+
 def has_early_orc_advance(result: RunEncounterResult) -> bool:
     first_orc_attack_index: int | None = None
 
@@ -201,6 +213,15 @@ def has_swallow_action(result: RunEncounterResult) -> bool:
     return False
 
 
+def has_phase_reaction(result: RunEncounterResult, reaction: str, actor_roles: set[str]) -> bool:
+    for event in iter_events(result, "phase_change"):
+        if not actor_has_role(result, event.actor_id, *actor_roles):
+            continue
+        if event.resolved_totals.get("reaction") == reaction:
+            return True
+    return False
+
+
 def build_signature_checks() -> dict[str, list[SignatureCheck]]:
     signature_library = {
         "goblin_melee_engagement": SignatureCheck(
@@ -243,6 +264,30 @@ def build_signature_checks() -> dict[str, list[SignatureCheck]]:
             lambda result: has_attack_rider(result, {"crocodile"}, "grapple_on_hit"),
         ),
         "toad_swallow": SignatureCheck("toadSwallow", has_swallow_action),
+        "hobgoblin_longsword_attack": SignatureCheck(
+            "hobgoblinLongswordAttack",
+            lambda result: any_attack_with_weapon(result, {"hobgoblin_melee"}, "longsword"),
+        ),
+        "hobgoblin_longbow_attack": SignatureCheck(
+            "hobgoblinLongbowAttack",
+            lambda result: any_attack_with_weapon(result, {"hobgoblin_archer"}, "longbow"),
+        ),
+        "goblin_boss_multiattack": SignatureCheck(
+            "goblinBossMultiattack",
+            lambda result: has_role_multiattack(result, {"goblin_boss"}),
+        ),
+        "dire_wolf_prone_rider": SignatureCheck(
+            "direWolfProneRider",
+            lambda result: has_attack_rider(result, {"dire_wolf"}, "prone_on_hit"),
+        ),
+        "worg_harry_target": SignatureCheck(
+            "worgHarryTarget",
+            lambda result: has_attack_rider(result, {"worg"}, "harry_target"),
+        ),
+        "rampage_follow_up": SignatureCheck(
+            "rampageFollowUp",
+            lambda result: has_phase_reaction(result, "rampage", {"gnoll_warrior", "giant_hyena"}),
+        ),
     }
 
     return {

@@ -5,10 +5,17 @@ from backend.content.attack_sequences import AttackStepDefinition
 from backend.content.combat_actions import action_prevents_opportunity_attacks, get_extra_movement_multiplier
 from backend.content.enemies import (
     get_attack_action_definition_for_unit,
+    unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
 from backend.content.special_actions import get_special_action
-from backend.engine.ai.decision import TurnDecision, choose_turn_decision, get_ranked_attack_targets
+from backend.engine.ai.decision import (
+    MovementPlan,
+    TurnDecision,
+    choose_turn_decision,
+    get_enemy_melee_weapon_id,
+    get_ranked_attack_targets,
+)
 from backend.engine.combat.setup import create_encounter
 from backend.engine.models.state import (
     CombatEvent,
@@ -43,11 +50,14 @@ from backend.engine.rules.combat_rules import (
     get_attack_mode,
     maybe_commit_reckless_attack,
     pull_die,
+    resolve_cast_spell,
     resolve_attack,
     resolve_death_save,
     unit_is_raging,
 )
 from backend.engine.rules.spatial import (
+    build_position_index,
+    find_advance_path,
     get_attack_context,
     get_melee_reach_squares,
     get_min_chebyshev_distance_between_footprints,
@@ -116,6 +126,40 @@ def add_unit_phase_event(
         condition_deltas=condition_deltas or [],
         text_summary=text_summary,
     )
+
+
+def build_attack_reaction_phase_events(state: EncounterState, attack_event: CombatEvent) -> list[CombatEvent]:
+    reaction_kind = attack_event.resolved_totals.get("attackReaction")
+    reaction_actor_id = attack_event.resolved_totals.get("reactionActorId")
+    if not reaction_kind or not reaction_actor_id or reaction_actor_id not in state.units:
+        return []
+
+    if reaction_kind == "parry":
+        return [
+            add_unit_phase_event(
+                state,
+                reaction_actor_id,
+                attack_event.actor_id,
+                f"{reaction_actor_id} uses Parry against {attack_event.actor_id}.",
+                condition_deltas=[f"{reaction_actor_id} raises AC by 2 against the incoming melee attack."],
+                resolved_totals={"reaction": "parry"},
+            )
+        ]
+
+    if reaction_kind == "redirect_attack":
+        final_target_id = attack_event.target_ids[0] if attack_event.target_ids else reaction_actor_id
+        return [
+            add_unit_phase_event(
+                state,
+                reaction_actor_id,
+                final_target_id,
+                f"{reaction_actor_id} uses Redirect Attack and swaps with {final_target_id}.",
+                condition_deltas=[f"{reaction_actor_id} redirects the attack onto {final_target_id}."],
+                resolved_totals={"reaction": "redirect_attack", "redirectedTargetId": final_target_id},
+            )
+        ]
+
+    return []
 
 
 def update_encounter_phase(state: EncounterState, actor_id: str) -> list[CombatEvent]:
@@ -613,12 +657,17 @@ def build_ongoing_damage_event(
             attack_riders_applied=None,
             total_damage=total_damage,
             resisted_damage=damage_result.resisted_damage,
+            amplified_damage=damage_result.amplified_damage or None,
             temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
             final_damage_to_hp=damage_result.final_damage_to_hp,
             hp_delta=damage_result.hp_delta,
         ),
         condition_deltas=damage_result.condition_deltas,
-        text_summary=f"{target_id} takes {total_damage} acid damage while swallowed by {actor_id}.",
+        text_summary=(
+            f"{target_id} takes {total_damage} acid damage while swallowed by {actor_id}"
+            f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+            f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+        ),
     )
 
 
@@ -795,6 +844,113 @@ def choose_attack_step_target_and_weapon(
     return None
 
 
+def choose_rampage_follow_up(state: EncounterState, actor_id: str, weapon_id: str) -> tuple[str, list[GridPosition]] | None:
+    actor = state.units[actor_id]
+    weapon = actor.attacks.get(weapon_id)
+    if not actor.position or not weapon:
+        return None
+
+    position_index = build_position_index(state)
+    half_speed_squares = max(0, get_move_squares(actor) // 2)
+
+    for target in get_ranked_attack_targets(state, actor):
+        if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+            continue
+
+        if get_attack_context(state, actor_id, target.id, weapon, position_index=position_index).legal:
+            return target.id, [actor.position.model_copy(deep=True)]
+
+        if half_speed_squares <= 0:
+            continue
+
+        advance = find_advance_path(state, actor_id, target.id, half_speed_squares, position_index)
+        if not advance or not advance.path:
+            continue
+
+        original_position = actor.position.model_copy(deep=True)
+        actor.position = advance.path[-1].model_copy(deep=True)
+        legal_after_move = get_attack_context(state, actor_id, target.id, weapon, position_index=build_position_index(state)).legal
+        actor.position = original_position
+        if legal_after_move:
+            return target.id, advance.path
+
+    return None
+
+
+def maybe_resolve_rampage_follow_up(state: EncounterState, actor_id: str, triggering_attack: CombatEvent) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if actor.faction != "goblins" or not unit_has_trait(actor, "rampage"):
+        return []
+    if actor.resource_pools.get("rampage_uses", 0) <= 0:
+        return []
+    if not triggering_attack.resolved_totals.get("hit"):
+        return []
+    if not triggering_attack.resolved_totals.get("targetWasBloodiedBeforeHit"):
+        return []
+    if not triggering_attack.damage_details:
+        return []
+
+    applied_damage = (
+        triggering_attack.damage_details.final_damage_to_hp + triggering_attack.damage_details.temporary_hp_absorbed
+    )
+    if applied_damage <= 0:
+        return []
+
+    melee_weapon_id = get_enemy_melee_weapon_id(actor)
+    follow_up = choose_rampage_follow_up(state, actor_id, melee_weapon_id)
+    if not follow_up:
+        return []
+
+    target_id, path = follow_up
+    events: list[CombatEvent] = []
+    if len(path) > 1:
+        movement_events, interrupted = execute_movement(
+            state,
+            actor_id,
+            MovementPlan(path=path, mode="move"),
+            False,
+            "after_action",
+        )
+        events.extend(movement_events)
+        if interrupted or state.units[actor_id].conditions.dead or state.units[actor_id].current_hp <= 0:
+            return events
+
+    weapon = state.units[actor_id].attacks.get(melee_weapon_id)
+    if not weapon or not get_attack_context(state, actor_id, target_id, weapon).legal:
+        return events
+
+    actor.resource_pools["rampage_uses"] = max(0, actor.resource_pools.get("rampage_uses", 0) - 1)
+    events.append(
+        add_unit_phase_event(
+            state,
+            actor_id,
+            target_id,
+            f"{actor_id} uses Rampage.",
+            condition_deltas=[f"{actor_id} moves up to half Speed and makes a bonus melee attack."],
+            resolved_totals={"reaction": "rampage", "rampageUsesRemaining": actor.resource_pools.get("rampage_uses", 0)},
+        )
+    )
+
+    follow_up_attack, _ = resolve_attack(
+        state,
+        ResolveAttackArgs(
+            attacker_id=actor_id,
+            target_id=target_id,
+            weapon_id=melee_weapon_id,
+            savage_attacker_available=unit_has_feature(actor, "savage_attacker"),
+        ),
+    )
+    events.extend(build_attack_reaction_phase_events(state, follow_up_attack))
+    events.append(follow_up_attack)
+
+    if follow_up_attack.target_ids and state.units[follow_up_attack.target_ids[0]].conditions.dead:
+        dead_target_id = follow_up_attack.target_ids[0]
+        events.extend(release_grappled_targets_from_source(state, dead_target_id, "source_dead"))
+        events.extend(release_swallowed_units_from_source(state, dead_target_id))
+
+    return events
+
+
 def get_cleave_follow_up_target_id(
     state: EncounterState,
     actor_id: str,
@@ -931,8 +1087,10 @@ def resolve_attack_action(
                 overrides=step_overrides[step_index] if step_overrides and step_index < len(step_overrides) else None,
             ),
         )
+        attack_events.extend(build_attack_reaction_phase_events(state, attack_event))
         attack_events.append(attack_event)
         cleave_events: list[CombatEvent] = []
+        resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else target_id
 
         if savage_consumed:
             savage_attacker_available = False
@@ -953,9 +1111,11 @@ def resolve_attack_action(
             if cleave_savage_consumed:
                 savage_attacker_available = False
 
-        if state.units[target_id].conditions.dead:
-            attack_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
-            attack_events.extend(release_swallowed_units_from_source(state, target_id))
+            attack_events.extend(maybe_resolve_rampage_follow_up(state, actor_id, attack_event))
+
+        if state.units[resolved_target_id].conditions.dead:
+            attack_events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+            attack_events.extend(release_swallowed_units_from_source(state, resolved_target_id))
 
         for follow_up_event in cleave_events:
             for follow_up_target_id in follow_up_event.target_ids:
@@ -964,6 +1124,31 @@ def resolve_attack_action(
                     attack_events.extend(release_swallowed_units_from_source(state, follow_up_target_id))
 
     return attack_events
+
+
+def resolve_cast_spell_action(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, str],
+    *,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    spell_event = resolve_cast_spell(
+        state,
+        actor_id,
+        action["spell_id"],
+        action["target_id"],
+        overrides,
+    )
+    spell_events = build_attack_reaction_phase_events(state, spell_event) if spell_event.event_type == "attack" else []
+    spell_events.append(spell_event)
+
+    for target_id in spell_event.target_ids:
+        if state.units[target_id].conditions.dead:
+            spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
+            spell_events.extend(release_swallowed_units_from_source(state, target_id))
+
+    return spell_events
 
 
 def create_movement_event(
@@ -1074,7 +1259,9 @@ def execute_movement(
                     is_opportunity_attack=True,
                 ),
             )
+            reaction_events.extend(build_attack_reaction_phase_events(state, attack_event))
             reaction_events.append(attack_event)
+            resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else actor_id
 
             if attack_event.resolved_totals.get("hit"):
                 cleave_events, _, cleave_target_id = maybe_resolve_cleave_follow_up(
@@ -1094,6 +1281,10 @@ def execute_movement(
                         if state.units[cleave_target_id].conditions.dead:
                             reaction_events.extend(release_grappled_targets_from_source(state, cleave_target_id, "source_dead"))
                             reaction_events.extend(release_swallowed_units_from_source(state, cleave_target_id))
+
+            if state.units[resolved_target_id].conditions.dead:
+                reaction_events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+                reaction_events.extend(release_swallowed_units_from_source(state, resolved_target_id))
 
             if actor.conditions.dead or actor.current_hp == 0:
                 movement_condition_deltas = clear_invalid_hidden_effects(state)
@@ -1389,6 +1580,8 @@ def resolve_turn_action(
 ) -> None:
     if action["kind"] == "attack" and not rescue_mode:
         events.extend(resolve_attack_action(state, actor_id, action))
+    elif action["kind"] == "cast_spell" and not rescue_mode:
+        events.extend(resolve_cast_spell_action(state, actor_id, action))
     elif action["kind"] == "special_action" and not rescue_mode:
         events.append(resolve_special_action(state, actor_id, action))
     elif action["kind"] == "stabilize":

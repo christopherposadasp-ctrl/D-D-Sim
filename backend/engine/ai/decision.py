@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.content.enemies import get_monster_definition_for_unit, unit_has_bonus_action
+from backend.content.enemies import get_monster_definition_for_unit, unit_has_bonus_action, unit_has_reaction
 from backend.content.feature_definitions import unit_has_feature, unit_has_granted_bonus_action
 from backend.content.player_loadouts import get_player_primary_melee_weapon_id, get_player_primary_ranged_weapon_id
+from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.profiles import get_monster_ai_profile
 from backend.engine.models.state import (
     AttackId,
@@ -13,6 +14,8 @@ from backend.engine.models.state import (
     ResolvedPlayerBehavior,
     RoleTag,
     UnitState,
+    WeaponProfile,
+    WeaponRange,
 )
 from backend.engine.rules.spatial import (
     PositionIndex,
@@ -175,6 +178,10 @@ def is_player_monk(unit: UnitState) -> bool:
     return unit.class_id == "monk" and unit.behavior_profile == "martial_artist"
 
 
+def is_player_wizard(unit: UnitState) -> bool:
+    return unit.class_id == "wizard" and unit.behavior_profile == "arcane_artillery"
+
+
 def unit_is_raging(unit: UnitState) -> bool:
     return any(effect.kind == "rage" for effect in unit.temporary_effects)
 
@@ -203,6 +210,21 @@ def can_use_player_weapon(unit: UnitState, weapon_id: str | None) -> bool:
     if weapon.resource_pool_id:
         return unit.resources.get_pool(weapon.resource_pool_id) > 0
     return True
+
+
+def can_cast_combat_spell(unit: UnitState, spell_id: str) -> bool:
+    if unit.current_hp <= 0 or unit.conditions.dead or unit.conditions.unconscious:
+        return False
+    if spell_id in unit.combat_cantrip_ids:
+        return True
+    if spell_id not in unit.prepared_combat_spell_ids:
+        return False
+    spell = get_spell_definition(spell_id)
+    if spell.level <= 0:
+        return True
+    if spell.level == 1:
+        return unit.resources.spell_slots_level_1 > 0
+    return False
 
 
 def can_open_barbarian_rage(actor: UnitState) -> bool:
@@ -1116,6 +1138,77 @@ def build_ranged_attack_plan(
     return AttackPlan(target_id=target.id, weapon_id=weapon_id, path=best_square.path)
 
 
+def build_spell_attack_context_profile(spell_id: str) -> WeaponProfile:
+    spell = get_spell_definition(spell_id)
+    return WeaponProfile(
+        id=spell_id,
+        display_name=spell.display_name,
+        attack_bonus=0,
+        ability_modifier=0,
+        damage_dice=[],
+        damage_modifier=0,
+        kind="ranged",
+        range=WeaponRange(normal=spell.range_feet, long=spell.range_feet),
+    )
+
+
+def build_spell_attack_plan(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    spell_id: str,
+    max_move_squares: int,
+    position_index: PositionIndex | None = None,
+) -> AttackPlan | None:
+    spell_profile = build_spell_attack_context_profile(spell_id)
+    if not target.position or not actor.position:
+        return None
+
+    candidates = []
+    for square in get_safe_reachable_squares(
+        state,
+        actor.id,
+        max_move_squares,
+        False,
+        position_index,
+    ):
+        context = get_attack_context(
+            state,
+            actor.id,
+            target.id,
+            spell_profile,
+            square.position,
+            target.position,
+            position_index,
+        )
+        if not context.legal or not context.within_normal_range:
+            continue
+        candidates.append((square, context))
+
+    if not candidates:
+        return None
+
+    def sort_key(item):
+        square, context = item
+        return (
+            int("adjacent_enemy" in context.disadvantage_sources),
+            context.cover_ac_bonus,
+            -get_min_distance_to_faction(
+                state,
+                square.position,
+                "goblins" if actor.faction == "fighters" else "fighters",
+                position_index,
+                get_unit_footprint(actor),
+            ),
+            square.distance,
+            square.position.x,
+            square.position.y,
+        )
+
+    best_square, _ = sorted(candidates, key=sort_key)[0]
+    return AttackPlan(target_id=target.id, weapon_id=spell_id, path=best_square.path)
+
+
 def build_post_action_advance(
     state: EncounterState,
     actor: UnitState,
@@ -1276,6 +1369,140 @@ def build_player_ranged_attack_decision(
         )
 
     return None
+
+
+def build_player_spell_attack_decision(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+    spell_id: str,
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> TurnDecision | None:
+    ranged_targets = sort_player_ranged_targets(state, actor, conscious_enemies, state.player_behavior)
+
+    for target in ranged_targets:
+        spell_plan = build_spell_attack_plan(
+            state,
+            actor,
+            target,
+            spell_id,
+            move_squares,
+            position_index,
+        )
+        if not spell_plan:
+            continue
+
+        pre_action_movement = MovementPlan(path=spell_plan.path, mode="move") if len(spell_plan.path) > 1 else None
+        attack_position = spell_plan.path[-1] if spell_plan.path else actor.position
+        post_action_movement = (
+            build_post_action_retreat(
+                state,
+                actor,
+                attack_position,
+                move_squares - get_movement_distance(pre_action_movement),
+            )
+            if attack_position
+            else None
+        )
+
+        return TurnDecision(
+            pre_action_movement=pre_action_movement,
+            post_action_movement=post_action_movement,
+            action={"kind": "cast_spell", "spell_id": spell_id, "target_id": spell_plan.target_id},
+        )
+
+    return None
+
+
+def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, conscious_enemies: list[UnitState]) -> str | None:
+    if not actor.position or not can_cast_combat_spell(actor, "magic_missile"):
+        return None
+
+    magic_missile_profile = build_spell_attack_context_profile("magic_missile")
+    fire_bolt_profile = build_spell_attack_context_profile("fire_bolt")
+    prioritized_targets = sort_player_ranged_targets(state, actor, conscious_enemies, state.player_behavior)
+
+    for target in prioritized_targets:
+        if not target.position:
+            continue
+        magic_missile_context = get_attack_context(state, actor.id, target.id, magic_missile_profile)
+        if not magic_missile_context.legal or not magic_missile_context.within_normal_range:
+            continue
+
+        obvious_finish = target.current_hp <= 6
+        if state.player_behavior == "dumb":
+            if obvious_finish:
+                return target.id
+            continue
+
+        fire_bolt_context = get_attack_context(state, actor.id, target.id, fire_bolt_profile)
+        avoids_bad_attack_roll = (
+            "adjacent_enemy" in fire_bolt_context.disadvantage_sources or fire_bolt_context.cover_ac_bonus > 0
+        )
+        if obvious_finish or (avoids_bad_attack_roll and target.current_hp <= 10):
+            return target.id
+
+    return None
+
+
+def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
+    move_squares = get_move_squares(actor)
+    position_index = build_position_index(state)
+    melee_weapon_id = get_player_primary_melee_weapon_id(actor)
+    conscious_enemies = sort_player_combat_targets(
+        state,
+        actor,
+        [unit for unit in get_units_by_faction(state, "goblins") if not unit.conditions.dead],
+        state.player_behavior,
+    )
+    melee_targets = sort_player_melee_targets(state, actor, conscious_enemies, state.player_behavior)
+    has_adjacent_enemy = any(
+        actor.position and target.position and get_distance_between_units(actor, target) <= 1 for target in conscious_enemies
+    )
+
+    magic_missile_target_id = choose_magic_missile_target_id(state, actor, conscious_enemies)
+    if magic_missile_target_id:
+        return TurnDecision(action={"kind": "cast_spell", "spell_id": "magic_missile", "target_id": magic_missile_target_id})
+
+    fire_bolt_decision = (
+        build_player_spell_attack_decision(state, actor, conscious_enemies, "fire_bolt", move_squares, position_index)
+        if can_cast_combat_spell(actor, "fire_bolt")
+        else None
+    )
+
+    if state.player_behavior == "smart" and has_adjacent_enemy and can_use_player_weapon(actor, melee_weapon_id):
+        adjacent_targets = [
+            target for target in melee_targets if actor.position and target.position and get_distance_between_units(actor, target) <= 1
+        ]
+        if adjacent_targets and not magic_missile_target_id:
+            return TurnDecision(action={"kind": "attack", "target_id": adjacent_targets[0].id, "weapon_id": melee_weapon_id})
+
+    if fire_bolt_decision:
+        return fire_bolt_decision
+
+    if can_use_player_weapon(actor, melee_weapon_id):
+        for target in melee_targets:
+            allow_provoking = can_intentionally_provoke_opportunity_attack(state, actor, target)
+            melee_path = find_preferred_adjacent_square(
+                state,
+                actor.id,
+                target.id,
+                move_squares,
+                allow_provoking,
+                position_index,
+            )
+            if melee_path:
+                return TurnDecision(
+                    pre_action_movement=MovementPlan(path=melee_path.path, mode="move") if melee_path.distance > 0 else None,
+                    action={"kind": "attack", "target_id": target.id, "weapon_id": melee_weapon_id},
+                )
+
+    nearest_target = melee_targets[0] if melee_targets else None
+    if not nearest_target:
+        return TurnDecision(action={"kind": "skip", "reason": "No enemies remain."})
+
+    return TurnDecision(action={"kind": "skip", "reason": f"No legal spell or melee line remains against {nearest_target.id}."})
 
 
 def get_planned_attack_position(actor: UnitState, decision: TurnDecision) -> GridPosition | None:
@@ -1748,6 +1975,9 @@ def apply_monk_martial_arts(
 def get_player_martial_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     if get_swallow_source_id(actor):
         return get_swallowed_player_decision(state, actor)
+
+    if is_player_wizard(actor):
+        return get_player_wizard_decision(state, actor)
 
     move_squares = get_move_squares(actor)
     dash_squares = get_total_move_squares(actor, 1)
@@ -2222,8 +2452,9 @@ def get_current_grappled_target(state: EncounterState, actor: UnitState) -> Unit
 def get_grappling_brute_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     current_grappled_target = get_current_grappled_target(state, actor)
     if current_grappled_target:
+        melee_weapon_id = "light_hammer" if actor.attacks.get("light_hammer") else get_enemy_melee_weapon_id(actor)
         return TurnDecision(
-            action={"kind": "attack", "target_id": current_grappled_target.id, "weapon_id": get_enemy_melee_weapon_id(actor)}
+            action={"kind": "attack", "target_id": current_grappled_target.id, "weapon_id": melee_weapon_id}
         )
 
     return get_enemy_melee_decision(state, actor)
@@ -2266,6 +2497,15 @@ def get_enemy_ranged_decision(state: EncounterState, actor: UnitState) -> TurnDe
         return TurnDecision(action={"kind": "attack", "target_id": adjacent_downed_targets[0].id, "weapon_id": melee_weapon_id})
 
     adjacent_conscious = get_adjacent_conscious_fighters(state, actor)
+    if adjacent_conscious and unit_has_reaction(actor, "redirect_attack"):
+        adjacent_target_ids = {unit.id for unit in adjacent_conscious}
+        adjacent_prioritized_targets = [target for target in prioritized_conscious_targets if target.id in adjacent_target_ids]
+        if adjacent_prioritized_targets:
+            commit_to_melee(actor)
+            return TurnDecision(
+                action={"kind": "attack", "target_id": adjacent_prioritized_targets[0].id, "weapon_id": melee_weapon_id}
+            )
+
     if adjacent_conscious and not can_use_disengage_bonus_action(actor):
         # Generic archers that cannot bonus-action Disengage stop trying to kite
         # once they have been pinned in melee. They switch to melee behavior for
