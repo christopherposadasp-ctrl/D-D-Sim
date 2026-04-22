@@ -1,0 +1,30 @@
+[project]
+name = "dnd-sim-backend"
+version = "0.1.0"
+description = "Python backend parity layer for the D&D encounter simulator."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "pydantic>=2.9,<3.0",
+  "uvicorn>=0.32,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1.0",
+  "pytest>=8.3,<9.0",
+  "ruff>=0.11,<1.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["slow: long-running benchmark health tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = ["reports"]
+
+[tool.ruff.lint]
+select = ["F401", "F841", "I001", "SIM102"]

@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from backend.content.enemies import ACTIVE_ENEMY_PRESET_IDS, ENEMY_PRESETS
+
+
+@dataclass(frozen=True)
+class ScenarioDefinition:
+    """Data-only scenario metadata that can stay stable as content grows."""
+
+    scenario_id: str
+    display_name: str
+    description: str
+    enemy_preset_id: str
+    audit_expectation_ids: tuple[str, ...] = ()
+
+
+SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
+    "goblin_screen": ScenarioDefinition(
+        scenario_id="goblin_screen",
+        display_name="Goblin Screen",
+        description=ENEMY_PRESETS["goblin_screen"].description,
+        enemy_preset_id="goblin_screen",
+        audit_expectation_ids=("goblin_melee_engagement", "goblin_shortbow_attack"),
+    ),
+    "bandit_ambush": ScenarioDefinition(
+        scenario_id="bandit_ambush",
+        display_name="Bandit Ambush",
+        description=ENEMY_PRESETS["bandit_ambush"].description,
+        enemy_preset_id="bandit_ambush",
+        audit_expectation_ids=("bandit_melee_attack", "bandit_shortbow_attack", "scout_multiattack"),
+    ),
+    "mixed_patrol": ScenarioDefinition(
+        scenario_id="mixed_patrol",
+        display_name="Mixed Patrol",
+        description=ENEMY_PRESETS["mixed_patrol"].description,
+        enemy_preset_id="mixed_patrol",
+        audit_expectation_ids=("guard_spear_attack", "scout_multiattack", "goblin_ranged_support"),
+    ),
+    "orc_push": ScenarioDefinition(
+        scenario_id="orc_push",
+        display_name="Orc Push",
+        description=ENEMY_PRESETS["orc_push"].description,
+        enemy_preset_id="orc_push",
+        audit_expectation_ids=("orc_greataxe_attack", "orc_early_advance"),
+    ),
+    "wolf_harriers": ScenarioDefinition(
+        scenario_id="wolf_harriers",
+        display_name="Wolf Harriers",
+        description=ENEMY_PRESETS["wolf_harriers"].description,
+        enemy_preset_id="wolf_harriers",
+        audit_expectation_ids=("pack_tactics_attack", "prone_rider_applied"),
+    ),
+    "marsh_predators": ScenarioDefinition(
+        scenario_id="marsh_predators",
+        display_name="Marsh Predators",
+        description=ENEMY_PRESETS["marsh_predators"].description,
+        enemy_preset_id="marsh_predators",
+        audit_expectation_ids=("crocodile_grapple", "toad_swallow"),
+    ),
+}
+
+ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS
+
+
+def get_scenario_definition(scenario_id: str) -> ScenarioDefinition:
+    try:
+        return SCENARIO_DEFINITIONS[scenario_id]
+    except KeyError as error:
+        raise ValueError(f"Unknown scenario definition '{scenario_id}'.") from error
+
+
+def get_active_scenario_definitions() -> list[ScenarioDefinition]:
+    return [SCENARIO_DEFINITIONS[scenario_id] for scenario_id in ACTIVE_SCENARIO_IDS]

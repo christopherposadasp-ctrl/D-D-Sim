@@ -1,0 +1,856 @@
+from __future__ import annotations
+
+from backend.content.enemies import get_monster_definition_for_unit, unit_has_bonus_action, unit_has_trait
+from backend.engine import create_encounter
+from backend.engine.ai.decision import can_intentionally_provoke_opportunity_attack, choose_turn_decision
+from backend.engine.combat.engine import clear_turn_flags, resolve_attack_action
+from backend.engine.constants import ARCHER_GOBLIN_IDS, DEFAULT_POSITIONS, MELEE_GOBLIN_IDS
+from backend.engine.models.state import EncounterConfig, GridPosition, HiddenEffect, RageEffect, WeaponRange
+from backend.engine.rules.spatial import can_attempt_hide_from_position
+from backend.engine.rules.combat_rules import AttackRollOverrides
+
+
+def build_placements(**overrides):
+    placements = {
+        "F1": {"x": 1, "y": 1},
+        "F2": {"x": 1, "y": 3},
+        "F3": {"x": 1, "y": 5},
+        "F4": {"x": 1, "y": 7},
+        "G1": {"x": 15, "y": 1},
+        "G2": {"x": 15, "y": 4},
+        "G3": {"x": 15, "y": 7},
+        "G4": {"x": 15, "y": 10},
+        "G5": {"x": 15, "y": 13},
+        "G6": {"x": 14, "y": 14},
+        "G7": {"x": 15, "y": 15},
+    }
+    placements.update(overrides)
+    return placements
+
+
+def build_trio_placements(**overrides):
+    placements = build_placements(**overrides)
+    placements.pop("F4", None)
+    return placements
+
+
+def defeat_other_enemies(encounter, *active_enemy_ids: str) -> None:
+    active_ids = set(active_enemy_ids)
+    for unit in encounter.units.values():
+        if unit.faction != "goblins" or unit.id in active_ids:
+            continue
+        unit.current_hp = 0
+        unit.conditions.dead = True
+
+
+def test_level2_fighter_opens_with_dash_then_action_surge_melee_attack_from_default_layout() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-open-dash", placements=DEFAULT_POSITIONS))
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.between_action_movement is not None
+    assert decision.between_action_movement.mode == "dash"
+    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.post_action_movement is None
+
+
+def test_level1_fighter_sample_still_opens_with_dash_from_default_layout() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-level1-open-dash",
+            placements=build_trio_placements(),
+            player_preset_id="fighter_sample_trio",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "dash"
+    assert decision.surged_action is None
+
+
+def test_level2_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallback() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-move-javelin", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["G1"].position = GridPosition(x=9, y=1)
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.between_action_movement is not None
+    assert decision.between_action_movement.mode == "dash"
+    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert [point.model_dump() for point in decision.between_action_movement.path] == [
+        {"x": 1, "y": 1},
+        {"x": 2, "y": 1},
+        {"x": 3, "y": 1},
+        {"x": 4, "y": 1},
+        {"x": 5, "y": 1},
+        {"x": 6, "y": 1},
+        {"x": 7, "y": 1},
+        {"x": 8, "y": 1},
+    ]
+    assert decision.post_action_movement is None
+
+
+def test_level2_fighter_uses_attack_plus_action_surge_when_already_in_melee() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-adjacent-action-surge", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].position = GridPosition(x=4, y=5)
+    encounter.units["G1"].position = GridPosition(x=5, y=5)
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-no-double-javelin", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["G1"].position = GridPosition(x=15, y=1)
+    encounter.units["F1"].effective_speed = 0
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "javelin"
+    assert decision.surged_action is None
+
+
+def test_rogue_skirmisher_does_not_close_after_opening_shortbow_attack() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-open-shortbow",
+            placements=build_trio_placements(),
+            player_preset_id="rogue_ranged_trio",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "shortbow"
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is None
+
+
+def test_rogue_skirmisher_prefers_sneak_attack_target_when_shooting() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-sneak-target-choice",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, F2={"x": 5, "y": 3}, G1={"x": 6, "y": 1}, G2={"x": 6, "y": 3}),
+            player_preset_id="rogue_ranged_trio",
+        )
+    )
+    encounter.units["G1"].current_hp = 1
+    encounter.units["G2"].current_hp = 7
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+
+
+def test_melee_rogue_prefers_rapier_line_when_melee_is_available() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="melee-rogue-rapier-first",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, F2={"x": 3, "y": 1}, G1={"x": 4, "y": 1}),
+            player_preset_id="rogue_melee_trio",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "rapier"}
+    assert decision.pre_action_movement is not None
+
+
+def test_melee_rogue_uses_shortbow_only_after_closing_options_fail() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="melee-rogue-shortbow-fallback",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 15, "y": 1}),
+            player_preset_id="rogue_melee_trio",
+        )
+    )
+    encounter.units["F1"].effective_speed = 0
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "shortbow"
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is None
+
+
+def test_smart_monk_uses_shortsword_plus_bonus_unarmed_when_already_in_melee() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-adjacent-martial-arts-smart",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="monk_sample_trio",
+            player_behavior="smart",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+
+
+def test_dumb_monk_still_uses_bonus_unarmed_when_already_in_melee() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-adjacent-martial-arts-dumb",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="monk_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+
+
+def test_smart_monk_uses_dash_plus_bonus_unarmed_when_normal_move_cannot_reach_melee() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-dash-bonus-smart",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 10, "y": 1}),
+            player_preset_id="monk_sample_trio",
+            player_behavior="smart",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "dash"
+
+
+def test_dumb_monk_does_not_build_dash_plus_bonus_unarmed_turns() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-dash-bonus-dumb",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 10, "y": 1}),
+            player_preset_id="monk_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.bonus_action is None
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "dash"
+
+
+def test_level2_smart_monk_uses_flurry_of_blows_when_extra_pressure_is_worth_the_focus() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-level2-flurry-smart",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="monk_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["G1"].current_hp = 14
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
+    assert decision.bonus_action == {"kind": "flurry_of_blows", "timing": "after_action", "target_id": "G1"}
+
+
+def test_level2_smart_monk_uses_patient_defense_when_low_hp_and_ending_threatened() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-level2-patient-defense-smart",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}, G2={"x": 5, "y": 6}),
+            player_preset_id="monk_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].current_hp = 8
+    defeat_other_enemies(encounter, "G1", "G2")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "shortsword"
+    assert decision.bonus_action == {"kind": "patient_defense", "timing": "after_action"}
+
+
+def test_level2_smart_monk_uses_step_of_the_wind_only_when_dash_and_disengage_are_both_needed() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-level2-step-smart",
+            placements=build_trio_placements(F1={"x": 2, "y": 1}, G1={"x": 3, "y": 1}, G2={"x": 12, "y": 1}),
+            player_preset_id="monk_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].current_hp = 8
+    encounter.units["G2"].current_hp = 6
+    defeat_other_enemies(encounter, "G1", "G2")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "step_of_the_wind", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortsword"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "dash"
+
+
+def test_level2_dumb_monk_keeps_the_free_bonus_strike_and_does_not_spend_focus() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monk-level2-flurry-dumb",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="monk_level2_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    encounter.units["G1"].current_hp = 14
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+
+
+def test_barbarian_delays_rage_on_opening_dash_from_default_layout() -> None:
+    encounter = create_encounter(EncounterConfig(seed="barbarian-open-dash", placements=DEFAULT_POSITIONS))
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.bonus_action is None
+    assert decision.action["kind"] == "dash"
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "dash"
+
+
+def test_barbarian_prefers_greataxe_when_melee_is_reachable() -> None:
+    encounter = create_encounter(EncounterConfig(seed="barbarian-greataxe-first", placements=DEFAULT_POSITIONS))
+    encounter.units["F2"].position = GridPosition(x=4, y=5)
+    encounter.units["G1"].position = GridPosition(x=5, y=5)
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.bonus_action == {"kind": "rage", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+
+
+def test_barbarian_throws_handaxe_only_after_close_and_dash_fail() -> None:
+    encounter = create_encounter(EncounterConfig(seed="barbarian-handaxe-fallback", placements=DEFAULT_POSITIONS))
+    encounter.units["F2"].position = GridPosition(x=1, y=1)
+    encounter.units["G1"].position = GridPosition(x=8, y=1)
+    encounter.units["F2"].effective_speed = 0
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.bonus_action == {"kind": "rage", "timing": "before_action"}
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "handaxe"
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is None
+
+
+def test_smart_barbarian_commits_reckless_attack_on_an_eligible_greataxe_turn() -> None:
+    encounter = create_encounter(EncounterConfig(seed="smart-barbarian-reckless", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    encounter.units["F2"].position = GridPosition(x=4, y=5)
+    encounter.units["G1"].position = GridPosition(x=5, y=5)
+
+    decision = choose_turn_decision(encounter, "F2")
+    clear_turn_flags(encounter.units["F2"])
+    attack_events = resolve_attack_action(
+        encounter,
+        "F2",
+        decision.action,
+        step_overrides=[AttackRollOverrides(attack_rolls=[4, 16], damage_rolls=[7])],
+    )
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert attack_events[0].event_type == "phase_change"
+    assert attack_events[0].resolved_totals["recklessAttack"] is True
+    attack_event = next(event for event in attack_events if event.event_type == "attack")
+    assert attack_event.resolved_totals["attackMode"] == "advantage"
+    assert "reckless_attack" in attack_event.raw_rolls["advantageSources"]
+
+
+def test_dumb_barbarian_does_not_use_reckless_attack() -> None:
+    encounter = create_encounter(EncounterConfig(seed="dumb-barbarian-reckless", placements=DEFAULT_POSITIONS, player_behavior="dumb"))
+    encounter.units["F2"].position = GridPosition(x=4, y=5)
+    encounter.units["G1"].position = GridPosition(x=5, y=5)
+
+    decision = choose_turn_decision(encounter, "F2")
+    clear_turn_flags(encounter.units["F2"])
+    attack_events = resolve_attack_action(
+        encounter,
+        "F2",
+        decision.action,
+        step_overrides=[AttackRollOverrides(attack_rolls=[16], damage_rolls=[7])],
+    )
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
+    assert any(effect.kind == "reckless_attack" for effect in encounter.units["F2"].temporary_effects) is False
+
+
+def test_smart_barbarian_skips_reckless_attack_on_pure_handaxe_fallback_turns() -> None:
+    encounter = create_encounter(EncounterConfig(seed="smart-barbarian-no-reckless-handaxe", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    encounter.units["F2"].position = GridPosition(x=1, y=1)
+    encounter.units["G1"].position = GridPosition(x=8, y=1)
+    encounter.units["F2"].effective_speed = 0
+
+    decision = choose_turn_decision(encounter, "F2")
+    clear_turn_flags(encounter.units["F2"])
+    attack_events = resolve_attack_action(
+        encounter,
+        "F2",
+        decision.action,
+        step_overrides=[AttackRollOverrides(attack_rolls=[16], damage_rolls=[4])],
+    )
+
+    assert decision.action["weapon_id"] == "handaxe"
+    assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
+    assert any(effect.kind == "reckless_attack" for effect in encounter.units["F2"].temporary_effects) is False
+
+
+def test_smart_barbarian_skips_reckless_attack_when_first_melee_attack_already_has_advantage() -> None:
+    encounter = create_encounter(EncounterConfig(seed="smart-barbarian-no-reckless-advantage", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    encounter.units["F2"].position = GridPosition(x=4, y=5)
+    encounter.units["G1"].position = GridPosition(x=5, y=5)
+    encounter.units["G1"].conditions.prone = True
+
+    decision = choose_turn_decision(encounter, "F2")
+    clear_turn_flags(encounter.units["F2"])
+    attack_events = resolve_attack_action(
+        encounter,
+        "F2",
+        decision.action,
+        step_overrides=[AttackRollOverrides(attack_rolls=[4, 16], damage_rolls=[7])],
+    )
+
+    attack_event = next(event for event in attack_events if event.event_type == "attack")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
+    assert attack_event.resolved_totals["attackMode"] == "advantage"
+    assert "target_prone" in attack_event.raw_rolls["advantageSources"]
+    assert "reckless_attack" not in attack_event.raw_rolls["advantageSources"]
+
+
+def test_smart_melee_rogue_prefers_ally_supported_target() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="smart-melee-rogue-target-choice",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, F2={"x": 5, "y": 3}, G1={"x": 4, "y": 1}, G2={"x": 6, "y": 3}),
+            player_preset_id="rogue_melee_trio",
+            player_behavior="smart",
+        )
+    )
+    smart.units["G1"].current_hp = 1
+    smart.units["G2"].current_hp = 7
+
+    decision = choose_turn_decision(smart, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "rapier"}
+
+
+def test_smart_level2_ranged_rogue_hides_from_rock_before_attacking_when_already_set() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-hide-open",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level2_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["F1"].effective_speed = 0
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+
+    for enemy_id, enemy in encounter.units.items():
+        if not enemy_id.startswith("E") or enemy_id == "E4":
+            continue
+        enemy.current_hp = 0
+        enemy.conditions.dead = True
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "hide", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert decision.pre_action_movement is None
+
+
+def test_smart_level2_ranged_rogue_moves_to_hide_ready_square_while_dumb_rogue_does_not() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-smart-hide-setup",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level2_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-dumb-hide-setup",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level2_ranged_trio",
+            player_behavior="dumb",
+        )
+    )
+
+    for encounter in (smart, dumb):
+        encounter.units["F1"].position = GridPosition(x=3, y=8)
+        encounter.units["E4"].position = GridPosition(x=8, y=8)
+        for enemy_id, enemy in encounter.units.items():
+            if not enemy_id.startswith("E") or enemy_id == "E4":
+                continue
+            enemy.current_hp = 0
+            enemy.conditions.dead = True
+
+    smart_decision = choose_turn_decision(smart, "F1")
+    dumb_decision = choose_turn_decision(dumb, "F1")
+
+    assert smart_decision.bonus_action == {"kind": "hide", "timing": "after_action"}
+    assert smart_decision.pre_action_movement is not None
+    assert can_attempt_hide_from_position(smart, "F1", smart_decision.pre_action_movement.path[-1]) is True
+    assert dumb_decision.bonus_action is None
+
+
+def test_smart_level2_ranged_rogue_uses_disengage_to_escape_melee_into_a_shortbow_turn() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-ranged-disengage",
+            placements=build_trio_placements(
+                F1={"x": 5, "y": 5},
+                F2={"x": 10, "y": 5},
+                G1={"x": 6, "y": 5},
+                G2={"x": 11, "y": 5},
+            ),
+            player_preset_id="rogue_level2_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "disengage", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "move"
+
+
+def test_smart_level2_ranged_rogue_uses_bonus_dash_when_a_normal_move_cannot_reach_shortbow_range() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-ranged-bonus-dash",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 15, "y": 1}),
+            player_preset_id="rogue_level2_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].attacks["shortbow"].range = WeaponRange(normal=30, long=60)
+
+    for enemy_id, enemy in encounter.units.items():
+        if not enemy_id.startswith("G") or enemy_id == "G1":
+            continue
+        enemy.current_hp = 0
+        enemy.conditions.dead = True
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "bonus_dash", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "dash"
+    assert len(decision.pre_action_movement.path) - 1 > 6
+
+
+def test_level2_melee_rogue_uses_bonus_dash_to_turn_distance_into_a_rapier_attack() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-melee-bonus-dash",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 10, "y": 1}),
+            player_preset_id="rogue_level2_melee_trio",
+            player_behavior="smart",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "bonus_dash", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "rapier"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "dash"
+
+
+def test_smart_level2_melee_rogue_can_disengage_into_an_ally_supported_shortbow_turn() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-melee-disengage",
+            placements=build_trio_placements(
+                F1={"x": 5, "y": 5},
+                F2={"x": 10, "y": 5},
+                G1={"x": 6, "y": 5},
+                G2={"x": 11, "y": 5},
+            ),
+            player_preset_id="rogue_level2_melee_trio",
+            player_behavior="smart",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "disengage", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert decision.pre_action_movement is not None
+
+
+def test_smart_level2_melee_rogue_uses_after_action_hide_opportunistically_while_dumb_rogue_does_not() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-melee-hide-smart",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level2_melee_trio",
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="rogue-level2-melee-hide-dumb",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level2_melee_trio",
+            player_behavior="dumb",
+        )
+    )
+
+    for encounter in (smart, dumb):
+        encounter.units["F1"].position = GridPosition(x=4, y=8)
+        encounter.units["F1"].effective_speed = 0
+        encounter.units["E4"].position = GridPosition(x=8, y=8)
+        for enemy_id, enemy in encounter.units.items():
+            if not enemy_id.startswith("E") or enemy_id == "E4":
+                continue
+            enemy.current_hp = 0
+            enemy.conditions.dead = True
+
+    smart_decision = choose_turn_decision(smart, "F1")
+    dumb_decision = choose_turn_decision(dumb, "F1")
+
+    assert smart_decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert smart_decision.bonus_action == {"kind": "hide", "timing": "after_action"}
+    assert dumb_decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert dumb_decision.bonus_action is None
+
+
+def test_monsters_do_not_attempt_hide_even_with_the_rock_present() -> None:
+    encounter = create_encounter(EncounterConfig(seed="monster-no-hide", enemy_preset_id="goblin_screen", monster_behavior="balanced"))
+    encounter.units["E4"].position = GridPosition(x=4, y=8)
+    encounter.units["F1"].position = GridPosition(x=8, y=8)
+    encounter.active_combatant_index = encounter.initiative_order.index("E4")
+
+    decision = choose_turn_decision(encounter, "E4")
+
+    assert decision.bonus_action != {"kind": "hide", "timing": "before_action"}
+    assert decision.bonus_action != {"kind": "hide", "timing": "after_action"}
+
+
+def test_balanced_monsters_deprioritize_hidden_rogues_when_a_visible_target_is_available() -> None:
+    encounter = create_encounter(EncounterConfig(seed="monster-hidden-target-priority", enemy_preset_id="goblin_screen", monster_behavior="balanced"))
+    encounter.units["E4"].position = GridPosition(x=10, y=8)
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["F2"].position = GridPosition(x=4, y=9)
+    encounter.units["F1"].temporary_effects.append(HiddenEffect(kind="hidden", source_id="F1", expires_at_turn_start_of="F1"))
+
+    for fighter_id, fighter in encounter.units.items():
+        if not fighter_id.startswith("F") or fighter_id in {"F1", "F2"}:
+            continue
+        fighter.current_hp = 0
+        fighter.conditions.dead = True
+
+    decision = choose_turn_decision(encounter, "E4")
+
+    assert decision.action == {"kind": "attack", "target_id": "F2", "weapon_id": "shortbow"}
+
+
+def test_smart_barbarian_seeks_flanking_while_dumb_barbarian_does_not() -> None:
+    smart = create_encounter(EncounterConfig(seed="smart-barbarian-flank", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    smart.units["F2"].position = GridPosition(x=3, y=5)
+    smart.units["F1"].position = GridPosition(x=5, y=4)
+    smart.units["G1"].position = GridPosition(x=5, y=5)
+
+    dumb = create_encounter(EncounterConfig(seed="dumb-barbarian-flank", placements=DEFAULT_POSITIONS, player_behavior="dumb"))
+    dumb.units["F2"].position = GridPosition(x=3, y=5)
+    dumb.units["F1"].position = GridPosition(x=5, y=4)
+    dumb.units["G1"].position = GridPosition(x=5, y=5)
+
+    smart_decision = choose_turn_decision(smart, "F2")
+    dumb_decision = choose_turn_decision(dumb, "F2")
+
+    assert smart_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert [point.model_dump() for point in smart_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 6}]
+    assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
+
+
+def test_raging_barbarian_uses_bonus_action_upkeep_when_no_attack_is_available() -> None:
+    encounter = create_encounter(EncounterConfig(seed="barbarian-rage-upkeep-ai", placements=DEFAULT_POSITIONS))
+    encounter.units["F2"].temporary_effects.append(
+        RageEffect(kind="rage", source_id="F2", damage_bonus=2, remaining_rounds=99)
+    )
+    encounter.units["F2"].resources.rage_uses = 1
+    encounter.units["F2"].resources.handaxes = 0
+    encounter.units["F2"].effective_speed = 0
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.bonus_action == {"kind": "rage", "timing": "after_action"}
+    assert decision.action["kind"] == "skip"
+
+
+def test_smart_players_seek_flanking_while_dumb_players_take_first_adjacent_square() -> None:
+    smart = create_encounter(EncounterConfig(seed="smart-flank-choice", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    smart.units["F1"].position = GridPosition(x=3, y=5)
+    smart.units["F2"].position = GridPosition(x=5, y=4)
+    smart.units["G1"].position = GridPosition(x=5, y=5)
+
+    dumb = create_encounter(EncounterConfig(seed="dumb-flank-choice", placements=DEFAULT_POSITIONS, player_behavior="dumb"))
+    dumb.units["F1"].position = GridPosition(x=3, y=5)
+    dumb.units["F2"].position = GridPosition(x=5, y=4)
+    dumb.units["G1"].position = GridPosition(x=5, y=5)
+
+    smart_decision = choose_turn_decision(smart, "F1")
+    dumb_decision = choose_turn_decision(dumb, "F1")
+
+    assert smart_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert [point.model_dump() for point in smart_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 6}]
+    assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
+
+
+def test_goblin_role_split_matches_expected_loadouts() -> None:
+    encounter = create_encounter(EncounterConfig(seed="goblin-roles", placements=DEFAULT_POSITIONS))
+
+    for goblin_id in MELEE_GOBLIN_IDS:
+        assert encounter.units[goblin_id].combat_role == "goblin_melee"
+        assert "shortbow" not in encounter.units[goblin_id].attacks
+        assert "scimitar" in encounter.units[goblin_id].attacks
+        assert get_monster_definition_for_unit(encounter.units[goblin_id]).variant_id == "goblin_raider"
+        assert unit_has_trait(encounter.units[goblin_id], "nimble_escape") is True
+        assert unit_has_bonus_action(encounter.units[goblin_id], "disengage") is True
+
+    for goblin_id in ARCHER_GOBLIN_IDS:
+        assert encounter.units[goblin_id].combat_role == "goblin_archer"
+        assert "shortbow" in encounter.units[goblin_id].attacks
+        assert "scimitar" in encounter.units[goblin_id].attacks
+        assert get_monster_definition_for_unit(encounter.units[goblin_id]).variant_id == "goblin_archer"
+        assert unit_has_trait(encounter.units[goblin_id], "nimble_escape") is True
+        assert unit_has_bonus_action(encounter.units[goblin_id], "disengage") is True
+
+
+def test_orc_aggressive_bonus_movement_extends_melee_reach() -> None:
+    encounter = create_encounter(EncounterConfig(seed="orc-aggressive", enemy_preset_id="orc_push", monster_behavior="balanced"))
+    encounter.units["E1"].position = GridPosition(x=1, y=1)
+    encounter.units["F1"].position = GridPosition(x=9, y=1)
+    encounter.units["F2"].position = GridPosition(x=1, y=12)
+    encounter.units["F3"].position = GridPosition(x=1, y=13)
+    encounter.units["F4"].position = GridPosition(x=1, y=15)
+    encounter.units["E2"].position = GridPosition(x=15, y=15)
+    encounter.units["E3"].position = GridPosition(x=15, y=14)
+    encounter.units["E4"].position = GridPosition(x=15, y=13)
+    encounter.units["E5"].position = GridPosition(x=16, y=15)
+    encounter.units["E6"].position = GridPosition(x=16, y=14)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert unit_has_trait(encounter.units["E1"], "aggressive") is True
+    assert unit_has_bonus_action(encounter.units["E1"], "aggressive_dash") is True
+    assert decision.bonus_action == {"kind": "aggressive_dash", "timing": "before_action"}
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "greataxe"
+    assert decision.action["target_id"] in {"F1", "F2", "F3", "F4"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "dash"
+
+
+def test_bandit_archer_commits_to_melee_when_engaged_without_disengage() -> None:
+    encounter = create_encounter(EncounterConfig(seed="bandit-melee-commit", enemy_preset_id="bandit_ambush", monster_behavior="balanced"))
+    encounter.units["E3"].position = GridPosition(x=6, y=6)
+    encounter.units["F1"].position = GridPosition(x=7, y=6)
+    encounter.units["F2"].position = GridPosition(x=1, y=12)
+    encounter.units["F3"].position = GridPosition(x=1, y=13)
+    encounter.units["E1"].position = GridPosition(x=15, y=15)
+    encounter.units["E2"].position = GridPosition(x=15, y=14)
+    encounter.units["E4"].position = GridPosition(x=16, y=15)
+    encounter.units["E5"].position = GridPosition(x=16, y=14)
+
+    first_decision = choose_turn_decision(encounter, "E3")
+
+    assert unit_has_bonus_action(encounter.units["E3"], "disengage") is False
+    assert first_decision.bonus_action is None
+    assert first_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "club"}
+
+    encounter.units["F1"].position = GridPosition(x=10, y=6)
+
+    second_decision = choose_turn_decision(encounter, "E3")
+
+    assert second_decision.action["weapon_id"] == "club"
+    assert second_decision.bonus_action is None
+
+
+def test_evil_goblins_finish_adjacent_downed_fighters_first() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="evil-finish-downed",
+            placements=build_placements(F1={"x": 5, "y": 5}, F2={"x": 6, "y": 6}, G1={"x": 6, "y": 5}),
+            monster_behavior="evil",
+        )
+    )
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+    encounter.units["F2"].role_tags = ["healer"]
+
+    decision = choose_turn_decision(encounter, "G1")
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "scimitar"}
+
+
+def test_evil_goblins_do_not_provoke_for_downed_targets() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="evil-no-provoke-downed",
+            placements=build_placements(F1={"x": 5, "y": 5}, G1={"x": 7, "y": 5}),
+            monster_behavior="evil",
+        )
+    )
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+
+    assert can_intentionally_provoke_opportunity_attack(encounter, encounter.units["G1"], encounter.units["F1"]) is False
+
+
+def test_evil_goblins_still_provoke_for_healers() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="evil-provoke-healer",
+            placements=build_placements(F1={"x": 5, "y": 5}, G1={"x": 7, "y": 5}),
+            monster_behavior="evil",
+        )
+    )
+    encounter.units["F1"].role_tags = ["healer"]
+
+    assert can_intentionally_provoke_opportunity_attack(encounter, encounter.units["G1"], encounter.units["F1"]) is True
