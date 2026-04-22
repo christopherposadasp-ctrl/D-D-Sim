@@ -1,126 +1,104 @@
 import { describe, expect, it } from 'vitest';
 
-import { createEncounter } from '../engine';
-import { DEFAULT_POSITIONS } from '../engine/constants';
-import { findPathToAdjacentSquare, getAttackContext, pathProvokesOpportunityAttack } from '../engine/spatial';
+import {
+  GRID_SIZE,
+  SINGLE_SQUARE_FOOTPRINT,
+  getOccupiedSquaresForPosition,
+  inspectPlacementsForUnitIds,
+  isWithinBounds,
+} from '../shared/sim/spatial';
 
-describe('spatial rules', () => {
-  it('grants flanking for melee attacks when an adjacent ally forms an angle greater than 90 degrees', () => {
-    const encounter = createEncounter({ seed: 'flanking-obtuse', placements: DEFAULT_POSITIONS });
-    encounter.units.F1.position = { x: 5, y: 4 };
-    encounter.units.G1.position = { x: 5, y: 5 };
-    encounter.units.F2.position = { x: 6, y: 6 };
-
-    const context = getAttackContext(encounter, 'F1', 'G1', encounter.units.F1.attacks.greatsword!);
-
-    expect(context.legal).toBe(true);
-    expect(context.advantageSources).toContain('flanking');
-  });
-
-  it('does not grant flanking when the supporting ally is only at a right angle to the attacker', () => {
-    const encounter = createEncounter({ seed: 'no-flanking-right-angle', placements: DEFAULT_POSITIONS });
-    encounter.units.F1.position = { x: 5, y: 4 };
-    encounter.units.G1.position = { x: 5, y: 5 };
-    encounter.units.F2.position = { x: 6, y: 5 };
-
-    const context = getAttackContext(encounter, 'F1', 'G1', encounter.units.F1.attacks.greatsword!);
-
-    expect(context.legal).toBe(true);
-    expect(context.advantageSources).not.toContain('flanking');
-  });
-
-  it('does not grant flanking from unconscious allies or for ranged attacks', () => {
-    const encounter = createEncounter({ seed: 'no-flanking-ranged', placements: DEFAULT_POSITIONS });
-    encounter.units.F1.position = { x: 5, y: 4 };
-    encounter.units.G1.position = { x: 5, y: 5 };
-    encounter.units.F2.position = { x: 6, y: 6 };
-    encounter.units.F2.currentHp = 0;
-    encounter.units.F2.conditions.unconscious = true;
-    encounter.units.F2.conditions.prone = true;
-    encounter.units.F3.position = { x: 4, y: 5 };
-
-    const meleeContext = getAttackContext(encounter, 'F1', 'G1', encounter.units.F1.attacks.greatsword!);
-    const rangedContext = getAttackContext(encounter, 'F3', 'G1', encounter.units.F3.attacks.javelin!);
-
-    expect(meleeContext.advantageSources).not.toContain('flanking');
-    expect(rangedContext.advantageSources).not.toContain('flanking');
-  });
-
-  it('applies ranged-in-melee disadvantage when an enemy is adjacent to the attacker', () => {
-    const encounter = createEncounter({ seed: 'adjacent-enemy', placements: DEFAULT_POSITIONS });
-    encounter.units.G5.position = { x: 5, y: 5 };
-    encounter.units.F1.position = { x: 8, y: 5 };
-    encounter.units.F2.position = { x: 5, y: 6 };
-
-    const context = getAttackContext(encounter, 'G5', 'F1', encounter.units.G5.attacks.shortbow!);
-
-    expect(context.legal).toBe(true);
-    expect(context.disadvantageSources).toContain('adjacent_enemy');
-  });
-
-  it('ignores unconscious adjacent enemies for ranged-in-melee disadvantage', () => {
-    const encounter = createEncounter({ seed: 'unconscious-adjacent-enemy', placements: DEFAULT_POSITIONS });
-    encounter.units.G5.position = { x: 5, y: 5 };
-    encounter.units.F1.position = { x: 8, y: 5 };
-    encounter.units.F2.position = { x: 5, y: 6 };
-    encounter.units.F2.currentHp = 0;
-    encounter.units.F2.conditions.unconscious = true;
-    encounter.units.F2.conditions.prone = true;
-
-    const context = getAttackContext(encounter, 'G5', 'F1', encounter.units.G5.attacks.shortbow!);
-
-    expect(context.legal).toBe(true);
-    expect(context.disadvantageSources).not.toContain('adjacent_enemy');
-  });
-
-  it('applies long-range disadvantage and half cover for ranged attacks', () => {
-    const encounter = createEncounter({ seed: 'range-and-cover', placements: DEFAULT_POSITIONS });
-    encounter.units.F1.position = { x: 1, y: 1 };
-    encounter.units.G1.position = { x: 10, y: 1 };
-    encounter.units.F2.position = { x: 5, y: 1 };
-
-    const context = getAttackContext(encounter, 'F1', 'G1', encounter.units.F1.attacks.javelin!);
-
-    expect(context.legal).toBe(true);
-    expect(context.withinNormalRange).toBe(false);
-    expect(context.withinLongRange).toBe(true);
-    expect(context.disadvantageSources).toContain('long_range');
-    expect(context.coverAcBonus).toBe(2);
-  });
-
-  it('finds a shortest path to an open square adjacent to the target', () => {
-    const encounter = createEncounter({ seed: 'shortest-path', placements: DEFAULT_POSITIONS });
-    encounter.units.F1.position = { x: 1, y: 1 };
-    encounter.units.G1.position = { x: 4, y: 1 };
-
-    const path = findPathToAdjacentSquare(encounter, 'F1', 'G1', 6);
-
-    expect(path).not.toBeNull();
-    expect(path?.path).toEqual([
-      { x: 1, y: 1 },
-      { x: 2, y: 1 },
-      { x: 3, y: 1 }
+describe('shared spatial helpers', () => {
+  it('lists all occupied squares for a large footprint from its top-left anchor', () => {
+    expect(getOccupiedSquaresForPosition({ x: 10, y: 7 }, { width: 2, height: 2 })).toEqual([
+      { x: 10, y: 7 },
+      { x: 10, y: 8 },
+      { x: 11, y: 7 },
+      { x: 11, y: 8 },
     ]);
-    expect(path?.distance).toBe(2);
   });
 
-  it('detects when a movement path leaves an enemy reach and provokes an opportunity attack', () => {
-    const encounter = createEncounter({ seed: 'provokes-opportunity-attack', placements: DEFAULT_POSITIONS });
-    encounter.units.F1.position = { x: 5, y: 5 };
-    encounter.units.G1.position = { x: 6, y: 5 };
+  it('accepts legal in-bounds placements', () => {
+    expect(isWithinBounds({ x: 1, y: 1 }, SINGLE_SQUARE_FOOTPRINT)).toBe(true);
+    expect(isWithinBounds({ x: GRID_SIZE - 1, y: GRID_SIZE - 1 }, { width: 2, height: 2 })).toBe(true);
+  });
 
-    expect(
-      pathProvokesOpportunityAttack(encounter, 'F1', [
-        { x: 5, y: 5 },
-        { x: 5, y: 6 }
-      ])
-    ).toBe(false);
-    expect(
-      pathProvokesOpportunityAttack(encounter, 'F1', [
-        { x: 5, y: 5 },
-        { x: 5, y: 6 },
-        { x: 5, y: 7 }
-      ])
-    ).toBe(true);
+  it('rejects out-of-bounds large placements', () => {
+    expect(isWithinBounds({ x: GRID_SIZE, y: GRID_SIZE }, { width: 2, height: 2 })).toBe(false);
+  });
+
+  it('reports missing placements and footprint overlaps', () => {
+    const validation = inspectPlacementsForUnitIds(
+      {
+        F1: { x: 1, y: 7 },
+        E1: { x: 10, y: 7 },
+        E2: { x: 11, y: 8 },
+      },
+      ['F1', 'F2', 'E1', 'E2'],
+      {
+        F1: SINGLE_SQUARE_FOOTPRINT,
+        F2: SINGLE_SQUARE_FOOTPRINT,
+        E1: { width: 2, height: 2 },
+        E2: SINGLE_SQUARE_FOOTPRINT,
+      },
+    );
+
+    expect(validation.isValid).toBe(false);
+    expect(validation.missingUnitIds).toEqual(['F2']);
+    expect(validation.overlappingGroups).toEqual([
+      {
+        position: { x: 11, y: 8 },
+        unitIds: ['E1', 'E2'],
+      },
+    ]);
+  });
+
+  it('accepts complete placement maps for mixed unit footprints', () => {
+    const validation = inspectPlacementsForUnitIds(
+      {
+        F1: { x: 1, y: 7 },
+        F2: { x: 1, y: 8 },
+        F3: { x: 1, y: 9 },
+        E1: { x: 9, y: 7 },
+        E2: { x: 11, y: 5 },
+        E3: { x: 11, y: 9 },
+      },
+      ['F1', 'F2', 'F3', 'E1', 'E2', 'E3'],
+      {
+        F1: SINGLE_SQUARE_FOOTPRINT,
+        F2: SINGLE_SQUARE_FOOTPRINT,
+        F3: SINGLE_SQUARE_FOOTPRINT,
+        E1: { width: 2, height: 2 },
+        E2: { width: 2, height: 2 },
+        E3: { width: 2, height: 2 },
+      },
+    );
+
+    expect(validation.isValid).toBe(true);
+    expect(validation.errors).toEqual([]);
+  });
+
+  it('rejects placements onto blocked terrain squares', () => {
+    const validation = inspectPlacementsForUnitIds(
+      {
+        F1: { x: 5, y: 8 },
+        E1: { x: 10, y: 7 }
+      },
+      ['F1', 'E1'],
+      {
+        F1: SINGLE_SQUARE_FOOTPRINT,
+        E1: { width: 2, height: 2 }
+      },
+      [{ featureId: 'rock_1', kind: 'rock', position: { x: 5, y: 8 }, footprint: SINGLE_SQUARE_FOOTPRINT }]
+    );
+
+    expect(validation.isValid).toBe(false);
+    expect(validation.blockedSquareGroups).toEqual([
+      {
+        position: { x: 5, y: 8 },
+        unitIds: ['F1'],
+        terrainFeatureIds: ['rock_1']
+      }
+    ]);
   });
 });
