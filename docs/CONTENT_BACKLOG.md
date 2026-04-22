@@ -78,7 +78,7 @@ Status: `approved`
 - presets should avoid requiring spell support in V4.1
 - presets should cover melee-heavy, ranged-heavy, and mixed-role cases
 
-## V4.2 Martial Classes
+## V4.2 Martial Classes Up To Level 2
 
 Status: `approved`
 
@@ -93,13 +93,46 @@ Status: `approved`
 | Ranger | deferred | better after spell framework exists |
 | Paladin | deferred | spell-adjacent even before broader casting support |
 
-### Support Goal
+### Framework Goal
 
-Target support should extend through level 11 for included base classes, but milestone sequencing should favor rules simplicity first.
+Use V4.2 to establish the player-content framework:
 
-## V4.3 Non-Spell Monster Framework
+- class definitions
+- class progressions
+- feature definitions
+- player loadouts
+- player presets
+- minimal reusable resource and hook primitives
+
+### Current Live Snapshot
+
+- Fighter is live to level 2
+- Barbarian is live to level 2
+- Rogue is live to level 2
+- Monk is live to level 2 in `V4.2-C`
+- The current default mixed party is:
+  - level 2 fighter
+  - level 2 barbarian
+  - level 2 ranged rogue
+  - level 2 melee rogue
+
+### V4.2 Phase Targets
+
+| Phase | Scope | Status |
+|---|---|---|
+| V4.2-A | framework and current fighter sample build on registries | approved |
+| V4.2-B | Fighter and Rogue | approved |
+| V4.2-C | Barbarian and Monk | approved |
+
+## V4.3 Non-Spell Monsters Below CR 3
 
 Status: `approved`
+
+### Scope Target
+
+- add 50 non-spellcasting monsters below CR 3
+- add 5 new scenarios
+- group monsters by reusable behavior shape instead of one-off branches
 
 ### Trait/Ability Backlog
 
@@ -113,7 +146,15 @@ Status: `approved`
 | Multiattack support | approved | needed for scaling monster roster |
 | Recharge action support | deferred | not needed for earliest easy roster |
 
-## V4.4 Spell Framework Primitives
+### V4.3 Phase Targets
+
+| Phase | Scope | Status |
+|---|---|---|
+| V4.3-A | monster intake schema, trait library, audit checklist | approved |
+| V4.3-B | first 25 monsters | approved |
+| V4.3-C | second 25 monsters plus 5 scenarios | approved |
+
+## V4.4 Spellcaster Classes Up To Level 2
 
 Status: `approved`
 
@@ -131,11 +172,40 @@ Status: `approved`
 | upcasting/scaling | approved | required for many spells |
 | reaction hooks | approved | required for later reaction magic |
 
-## V4.5 Healer/Caster AI and Reaction Magic
+### Class Scope
+
+- Wizard
+- Sorcerer
+- Cleric
+- Bard
+- Druid
+- Warlock
+
+### V4.4 Phase Targets
+
+| Phase | Scope | Status |
+|---|---|---|
+| V4.4-A | spell slots, preparation, combat spell catalog, targeting, saves, concentration | approved |
+| V4.4-B | Wizard, Sorcerer, Cleric | approved |
+| V4.4-C | Bard, Druid, Warlock | approved |
+
+## V4.5 Half-Caster Classes Up To Level 2
 
 Status: `approved`
 
-### AI Capabilities To Add
+### Class Scope
+
+- Paladin
+- Ranger
+
+### V4.5 Phase Targets
+
+| Phase | Scope | Status |
+|---|---|---|
+| V4.5-A | Paladin and Ranger class packages on the shared spell framework | approved |
+| V4.5-B | class AI tuning, presets, and mixed-party validation | approved |
+
+### AI Capabilities To Reuse and Extend
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -144,44 +214,6 @@ Status: `approved`
 | AoE spell valuation | approved | must avoid random spell use |
 | counterspell timing | blocked | requires spell/reaction primitives |
 | reaction spell choice | blocked | depends on legal action framework |
-
-## V4.6 Trimmed SRD Intake
-
-Status: `blocked`
-
-This milestone depends on the curated lists being prepared separately.
-
-### Expected Monster Intake Format
-
-Use a structured list with fields like:
-
-- `monster_id`
-- `display_name`
-- `include`
-- `reason`
-- `difficulty_tag`
-- `needs_special_rules`
-- `depends_on`
-
-### Expected Spell Intake Format
-
-Use a structured list with fields like:
-
-- `spell_id`
-- `display_name`
-- `include`
-- `reason`
-- `combat_relevance`
-- `complexity_tag`
-- `needs_special_rules`
-- `depends_on`
-
-### Suggested Complexity Tags
-
-- `easy`
-- `medium`
-- `hard`
-- `special_case`
 
 ## Deferred/Not Immediate
 
@@ -199,5 +231,4 @@ These are not rejected. They are delayed until the engine primitives are stable 
 
 - which trimmed monster list should land first after V4.3
 - which trimmed spell list should land first after V4.4
-- whether Ranger and Paladin should partially enter before full general spell support
 - whether early V4 should support only curated presets or also free-form encounter building

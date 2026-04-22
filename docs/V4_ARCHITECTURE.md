@@ -2,15 +2,16 @@
 
 ## Purpose
 
-This document captures the recommended architecture for the Python-based V4 rewrite.
+This document captures the live backend-first architecture for the Python-based V4 simulator.
 
 It is intended to answer:
 
-- what stays from the proof of concept
-- what moves to Python
+- which layer owns simulation authority
+- how the current repository is organized
+- where combat logic and content live today
 - how the UI should talk to the engine
 - how content should be modeled
-- how the repository should be organized as V4 work begins
+- how future class and content work should fit into the current structure
 
 ## V4 Design Goals
 
@@ -66,29 +67,37 @@ The Python engine should never depend on the frontend. The frontend should never
 backend/
   api/
   content/
-    classes/
-    monsters/
-    presets/
-    spells/
-    traits/
+    attack_sequences.py
+    class_definitions.py
+    class_progressions.py
+    combat_actions.py
+    enemies.py
+    feature_definitions.py
+    monster_traits.py
+    player_loadouts.py
+    scenario_definitions.py
+    special_actions.py
+    spell_definitions.py
   engine/
-    actions/
     ai/
     combat/
-    effects/
     models/
     rules/
     services/
     utils/
-frontend/
+src/
+  shared/
+  ui/
 tests/
   golden/
-  integration/
   rules/
+  api/
+scripts/
 docs/
   MASTER_NOTES.md
   V4_ARCHITECTURE.md
   CONTENT_BACKLOG.md
+  PLAYER_CLASS_IMPLEMENTATION.md
   reference/
 ```
 
@@ -132,32 +141,6 @@ Examples:
 - phase transitions
 - initiative handling
 
-### `backend/engine/actions`
-
-Owns legal combat actions and action resolution entry points.
-
-Examples:
-
-- move
-- attack
-- dash
-- stabilize
-- cast spell
-- ready/use reaction
-
-### `backend/engine/effects`
-
-Owns effect primitives and duration management.
-
-Examples:
-
-- condition application
-- concentration
-- buffs/debuffs
-- forced movement
-- AoE resolution
-- ongoing effects
-
 ### `backend/engine/rules`
 
 Owns reusable rules logic.
@@ -171,6 +154,14 @@ Examples:
 - saving throws
 - death saves
 - concentration checks
+
+Current implementation note:
+
+- combat-action metadata currently lives in `backend/content/combat_actions.py`
+- action resolution and temporary-effect handling currently live mainly in:
+  - `backend/engine/combat/engine.py`
+  - `backend/engine/rules/combat_rules.py`
+- splitting those further is optional future cleanup, not a requirement for new class work
 
 ### `backend/engine/ai`
 
@@ -201,14 +192,15 @@ The content layer should be mostly data-driven.
 
 Recommended content buckets:
 
-- classes
-- class features
-- monsters
-- enemy variants
+- class definitions
+- class progressions
+- feature definitions
+- player loadouts
+- monsters / enemy variants
 - actions
 - traits
 - spells
-- presets
+- scenarios / presets
 
 ### Data-First Rule
 
@@ -272,17 +264,21 @@ The UI should consume stored replay data and never re-simulate while scrubbing.
 - `POST /api/encounters/batch`
 - `POST /api/encounters/validate`
 
-### Catalog Endpoints
+### Current Active Endpoints
 
+- `GET /health`
+- `GET /api/catalog/enemies`
 - `GET /api/catalog/classes`
-- `GET /api/catalog/monsters`
-- `GET /api/catalog/spells`
-- `GET /api/catalog/presets`
+- `POST /api/encounters/run`
+- `POST /api/encounters/batch`
+- `POST /api/encounters/batch-jobs`
+- `GET /api/encounters/batch-jobs/{job_id}`
 
-### Comparison/Planning Endpoints
+API stability rule:
 
-- `POST /api/analysis/compare`
-- `POST /api/analysis/preset-batch`
+- the Python backend owns the live run, batch, replay, and catalog contracts
+- frontend and `src/shared/` changes should follow backend needs, not lead them
+- prefer keeping run and batch payload shapes stable unless a new backend capability truly needs a transport change
 
 ## Testing Strategy
 
@@ -330,42 +326,40 @@ Add starter enemy content and preset-mix support without changing engine fundame
 
 ### `V4.2`
 
-Add martial class progression and martial-only player features.
+Add martial classes up to level 2 through a player-content framework:
 
-### `V4.3`
+- `V4.2-A` player schema, progressions, features, loadouts, presets, and hook foundation
+- `V4.2-B` Fighter and Rogue
+- `V4.2-C` Barbarian and Monk
 
-Add a generalized non-spell monster trait/action system.
+Current implementation snapshot:
 
-### `V4.4`
+- Fighter, Barbarian, and Rogue are already live through level 2
+- Monk is now live at level 2 in `V4.2-C`
 
-Add spell primitives and core combat spell support.
+## Backend Authority Status
 
-### `V4.5`
+- the Python backend is the live simulation authority
+- React consumes backend-owned catalogs and replay/state transport data
+- the old TypeScript engine/runtime is no longer part of the live simulation path
+- new combat rules should not be added back into `src/`
 
-Add healer/caster AI and reaction-timing intelligence.
+## Current Framework Direction
 
-### `V4.6`
+The live repo should converge on four reusable content layers:
 
-Load broader trimmed SRD content.
+- classes and progression
+- actions, features, and traits
+- monsters and scenarios
+- spells and effects
 
-### `V4.7`
-
-Optimize, package, and harden the product.
-
-## Migration Strategy
-
-Recommended sequence:
-
-1. keep the current TypeScript version intact as the proof of concept
-2. create a fresh Python backend alongside it
-3. reproduce current deterministic outputs first
-4. shift future content growth into the Python engine
-5. keep the current UI as a behavior reference while the frontend evolves
+The important implementation rule is that new content should prefer registry entries and shared handlers over new creature-specific or class-specific branches.
 
 ## Open Decisions
 
-- final frontend technology confirmation
-- exact Python dependency set
+- whether to split action/effect resolution into additional backend modules later
+- how much observer-specific stealth/search simulation should exist beyond the current combat-only Hide model
+- when to expose more player catalog controls in the frontend
 - whether local desktop packaging is required before or after V4.6
 - exact SRD trim list for monsters
 - exact SRD trim list for combat spells
