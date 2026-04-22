@@ -387,7 +387,10 @@ def test_giant_crab_claw_grapples_medium_targets_with_dc_11_but_not_large_target
 
     assert grapple_attack.damage_details.attack_riders_applied == ["grapple_on_hit"]
     assert any(
-        effect.kind == "grappled_by" and effect.source_id == "E1" and effect.escape_dc == 11
+        effect.kind == "grappled_by"
+        and effect.source_id == "E1"
+        and effect.escape_dc == 11
+        and effect.maintain_reach_feet == 5
         for effect in encounter.units["F1"].temporary_effects
     )
 
@@ -805,7 +808,12 @@ def test_bugbear_warrior_grab_applies_grapple_and_follow_up_light_hammer_gains_a
     )
 
     assert grab_attack.damage_details.attack_riders_applied == ["grapple_on_hit"]
-    assert any(effect.kind == "grappled_by" and effect.source_id == "E1" for effect in encounter.units["F1"].temporary_effects)
+    assert any(
+        effect.kind == "grappled_by"
+        and effect.source_id == "E1"
+        and effect.maintain_reach_feet == 10
+        for effect in encounter.units["F1"].temporary_effects
+    )
     assert follow_up_attack.resolved_totals["attackMode"] == "advantage"
     assert "self_grappled_target" in follow_up_attack.raw_rolls["advantageSources"]
 

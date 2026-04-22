@@ -22,6 +22,8 @@ from backend.engine.rules.combat_rules import choose_burning_hands_targeting
 from backend.engine.rules.spatial import (
     PositionIndex,
     ReachableSquare,
+    get_active_grappled_target_ids,
+    get_active_grappler_ids,
     build_position_index,
     can_attempt_hide_from_position,
     chebyshev_distance,
@@ -141,19 +143,26 @@ def is_unit_downed(unit: UnitState) -> bool:
     return not unit.conditions.dead and unit.current_hp == 0
 
 
-def is_grappled(unit: UnitState) -> bool:
-    return any(effect.kind == "grappled_by" for effect in unit.temporary_effects)
+def is_grappled(unit: UnitState, state: EncounterState | None = None) -> bool:
+    if state is None:
+        return any(effect.kind == "grappled_by" for effect in unit.temporary_effects)
+    return bool(get_active_grappler_ids(state, unit.id))
 
 
-def get_move_squares(unit: UnitState) -> int:
-    if is_grappled(unit):
+def get_move_squares(unit: UnitState, state: EncounterState | None = None) -> int:
+    if is_grappled(unit, state):
         return 0
     base_move_squares = unit.effective_speed // 5
     return max(0, base_move_squares - unit._turn_stand_up_cost_squares)
 
 
-def get_total_move_squares(unit: UnitState, extra_speed_multipliers: int = 0) -> int:
-    if is_grappled(unit):
+def get_total_move_squares(
+    unit: UnitState,
+    extra_speed_multipliers: int = 0,
+    *,
+    state: EncounterState | None = None,
+) -> int:
+    if is_grappled(unit, state):
         return 0
     base_move_squares = unit.effective_speed // 5
     total_budget = base_move_squares * (1 + extra_speed_multipliers)
@@ -270,7 +279,7 @@ def is_barbarian_under_immediate_melee_threat(
             state,
             enemy,
             [actor],
-            get_move_squares(enemy),
+            get_move_squares(enemy, state),
             melee_weapon_id,
             False,
             position_index,
@@ -308,8 +317,12 @@ def apply_barbarian_rage_upkeep(actor: UnitState, decision: TurnDecision) -> Tur
     return decision
 
 
-def get_remaining_move_squares_after_primary_action(actor: UnitState, decision: TurnDecision) -> int:
-    return max(0, get_move_squares(actor) - get_movement_distance(decision.pre_action_movement))
+def get_remaining_move_squares_after_primary_action(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+) -> int:
+    return max(0, get_move_squares(actor, state) - get_movement_distance(decision.pre_action_movement))
 
 
 def choose_action_surge_reposition(
@@ -374,7 +387,7 @@ def apply_fighter_action_surge(
     if not target:
         return decision
 
-    remaining_move_squares = get_remaining_move_squares_after_primary_action(actor, decision)
+    remaining_move_squares = get_remaining_move_squares_after_primary_action(state, actor, decision)
     between_action_movement = choose_action_surge_reposition(
         state,
         actor,
@@ -1545,7 +1558,7 @@ def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, cons
 
 
 def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
-    move_squares = get_move_squares(actor)
+    move_squares = get_move_squares(actor, state)
     position_index = build_position_index(state)
     melee_weapon_id = get_player_primary_melee_weapon_id(actor)
     conscious_enemies = sort_player_combat_targets(
@@ -2085,8 +2098,8 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
     if is_player_wizard(actor):
         return get_player_wizard_decision(state, actor)
 
-    move_squares = get_move_squares(actor)
-    dash_squares = get_total_move_squares(actor, 1)
+    move_squares = get_move_squares(actor, state)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
     behavior = state.player_behavior
     position_index = build_position_index(state)
     melee_weapon_id = get_player_primary_melee_weapon_id(actor)
@@ -2356,8 +2369,8 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
 
 
 def get_enemy_melee_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
-    move_squares = get_move_squares(actor)
-    dash_squares = get_total_move_squares(actor, 1)
+    move_squares = get_move_squares(actor, state)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
     position_index = build_position_index(state)
     conscious_targets = get_conscious_fighter_targets(state)
     downed_targets = sort_downed_targets(state, actor, get_downed_fighter_targets(state))
@@ -2421,7 +2434,7 @@ def get_enemy_melee_decision(state: EncounterState, actor: UnitState) -> TurnDec
     # 1. a longer move that still reaches melee for an attack, or
     # 2. a stronger closing dash when even that is not enough.
     if can_use_aggressive_bonus_movement(actor):
-        aggressive_reach = get_total_move_squares(actor, 1)
+        aggressive_reach = get_total_move_squares(actor, 1, state=state)
         aggressive_option = None
 
         if state.monster_behavior == "kind":
@@ -2508,7 +2521,7 @@ def get_enemy_melee_decision(state: EncounterState, actor: UnitState) -> TurnDec
         state,
         actor.id,
         dash_target.id,
-        get_total_move_squares(actor, 2) if can_use_aggressive_bonus_movement(actor) else dash_squares,
+        get_total_move_squares(actor, 2, state=state) if can_use_aggressive_bonus_movement(actor) else dash_squares,
         can_intentionally_provoke_opportunity_attack(state, actor, dash_target),
         position_index,
     )
@@ -2525,16 +2538,8 @@ def get_enemy_melee_decision(state: EncounterState, actor: UnitState) -> TurnDec
 
 
 def get_swallow_predator_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
-    grappled_targets = get_ranked_attack_targets(state, actor)
-    current_grappled_target = next(
-        (
-            target
-            for target in grappled_targets
-            if any(effect.kind == "grappled_by" and effect.source_id == actor.id for effect in target.temporary_effects)
-        ),
-        None,
-    )
-    if current_grappled_target:
+    current_grappled_target = get_current_grappled_target(state, actor)
+    if current_grappled_target and current_grappled_target.size_category in {"tiny", "small", "medium"}:
         return TurnDecision(
             action={"kind": "special_action", "action_id": "swallow", "target_id": current_grappled_target.id}
         )
@@ -2543,13 +2548,13 @@ def get_swallow_predator_decision(state: EncounterState, actor: UnitState) -> Tu
 
 
 def get_current_grappled_target(state: EncounterState, actor: UnitState) -> UnitState | None:
+    active_grappled_target_ids = set(get_active_grappled_target_ids(state, actor.id))
     grappled_targets = get_ranked_attack_targets(state, actor)
     return next(
         (
             target
             for target in grappled_targets
-            if any(effect.kind == "grappled_by" and effect.source_id == actor.id for effect in target.temporary_effects)
-            and is_unit_conscious(target)
+            if target.id in active_grappled_target_ids and is_unit_conscious(target)
         ),
         None,
     )
@@ -2559,9 +2564,11 @@ def get_grappling_brute_decision(state: EncounterState, actor: UnitState) -> Tur
     current_grappled_target = get_current_grappled_target(state, actor)
     if current_grappled_target:
         melee_weapon_id = "light_hammer" if actor.attacks.get("light_hammer") else get_enemy_melee_weapon_id(actor)
-        return TurnDecision(
-            action={"kind": "attack", "target_id": current_grappled_target.id, "weapon_id": melee_weapon_id}
-        )
+        weapon = actor.attacks.get(melee_weapon_id)
+        if weapon and get_attack_context(state, actor.id, current_grappled_target.id, weapon).legal:
+            return TurnDecision(
+                action={"kind": "attack", "target_id": current_grappled_target.id, "weapon_id": melee_weapon_id}
+            )
 
     return get_enemy_melee_decision(state, actor)
 
@@ -2583,8 +2590,8 @@ def get_adjacent_downed_fighters(state: EncounterState, actor: UnitState) -> lis
 
 
 def get_enemy_ranged_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
-    move_squares = get_move_squares(actor)
-    dash_squares = get_total_move_squares(actor, 1)
+    move_squares = get_move_squares(actor, state)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
     position_index = build_position_index(state)
     conscious_targets = get_conscious_fighter_targets(state)
     kind_targets = sort_kind_targets(state, actor, conscious_targets)

@@ -58,6 +58,7 @@ from backend.engine.rules.combat_rules import (
     unit_is_raging,
 )
 from backend.engine.rules.spatial import (
+    get_active_grappler_ids,
     build_position_index,
     find_advance_path,
     get_attack_context,
@@ -66,6 +67,7 @@ from backend.engine.rules.spatial import (
     get_occupied_squares_for_position,
     get_swallow_source_id,
     get_unit_footprint,
+    is_active_grapple,
     is_unit_swallowed,
 )
 from backend.engine.utils.helpers import (
@@ -329,12 +331,14 @@ def get_opportunity_attack_weapon_id(unit: UnitState) -> str:
     return sorted(melee_weapons, key=sort_key)[0][0]
 
 
-def is_grappled(unit: UnitState) -> bool:
-    return any(effect.kind == "grappled_by" for effect in unit.temporary_effects)
+def is_grappled(state: EncounterState | None, unit: UnitState) -> bool:
+    if state is None:
+        return any(effect.kind == "grappled_by" for effect in unit.temporary_effects)
+    return bool(get_active_grappler_ids(state, unit.id))
 
 
-def get_move_squares(unit: UnitState) -> int:
-    if is_grappled(unit):
+def get_move_squares(state: EncounterState | None, unit: UnitState) -> int:
+    if is_grappled(state, unit):
         return 0
     return unit.effective_speed // 5
 
@@ -354,8 +358,10 @@ def get_total_movement_budget(
     action: dict[str, str],
     bonus_action: dict[str, str] | None = None,
     surged_action: dict[str, str] | None = None,
+    *,
+    state: EncounterState | None = None,
 ) -> int:
-    move_squares = get_move_squares(actor)
+    move_squares = get_move_squares(state, actor)
     action_multiplier = int(action["kind"] == "dash") + int(bool(surged_action and surged_action["kind"] == "dash"))
     bonus_multiplier = get_extra_movement_multiplier(bonus_action["kind"] if bonus_action else None)
     total_budget = move_squares * (1 + action_multiplier + bonus_multiplier)
@@ -376,10 +382,10 @@ def resolve_turn_start_posture(state: EncounterState, actor_id: str) -> list[Com
         return []
 
     # Grappled creatures have speed 0, so they cannot spend movement to stand.
-    if get_move_squares(actor) <= 0:
+    if get_move_squares(state, actor) <= 0:
         return []
 
-    stand_up_cost_squares = max(1, (get_move_squares(actor) + 1) // 2)
+    stand_up_cost_squares = max(1, (get_move_squares(state, actor) + 1) // 2)
     actor._turn_stand_up_cost_squares = stand_up_cost_squares
     actor.conditions.prone = False
 
@@ -517,21 +523,71 @@ def release_grappled_targets_from_source(state: EncounterState, source_id: str, 
     return events
 
 
+def classify_invalid_grapple_reason(state: EncounterState, source_id: str) -> str:
+    source = state.units.get(source_id)
+    if not source or source.conditions.dead:
+        return "source_dead"
+    if source.current_hp <= 0 or source.conditions.unconscious:
+        return "source_incapacitated"
+    return "invalid_grapple"
+
+
+def build_invalid_grapple_release_summary(reason: str, source_id: str, target_id: str) -> str:
+    if reason == "source_dead":
+        return f"{source_id} dies and releases {target_id}."
+    if reason == "source_incapacitated":
+        return f"{source_id} can no longer maintain the grapple on {target_id}."
+    return f"{source_id} loses its hold on {target_id}."
+
+
 def release_invalid_grappled_targets_at_turn_start(state: EncounterState, actor_id: str) -> list[CombatEvent]:
-    actor = state.units[actor_id]
-    if actor.combat_role != "crocodile":
-        return []
+    _ = actor_id
+    events: list[CombatEvent] = []
+    invalid_pairs: list[tuple[str, str, bool, str]] = []
 
-    valid_target_ids = {target.id for target in get_ranked_attack_targets(state, actor)}
-    invalid_targets = [
-        target
-        for target in get_units_grappled_by(state, actor_id)
-        if not is_unit_conscious(target) or target.id not in valid_target_ids
-    ]
-    if not invalid_targets:
-        return []
+    for target in sorted(state.units.values(), key=lambda unit: unit_sort_key(unit.id)):
+        source_ids = sorted(
+            {effect.source_id for effect in target.temporary_effects if effect.kind == "grappled_by"},
+            key=unit_sort_key,
+        )
+        for source_id in source_ids:
+            if any(effect.kind == "swallowed_by" and effect.source_id == source_id for effect in target.temporary_effects):
+                continue
+            if is_active_grapple(state, source_id, target.id):
+                continue
 
-    return release_grappled_targets_from_source(state, actor_id, "invalid_target")
+            had_restrained = any(
+                effect.kind == "restrained_by" and effect.source_id == source_id for effect in target.temporary_effects
+            )
+            invalid_pairs.append((source_id, target.id, had_restrained, classify_invalid_grapple_reason(state, source_id)))
+
+    for source_id, target_id, had_restrained, reason in invalid_pairs:
+        target = state.units[target_id]
+        clear_source_bound_effects(target, source_id, {"grappled_by", "restrained_by", "blinded_by"})
+
+        if target.conditions.dead:
+            continue
+
+        condition_deltas = [f"{target_id} is no longer grappled by {source_id}."]
+        if had_restrained:
+            condition_deltas.append(f"{target_id} is no longer restrained by {source_id}.")
+
+        events.append(
+            CombatEvent(
+                round=state.round,
+                actor_id=source_id,
+                target_ids=[target_id],
+                event_type="phase_change",
+                raw_rolls={},
+                resolved_totals={"releaseReason": reason},
+                movement_details=None,
+                damage_details=None,
+                condition_deltas=condition_deltas,
+                text_summary=build_invalid_grapple_release_summary(reason, source_id, target_id),
+            )
+        )
+
+    return events
 
 
 def is_release_square_open(state: EncounterState, released_unit_id: str, position: GridPosition, footprint: Footprint) -> bool:
@@ -749,7 +805,7 @@ def can_use_swallow_special_action(state: EncounterState, actor_id: str, target_
         return False
     if get_swallow_source_id(target) is not None:
         return False
-    return any(effect.kind == "grappled_by" and effect.source_id == actor_id for effect in target.temporary_effects)
+    return is_active_grapple(state, actor_id, target_id)
 
 
 def resolve_special_action(state: EncounterState, actor_id: str, action: dict[str, str]) -> CombatEvent:
@@ -880,7 +936,7 @@ def choose_rampage_follow_up(state: EncounterState, actor_id: str, weapon_id: st
         return None
 
     position_index = build_position_index(state)
-    half_speed_squares = max(0, get_move_squares(actor) // 2)
+    half_speed_squares = max(0, get_move_squares(state, actor) // 2)
 
     for target in get_ranked_attack_targets(state, actor):
         if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
@@ -1100,6 +1156,8 @@ def resolve_attack_action(
             preferred_weapon_id,
         )
         if not selected_target_and_weapon:
+            if step_index == 0 and not attack_events:
+                return [create_skip_event(state, actor_id, "No legal attack target is available.")]
             break
 
         target_id, weapon_id = selected_target_and_weapon
@@ -1604,7 +1662,7 @@ def resolve_action_surge(state: EncounterState, actor_id: str) -> CombatEvent:
     )
 
 
-def exceeds_movement_budget(actor: UnitState, decision: TurnDecision) -> bool:
+def exceeds_movement_budget(state: EncounterState, actor: UnitState, decision: TurnDecision) -> bool:
     total_distance = 0
     if decision.pre_action_movement:
         total_distance += len(decision.pre_action_movement.path) - 1
@@ -1612,7 +1670,13 @@ def exceeds_movement_budget(actor: UnitState, decision: TurnDecision) -> bool:
         total_distance += len(decision.between_action_movement.path) - 1
     if decision.post_action_movement:
         total_distance += len(decision.post_action_movement.path) - 1
-    return total_distance > get_total_movement_budget(actor, decision.action, decision.bonus_action, decision.surged_action)
+    return total_distance > get_total_movement_budget(
+        actor,
+        decision.action,
+        decision.bonus_action,
+        decision.surged_action,
+        state=state,
+    )
 
 
 def resolve_turn_action(
@@ -1728,7 +1792,7 @@ def execute_decision(
     *,
     rescue_mode: bool,
 ) -> None:
-    if exceeds_movement_budget(state.units[actor_id], decision):
+    if exceeds_movement_budget(state, state.units[actor_id], decision):
         events.append(create_skip_event(state, actor_id, "Planned movement exceeds the unit speed budget."))
         return
 

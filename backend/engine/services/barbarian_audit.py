@@ -358,7 +358,7 @@ def get_actor_damage_taken(turn_events: list[CombatEvent], actor_id: str) -> int
 
 
 def state_has_legal_barbarian_melee_attack(state, actor: UnitState) -> bool:
-    move_squares = get_move_squares(actor)
+    move_squares = get_move_squares(actor, state)
     position_index = build_position_index(state)
     melee_weapon_id = get_player_primary_melee_weapon_id(actor)
     conscious_enemies = sort_player_combat_targets(
@@ -393,7 +393,7 @@ def state_has_legal_barbarian_melee_attack(state, actor: UnitState) -> bool:
 
 
 def state_has_meaningful_barbarian_dash(state, actor: UnitState) -> bool:
-    dash_squares = get_total_move_squares(actor, 1)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
     position_index = build_position_index(state)
     conscious_enemies = sort_player_combat_targets(
         state,

@@ -33,11 +33,17 @@ def test_simple_suggestion_rules_are_scenario_specific() -> None:
     assert build_simple_suggestion("marsh_predators", 0.95, 0.05) == (
         "Move the crocodile cluster 1 square closer before changing monster counts or stats."
     )
+    assert build_simple_suggestion("deadwatch_phalanx", 0.91, 0.09) is None
+    assert build_simple_suggestion("deadwatch_phalanx", 0.09, 0.91) is None
     assert build_simple_suggestion("goblin_screen", 0.05, 0.95) == (
         "Move the enemy front line 1 square back, or spread the back line by 1 square."
     )
     assert build_simple_suggestion("marsh_predators", 0.05, 0.95) == (
         "Move one crocodile 1 square back before changing composition."
+    )
+    assert build_simple_suggestion("deadwatch_phalanx", 0.93, 0.07) == "Move the enemy front line 1 square closer."
+    assert build_simple_suggestion("deadwatch_phalanx", 0.07, 0.93) == (
+        "Move the enemy front line 1 square back, or spread the back line by 1 square."
     )
 
 

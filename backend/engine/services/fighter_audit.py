@@ -284,7 +284,7 @@ def get_weapon_id(event: CombatEvent) -> str | None:
 
 
 def state_has_legal_fighter_melee_attack(state, actor: UnitState) -> bool:
-    move_squares = get_move_squares(actor)
+    move_squares = get_move_squares(actor, state)
     position_index = build_position_index(state)
     melee_weapon_id = get_player_primary_melee_weapon_id(actor)
     conscious_enemies = sort_player_combat_targets(
@@ -319,8 +319,8 @@ def state_has_legal_fighter_melee_attack(state, actor: UnitState) -> bool:
 
 
 def state_has_meaningful_fighter_dash_action_surge(state, actor: UnitState) -> bool:
-    move_squares = get_move_squares(actor)
-    dash_squares = get_total_move_squares(actor, 1)
+    move_squares = get_move_squares(actor, state)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
     position_index = build_position_index(state)
     melee_weapon_id = get_player_primary_melee_weapon_id(actor)
     conscious_enemies = sort_player_combat_targets(

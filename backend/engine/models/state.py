@@ -229,6 +229,7 @@ class GrappledEffect(CamelModel):
     kind: Literal["grappled_by"]
     source_id: str
     escape_dc: int
+    maintain_reach_feet: int | None = None
 
 
 class RestrainedEffect(CamelModel):

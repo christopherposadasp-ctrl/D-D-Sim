@@ -488,12 +488,14 @@ def get_combination_summary(summary: BatchSummary, monster_behavior: str) -> Bat
 
 
 def build_simple_suggestion(preset_id: str, player_win_rate: float, enemy_win_rate: float) -> str | None:
-    if player_win_rate > 0.9:
+    dominance_threshold = 0.92 if preset_id == "deadwatch_phalanx" else 0.9
+
+    if player_win_rate > dominance_threshold:
         if preset_id == "marsh_predators":
             return "Move the crocodile cluster 1 square closer before changing monster counts or stats."
         return "Move the enemy front line 1 square closer."
 
-    if enemy_win_rate > 0.9:
+    if enemy_win_rate > dominance_threshold:
         if preset_id == "marsh_predators":
             return "Move one crocodile 1 square back before changing composition."
         return "Move the enemy front line 1 square back, or spread the back line by 1 square."

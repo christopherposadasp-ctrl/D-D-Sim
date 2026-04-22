@@ -81,7 +81,7 @@ def test_crocodile_releases_downed_target_before_retargeting() -> None:
 
     result = step_encounter_without_history(encounter)
 
-    assert any("releases F1 and looks for a new target" in event.text_summary for event in result.events)
+    assert any(event.resolved_totals.get("releaseReason") == "invalid_grapple" for event in result.events)
     assert all(not (effect.kind == "grappled_by" and effect.source_id == "E2") for effect in result.state.units["F1"].temporary_effects)
     assert any(event.event_type == "attack" and event.target_ids == ["F2"] for event in result.events)
 

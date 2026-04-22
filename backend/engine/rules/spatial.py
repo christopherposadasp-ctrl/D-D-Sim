@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from backend.content.enemies import unit_has_trait
 from backend.engine.models.state import EncounterState, Faction, Footprint, GridPosition, TerrainFeature, UnitState, WeaponProfile
-from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
+from backend.engine.utils.helpers import is_unit_conscious, unit_can_take_reactions, unit_sort_key
 
 GRID_SIZE = 15
 SINGLE_SQUARE_FOOTPRINT = Footprint(width=1, height=1)
@@ -124,14 +124,87 @@ def get_swallow_source_id(unit: UnitState) -> str | None:
     return swallowed_effect.source_id if swallowed_effect else None
 
 
-def get_grappled_target_ids(state: EncounterState, source_id: str) -> list[str]:
-    return sorted(
-        [
-            unit.id
-            for unit in state.units.values()
-            if any(effect.kind == "grappled_by" and effect.source_id == source_id for effect in unit.temporary_effects)
-        ]
+def get_default_grapple_maintain_reach_feet(source: UnitState) -> int:
+    grapple_reaches = [
+        weapon.reach or 5
+        for weapon in source.attacks.values()
+        if weapon.on_hit_effects
+        and any(effect.kind in {"grapple_on_hit", "grapple_and_restrain"} for effect in weapon.on_hit_effects)
+    ]
+    return max(grapple_reaches, default=5)
+
+
+def get_grapple_maintain_reach_feet(state: EncounterState, source_id: str, target_id: str) -> int | None:
+    target = state.units.get(target_id)
+    if not target:
+        return None
+
+    grappled_effect = next(
+        (
+            effect
+            for effect in target.temporary_effects
+            if effect.kind == "grappled_by" and effect.source_id == source_id
+        ),
+        None,
     )
+    if not grappled_effect:
+        return None
+    if grappled_effect.maintain_reach_feet is not None:
+        return max(5, grappled_effect.maintain_reach_feet)
+
+    source = state.units.get(source_id)
+    if not source:
+        return 5
+    return get_default_grapple_maintain_reach_feet(source)
+
+
+def is_active_grapple(state: EncounterState, source_id: str, target_id: str) -> bool:
+    source = state.units.get(source_id)
+    target = state.units.get(target_id)
+    if not source or not target:
+        return False
+    if not any(effect.kind == "grappled_by" and effect.source_id == source_id for effect in target.temporary_effects):
+        return False
+    if not is_unit_conscious(source) or not source.position:
+        return False
+    if not is_unit_conscious(target) or not target.position:
+        return False
+
+    maintain_reach_feet = get_grapple_maintain_reach_feet(state, source_id, target_id)
+    if maintain_reach_feet is None:
+        return False
+
+    distance_squares = get_min_chebyshev_distance_between_footprints(
+        source.position,
+        get_unit_footprint(source),
+        target.position,
+        get_unit_footprint(target),
+    )
+    return distance_squares <= feet_to_squares(maintain_reach_feet)
+
+
+def get_active_grappled_target_ids(state: EncounterState, source_id: str) -> list[str]:
+    return sorted(
+        [unit.id for unit in state.units.values() if is_active_grapple(state, source_id, unit.id)],
+        key=unit_sort_key,
+    )
+
+
+def get_active_grappler_ids(state: EncounterState, target_id: str) -> list[str]:
+    target = state.units.get(target_id)
+    if not target:
+        return []
+
+    source_ids = {
+        effect.source_id
+        for effect in target.temporary_effects
+        if effect.kind == "grappled_by" and is_active_grapple(state, effect.source_id, target_id)
+    }
+    return sorted(source_ids, key=unit_sort_key)
+
+
+def get_grappled_target_ids(state: EncounterState, source_id: str) -> list[str]:
+    return get_active_grappled_target_ids(state, source_id)
 
 
 def is_within_bounds(position: GridPosition, footprint: Footprint | None = None) -> bool:
@@ -1115,7 +1188,7 @@ def get_attack_context(
     # attacker is already holding. This rule belongs in shared range legality so
     # large grapplers like crocodiles and giant toads use the same check.
     if weapon.locks_to_grappled_target:
-        grappled_targets = get_grappled_target_ids(state, attacker_id)
+        grappled_targets = get_active_grappled_target_ids(state, attacker_id)
         if grappled_targets and target_id not in grappled_targets:
             legal = False
             within_reach = False

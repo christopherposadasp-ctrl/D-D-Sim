@@ -49,6 +49,7 @@ from backend.engine.rules.spatial import (
     get_hide_passive_perception_dc,
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
+    is_active_grapple,
     get_unit_footprint,
 )
 from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
@@ -1378,7 +1379,12 @@ def apply_on_hit_effects(
                 )
             ]
             target.temporary_effects.append(
-                GrappledEffect(kind="grappled_by", source_id=attacker_id, escape_dc=escape_dc)
+                GrappledEffect(
+                    kind="grappled_by",
+                    source_id=attacker_id,
+                    escape_dc=escape_dc,
+                    maintain_reach_feet=weapon.reach or 5,
+                )
             )
 
             if effect.kind == "grapple_and_restrain":
@@ -1417,8 +1423,8 @@ def apply_on_hit_effects(
     return applied_riders, condition_deltas
 
 
-def target_is_grappled_by_attacker(target: UnitState, attacker_id: str) -> bool:
-    return any(effect.kind == "grappled_by" and effect.source_id == attacker_id for effect in target.temporary_effects)
+def target_is_grappled_by_attacker(state: EncounterState, target: UnitState, attacker_id: str) -> bool:
+    return is_active_grapple(state, attacker_id, target.id)
 
 
 def can_trigger_attack_reaction(unit: UnitState, reaction_id: str) -> bool:
@@ -1662,7 +1668,7 @@ def get_attack_mode(
     if has_harried_effect(target):
         advantage_sources.append("harried_target")
 
-    if weapon.advantage_against_self_grappled_target and target_is_grappled_by_attacker(target, attacker_id):
+    if weapon.advantage_against_self_grappled_target and target_is_grappled_by_attacker(state, target, attacker_id):
         advantage_sources.append("self_grappled_target")
 
     if attacker.faction == "goblins" and unit_has_trait(attacker, "bloodied_frenzy") and unit_is_bloodied(attacker):
