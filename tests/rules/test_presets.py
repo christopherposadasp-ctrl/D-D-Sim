@@ -54,6 +54,33 @@ def test_hobgoblin_kill_box_builds_eight_enemy_units() -> None:
     assert encounter.units["E8"].combat_role == "goblin_boss"
 
 
+def test_bugbear_dragnet_builds_controller_screen() -> None:
+    encounter = create_encounter(EncounterConfig(seed="bugbear-dragnet", enemy_preset_id="bugbear_dragnet"))
+
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "F1", "F2", "F3", "F4"]
+    assert encounter.units["E1"].combat_role == "bugbear_warrior"
+    assert encounter.units["E3"].combat_role == "goblin_boss"
+    assert encounter.units["E6"].combat_role == "hobgoblin_archer"
+
+
+def test_deadwatch_phalanx_builds_undead_armor_line() -> None:
+    encounter = create_encounter(EncounterConfig(seed="deadwatch-phalanx", enemy_preset_id="deadwatch_phalanx"))
+
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4"]
+    assert encounter.units["E1"].combat_role == "animated_armor"
+    assert encounter.units["E3"].combat_role == "zombie"
+    assert encounter.units["E5"].combat_role == "skeleton"
+
+
+def test_captains_crossfire_builds_leader_screen() -> None:
+    encounter = create_encounter(EncounterConfig(seed="captains-crossfire", enemy_preset_id="captains_crossfire"))
+
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "F1", "F2", "F3", "F4"]
+    assert encounter.units["E1"].combat_role == "guard"
+    assert encounter.units["E3"].combat_role == "bandit_captain"
+    assert encounter.units["E4"].combat_role == "noble"
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(
@@ -126,6 +153,51 @@ def test_predator_rampage_preset_runs_in_combined_batch_mode() -> None:
         EncounterConfig(
             seed="predator-rampage-combined-batch",
             enemy_preset_id="predator_rampage",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_bugbear_dragnet_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="bugbear-dragnet-combined-batch",
+            enemy_preset_id="bugbear_dragnet",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_deadwatch_phalanx_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="deadwatch-phalanx-combined-batch",
+            enemy_preset_id="deadwatch_phalanx",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_captains_crossfire_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="captains-crossfire-combined-batch",
+            enemy_preset_id="captains_crossfire",
             batch_size=1,
             player_behavior="balanced",
             monster_behavior="combined",

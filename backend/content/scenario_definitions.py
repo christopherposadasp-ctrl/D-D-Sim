@@ -73,6 +73,27 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         enemy_preset_id="predator_rampage",
         audit_expectation_ids=("dire_wolf_prone_rider", "worg_harry_target", "rampage_follow_up"),
     ),
+    "bugbear_dragnet": ScenarioDefinition(
+        scenario_id="bugbear_dragnet",
+        display_name="Bugbear Dragnet",
+        description=ENEMY_PRESETS["bugbear_dragnet"].description,
+        enemy_preset_id="bugbear_dragnet",
+        audit_expectation_ids=("bugbear_grapple", "goblin_boss_redirect_attack"),
+    ),
+    "deadwatch_phalanx": ScenarioDefinition(
+        scenario_id="deadwatch_phalanx",
+        display_name="Deadwatch Phalanx",
+        description=ENEMY_PRESETS["deadwatch_phalanx"].description,
+        enemy_preset_id="deadwatch_phalanx",
+        audit_expectation_ids=("animated_armor_multiattack", "undead_fortitude_triggered"),
+    ),
+    "captains_crossfire": ScenarioDefinition(
+        scenario_id="captains_crossfire",
+        display_name="Captain's Crossfire",
+        description=ENEMY_PRESETS["captains_crossfire"].description,
+        enemy_preset_id="captains_crossfire",
+        audit_expectation_ids=("bandit_captain_multiattack", "parry_reaction"),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS

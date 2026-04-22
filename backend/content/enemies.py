@@ -2288,6 +2288,52 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
+    "bugbear_dragnet": EnemyPresetDefinition(
+        preset_id="bugbear_dragnet",
+        display_name="Bugbear Dragnet",
+        description="Bugbears pin the front while a goblin boss and archers punish the approach lanes.",
+        units=(
+            EnemyPresetUnit("E1", "bugbear_warrior", GridPosition(x=10, y=6)),
+            EnemyPresetUnit("E2", "bugbear_warrior", GridPosition(x=10, y=10)),
+            EnemyPresetUnit("E3", "goblin_boss", GridPosition(x=13, y=8)),
+            EnemyPresetUnit("E4", "goblin_archer", GridPosition(x=14, y=7)),
+            EnemyPresetUnit("E5", "goblin_minion", GridPosition(x=14, y=9)),
+            EnemyPresetUnit("E6", "hobgoblin_archer", GridPosition(x=15, y=5)),
+            EnemyPresetUnit("E7", "hobgoblin_archer", GridPosition(x=15, y=11)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
+    "deadwatch_phalanx": EnemyPresetDefinition(
+        preset_id="deadwatch_phalanx",
+        display_name="Deadwatch Phalanx",
+        description="Animated armor and undead archers grind attackers down behind a rigid phalanx.",
+        units=(
+            EnemyPresetUnit("E1", "animated_armor", GridPosition(x=10, y=6)),
+            EnemyPresetUnit("E2", "animated_armor", GridPosition(x=10, y=10)),
+            EnemyPresetUnit("E3", "zombie", GridPosition(x=12, y=5)),
+            EnemyPresetUnit("E4", "zombie", GridPosition(x=12, y=11)),
+            EnemyPresetUnit("E5", "skeleton", GridPosition(x=14, y=4)),
+            EnemyPresetUnit("E6", "skeleton", GridPosition(x=14, y=7)),
+            EnemyPresetUnit("E7", "skeleton", GridPosition(x=14, y=10)),
+            EnemyPresetUnit("E8", "skeleton", GridPosition(x=14, y=13)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
+    "captains_crossfire": EnemyPresetDefinition(
+        preset_id="captains_crossfire",
+        display_name="Captain's Crossfire",
+        description="A veteran captain anchors a layered crossfire with guard screens and parrying nobles.",
+        units=(
+            EnemyPresetUnit("E1", "guard", GridPosition(x=10, y=7)),
+            EnemyPresetUnit("E2", "guard", GridPosition(x=10, y=9)),
+            EnemyPresetUnit("E3", "bandit_captain", GridPosition(x=11, y=8)),
+            EnemyPresetUnit("E4", "noble", GridPosition(x=12, y=6)),
+            EnemyPresetUnit("E5", "noble", GridPosition(x=12, y=10)),
+            EnemyPresetUnit("E6", "scout", GridPosition(x=14, y=4)),
+            EnemyPresetUnit("E7", "scout", GridPosition(x=14, y=12)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (

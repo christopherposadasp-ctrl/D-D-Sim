@@ -8,7 +8,7 @@ from backend.content.enemies import (
     get_enemy_variant,
 )
 from backend.content.player_loadouts import get_player_preset_unit_ids
-from backend.content.scenario_definitions import ACTIVE_SCENARIO_IDS, get_scenario_definition
+from backend.content.scenario_definitions import ACTIVE_SCENARIO_IDS, SCENARIO_DEFINITIONS, get_scenario_definition
 from backend.engine import create_encounter, run_batch, run_encounter, step_encounter
 from backend.engine.models.state import (
     BatchCombinationSummary,
@@ -213,6 +213,17 @@ def has_swallow_action(result: RunEncounterResult) -> bool:
     return False
 
 
+def has_target_role_resolved_total(result: RunEncounterResult, target_roles: set[str], key: str) -> bool:
+    for event in iter_events(result, "attack"):
+        if not event.target_ids:
+            continue
+        if not actor_has_role(result, event.target_ids[0], *target_roles):
+            continue
+        if event.resolved_totals.get(key):
+            return True
+    return False
+
+
 def has_phase_reaction(result: RunEncounterResult, reaction: str, actor_roles: set[str]) -> bool:
     for event in iter_events(result, "phase_change"):
         if not actor_has_role(result, event.actor_id, *actor_roles):
@@ -288,11 +299,35 @@ def build_signature_checks() -> dict[str, list[SignatureCheck]]:
             "rampageFollowUp",
             lambda result: has_phase_reaction(result, "rampage", {"gnoll_warrior", "giant_hyena"}),
         ),
+        "bugbear_grapple": SignatureCheck(
+            "bugbearGrapple",
+            lambda result: has_attack_rider(result, {"bugbear_warrior"}, "grapple_on_hit"),
+        ),
+        "goblin_boss_redirect_attack": SignatureCheck(
+            "goblinBossRedirectAttack",
+            lambda result: has_phase_reaction(result, "redirect_attack", {"goblin_boss"}),
+        ),
+        "animated_armor_multiattack": SignatureCheck(
+            "animatedArmorMultiattack",
+            lambda result: has_role_multiattack(result, {"animated_armor"}),
+        ),
+        "undead_fortitude_triggered": SignatureCheck(
+            "undeadFortitudeTriggered",
+            lambda result: has_target_role_resolved_total(result, {"zombie"}, "undeadFortitudeTriggered"),
+        ),
+        "bandit_captain_multiattack": SignatureCheck(
+            "banditCaptainMultiattack",
+            lambda result: has_role_multiattack(result, {"bandit_captain"}),
+        ),
+        "parry_reaction": SignatureCheck(
+            "parryReaction",
+            lambda result: has_phase_reaction(result, "parry", {"bandit_captain", "noble", "guard_captain"}),
+        ),
     }
 
     return {
         scenario_id: [signature_library[expectation_id] for expectation_id in get_scenario_definition(scenario_id).audit_expectation_ids]
-        for scenario_id in ACTIVE_SCENARIO_IDS
+        for scenario_id in SCENARIO_DEFINITIONS
     }
 
 
