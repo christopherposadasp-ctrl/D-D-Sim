@@ -5,7 +5,7 @@ from backend.engine import create_encounter
 from backend.engine.ai.decision import can_intentionally_provoke_opportunity_attack, choose_turn_decision
 from backend.engine.combat.engine import clear_turn_flags, resolve_attack_action
 from backend.engine.constants import ARCHER_GOBLIN_IDS, DEFAULT_POSITIONS, MELEE_GOBLIN_IDS
-from backend.engine.models.state import EncounterConfig, GridPosition, HiddenEffect, RageEffect, WeaponRange
+from backend.engine.models.state import EncounterConfig, GridPosition, HiddenEffect, NoReactionsEffect, RageEffect, WeaponRange
 from backend.engine.rules.spatial import can_attempt_hide_from_position
 from backend.engine.rules.combat_rules import AttackRollOverrides
 
@@ -328,6 +328,138 @@ def test_level2_dumb_monk_keeps_the_free_bonus_strike_and_does_not_spend_focus()
 
     assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
     assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+
+
+def test_smart_wizard_uses_fire_bolt_as_the_default_ranged_action() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-fire-bolt-smart",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+
+
+def test_smart_wizard_uses_shocking_grasp_and_retreats_when_pinned_by_one_enemy() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-shocking-grasp-smart",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "G1"}
+    assert decision.post_action_movement is not None
+
+
+def test_dumb_wizard_uses_shocking_grasp_opportunistically_without_retreat_plan() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-shocking-grasp-dumb",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "G1"}
+    assert decision.post_action_movement is None
+
+
+def test_smart_wizard_uses_magic_missile_to_avoid_adjacent_enemy_disadvantage_while_dumb_wizard_uses_fire_bolt() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-smart",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-dumb",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+
+    smart.units["G1"].current_hp = 8
+    dumb.units["G1"].current_hp = 8
+    smart.units["G1"].temporary_effects.append(
+        NoReactionsEffect(kind="no_reactions", source_id="F2", expires_at_turn_start_of="G1")
+    )
+    dumb.units["G1"].temporary_effects.append(
+        NoReactionsEffect(kind="no_reactions", source_id="F2", expires_at_turn_start_of="G1")
+    )
+    defeat_other_enemies(smart, "G1")
+    defeat_other_enemies(dumb, "G1")
+
+    smart_decision = choose_turn_decision(smart, "F1")
+    dumb_decision = choose_turn_decision(dumb, "F1")
+
+    assert smart_decision.action == {"kind": "cast_spell", "spell_id": "magic_missile", "target_id": "G1"}
+    assert dumb_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+
+
+def test_smart_wizard_repositions_for_ally_safe_burning_hands_cone() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-burning-hands-smart",
+            placements=build_trio_placements(
+                F1={"x": 5, "y": 5},
+                F2={"x": 6, "y": 5},
+                G1={"x": 7, "y": 4},
+                G2={"x": 7, "y": 5},
+            ),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1", "G2")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.path[-1] == GridPosition(x=5, y=4)
+    assert decision.action["kind"] == "cast_spell"
+    assert decision.action["spell_id"] == "burning_hands"
+
+
+def test_dumb_wizard_does_not_reposition_specifically_for_burning_hands() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-burning-hands-dumb",
+            placements=build_trio_placements(
+                F1={"x": 5, "y": 5},
+                F2={"x": 6, "y": 5},
+                G1={"x": 7, "y": 4},
+                G2={"x": 7, "y": 5},
+            ),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    defeat_other_enemies(encounter, "G1", "G2")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "cast_spell"
+    assert decision.action["spell_id"] == "fire_bolt"
 
 
 def test_barbarian_delays_rage_on_opening_dash_from_default_layout() -> None:

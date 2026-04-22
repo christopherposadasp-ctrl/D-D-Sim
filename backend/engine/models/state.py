@@ -194,6 +194,12 @@ class SlowEffect(CamelModel):
     penalty: int
 
 
+class NoReactionsEffect(CamelModel):
+    kind: Literal["no_reactions"]
+    source_id: str
+    expires_at_turn_start_of: str
+
+
 class HiddenEffect(CamelModel):
     kind: Literal["hidden"]
     source_id: str | None = None
@@ -204,6 +210,13 @@ class DodgingEffect(CamelModel):
     kind: Literal["dodging"]
     source_id: str
     expires_at_turn_start_of: str
+
+
+class ShieldEffect(CamelModel):
+    kind: Literal["shield"]
+    source_id: str
+    expires_at_turn_start_of: str
+    ac_bonus: int
 
 
 class InvisibleEffect(CamelModel):
@@ -265,8 +278,10 @@ class HarriedEffect(CamelModel):
 TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
+    | NoReactionsEffect
     | HiddenEffect
     | DodgingEffect
+    | ShieldEffect
     | InvisibleEffect
     | GrappledEffect
     | RestrainedEffect

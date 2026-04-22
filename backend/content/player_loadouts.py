@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
-from backend.content.class_progressions import get_class_progression
+from backend.content.class_progressions import get_class_progression, get_progression_scalar
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import (
     AbilityModifiers,
@@ -45,6 +45,8 @@ class PlayerLoadoutDefinition:
     default_ranged_weapon_id: str | None = None
     combat_skill_modifiers: dict[str, int] | None = None
     ac_formula_id: str | None = None
+    combat_cantrip_ids: tuple[str, ...] = ()
+    prepared_combat_spell_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ fighter_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=0, wis=-1, cha=
 rogue_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=1, wis=1, cha=-1)
 barbarian_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=0)
 monk_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=0, wis=2, cha=-1)
+wizard_ability_mods = AbilityModifiers(str=-1, dex=2, con=2, int=3, wis=1, cha=0)
 medium_footprint = Footprint(width=1, height=1)
 TRIO_PLAYER_IDS = ("F1", "F2", "F3")
 
@@ -188,6 +191,18 @@ player_weapons: dict[str, WeaponProfile] = {
         damage_modifier=3,
         damage_type="bludgeoning",
         kind="melee",
+    ),
+    "dagger": WeaponProfile(
+        id="dagger",
+        display_name="Dagger",
+        attack_bonus=4,
+        ability_modifier=2,
+        attack_ability="dex",
+        damage_dice=[DiceSpec(count=1, sides=4)],
+        damage_modifier=2,
+        damage_type="piercing",
+        kind="melee",
+        finesse=True,
     ),
 }
 
@@ -446,6 +461,28 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_melee_weapon_id="shortsword",
         medicine_modifier=2,
     ),
+    "wizard_sample_build": PlayerLoadoutDefinition(
+        loadout_id="wizard_sample_build",
+        display_name="Level 1 Wizard Sample Build",
+        class_id="wizard",
+        level=1,
+        template_name="Level 1 Wizard Sample Build",
+        behavior_profile="arcane_artillery",
+        max_hp=8,
+        ac=12,
+        speed=30,
+        initiative_mod=2,
+        passive_perception=11,
+        ability_mods=wizard_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={"dagger": player_weapons["dagger"]},
+        role_tags=("caster",),
+        medicine_modifier=1,
+        default_melee_weapon_id="dagger",
+        combat_cantrip_ids=("fire_bolt", "shocking_grasp"),
+        prepared_combat_spell_ids=("magic_missile", "shield", "burning_hands"),
+    ),
 }
 
 PLAYER_LOADOUTS.update(
@@ -587,6 +624,12 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             PlayerPresetUnit(unit_id=fighter_id, loadout_id="monk_level2_sample_build") for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "wizard_sample_trio": PlayerPresetDefinition(
+        preset_id="wizard_sample_trio",
+        display_name="Level 1 Wizard Trio",
+        description="Three level 1 wizards with direct damage, melee escape, Shield, and Burning Hands pressure.",
+        units=tuple(PlayerPresetUnit(unit_id=fighter_id, loadout_id="wizard_sample_build") for fighter_id in TRIO_PLAYER_IDS),
+    ),
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
@@ -626,6 +669,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "barbarian_level2_sample_trio",
     "monk_sample_trio",
     "monk_level2_sample_trio",
+    "wizard_sample_trio",
     "martial_mixed_party",
 )
 
@@ -703,6 +747,7 @@ def build_legacy_resource_state(resource_pools: dict[str, int]) -> ResourceState
         action_surge_uses=resource_pools.get("action_surge", 0),
         focus_points=resource_pools.get("focus_points", 0),
         uncanny_metabolism_uses=resource_pools.get("uncanny_metabolism", 0),
+        spell_slots_level_1=resource_pools.get("spell_slots_level_1", 0),
     )
 
 
@@ -744,6 +789,14 @@ def create_player_unit(unit_id: str, loadout_id: str) -> UnitState:
         resource_pools=resource_pools,
         behavior_profile=loadout.behavior_profile,
         combat_skill_modifiers=deepcopy(loadout.combat_skill_modifiers or {}),
+        combat_cantrip_ids=list(loadout.combat_cantrip_ids),
+        prepared_combat_spell_ids=list(loadout.prepared_combat_spell_ids),
+        cantrips_known=get_progression_scalar(loadout.class_id, loadout.level, "cantrips_known", 0),
+        spellbook_spells=get_progression_scalar(loadout.class_id, loadout.level, "spellbook_spells", 0),
+        prepared_spells=get_progression_scalar(loadout.class_id, loadout.level, "prepared_spells", 0),
+        damage_resistances=(),
+        damage_immunities=(),
+        damage_vulnerabilities=(),
     )
 
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from backend.content.enemies import unit_has_trait
 from backend.engine.models.state import EncounterState, Faction, Footprint, GridPosition, TerrainFeature, UnitState, WeaponProfile
-from backend.engine.utils.helpers import unit_sort_key
+from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 
 GRID_SIZE = 15
 SINGLE_SQUARE_FOOTPRINT = Footprint(width=1, height=1)
@@ -484,7 +484,7 @@ def get_opportunity_attack_threats_for_path(
         next_position = path[path_index]
 
         for unit in threatening_units:
-            if unit.current_hp <= 0 or unit.conditions.dead or not unit.reaction_available or not unit.position:
+            if not unit_can_take_reactions(unit) or not unit.position:
                 continue
 
             melee_weapon = next((weapon for weapon in unit.attacks.values() if weapon and weapon.kind == "melee"), None)

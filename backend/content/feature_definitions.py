@@ -142,6 +142,24 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Initiative-time monk recovery that restores Focus and heals when the monk starts an encounter worn down.",
     ),
+    "spellcasting": FeatureDefinition(
+        feature_id="spellcasting",
+        display_name="Spellcasting",
+        kind="class_feature",
+        description="Level 1 wizard spellcasting with prepared spell counts, cantrips, and first-level spell slots.",
+    ),
+    "ritual_adept": FeatureDefinition(
+        feature_id="ritual_adept",
+        display_name="Ritual Adept",
+        kind="class_feature",
+        description="Wizard ritual casting support tracked as level 1 metadata for future non-combat magic.",
+    ),
+    "arcane_recovery": FeatureDefinition(
+        feature_id="arcane_recovery",
+        display_name="Arcane Recovery",
+        kind="class_feature",
+        description="Wizard short-rest slot recovery tracked as metadata; live encounter actions do not use it yet.",
+    ),
     "ki": FeatureDefinition(
         feature_id="ki",
         display_name="Ki",

@@ -11,12 +11,14 @@ from backend.engine.models.state import (
     AttackId,
     EncounterState,
     GridPosition,
+    NoReactionsEffect,
     ResolvedPlayerBehavior,
     RoleTag,
     UnitState,
     WeaponProfile,
     WeaponRange,
 )
+from backend.engine.rules.combat_rules import choose_burning_hands_targeting
 from backend.engine.rules.spatial import (
     PositionIndex,
     ReachableSquare,
@@ -32,7 +34,7 @@ from backend.engine.rules.spatial import (
     get_units_with_positions,
     path_provokes_opportunity_attack,
 )
-from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious
+from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions
 
 
 @dataclass
@@ -1140,6 +1142,7 @@ def build_ranged_attack_plan(
 
 def build_spell_attack_context_profile(spell_id: str) -> WeaponProfile:
     spell = get_spell_definition(spell_id)
+    is_melee_spell = spell.targeting_mode == "melee_spell_attack"
     return WeaponProfile(
         id=spell_id,
         display_name=spell.display_name,
@@ -1147,8 +1150,9 @@ def build_spell_attack_context_profile(spell_id: str) -> WeaponProfile:
         ability_modifier=0,
         damage_dice=[],
         damage_modifier=0,
-        kind="ranged",
-        range=WeaponRange(normal=spell.range_feet, long=spell.range_feet),
+        kind="melee" if is_melee_spell else "ranged",
+        reach=spell.range_feet if is_melee_spell else None,
+        range=None if is_melee_spell else WeaponRange(normal=spell.range_feet, long=spell.range_feet),
     )
 
 
@@ -1415,6 +1419,100 @@ def build_player_spell_attack_decision(
     return None
 
 
+def build_burning_hands_decision(
+    state: EncounterState,
+    actor: UnitState,
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> TurnDecision | None:
+    if not actor.position or not can_cast_combat_spell(actor, "burning_hands"):
+        return None
+
+    candidate_squares = (
+        get_safe_reachable_squares(state, actor.id, move_squares, False, position_index)
+        if state.player_behavior == "smart"
+        else [ReachableSquare(position=actor.position, path=[actor.position], distance=0)]
+    )
+    candidate_options: list[tuple[ReachableSquare, object]] = []
+
+    for square in candidate_squares:
+        targeting = choose_burning_hands_targeting(
+            state,
+            actor.id,
+            actor_position=square.position,
+        )
+        if not targeting:
+            continue
+        if len(targeting.enemy_target_ids) < 2 or len(targeting.ally_target_ids) > 0:
+            continue
+        candidate_options.append((square, targeting))
+
+    if not candidate_options:
+        return None
+
+    best_square, best_targeting = sorted(
+        candidate_options,
+        key=lambda item: (
+            -len(item[1].enemy_target_ids),
+            item[0].distance,
+            sum(state.units[target_id].current_hp for target_id in item[1].enemy_target_ids),
+            item[0].position.x,
+            item[0].position.y,
+            item[1].primary_target_id,
+        ),
+    )[0]
+
+    return TurnDecision(
+        pre_action_movement=MovementPlan(path=best_square.path, mode="move") if best_square.distance > 0 else None,
+        action={"kind": "cast_spell", "spell_id": "burning_hands", "target_id": best_targeting.primary_target_id},
+    )
+
+
+def build_shocking_grasp_decision(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+    move_squares: int,
+) -> TurnDecision | None:
+    if not actor.position or not can_cast_combat_spell(actor, "shocking_grasp"):
+        return None
+
+    adjacent_threats = [
+        target
+        for target in sort_player_melee_targets(state, actor, conscious_enemies, state.player_behavior)
+        if target.position and get_distance_between_units(actor, target) <= 1 and unit_can_take_reactions(target)
+    ]
+    if not adjacent_threats:
+        return None
+
+    if state.player_behavior == "dumb":
+        return TurnDecision(action={"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": adjacent_threats[0].id})
+
+    if len(adjacent_threats) != 1:
+        return None
+
+    target = adjacent_threats[0]
+    projected_state = state.model_copy(deep=True)
+    projected_actor = projected_state.units[actor.id]
+    projected_target = projected_state.units[target.id]
+    projected_target.temporary_effects = [
+        effect
+        for effect in projected_target.temporary_effects
+        if not (effect.kind == "no_reactions" and effect.source_id == actor.id)
+    ]
+    projected_target.temporary_effects.append(
+        NoReactionsEffect(kind="no_reactions", source_id=actor.id, expires_at_turn_start_of=target.id)
+    )
+    retreat_plan = build_post_action_retreat(projected_state, projected_actor, projected_actor.position, move_squares)
+    if not retreat_plan:
+        return None
+
+    return TurnDecision(
+        action={"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": target.id},
+        post_action_movement=retreat_plan,
+    )
+
+
 def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, conscious_enemies: list[UnitState]) -> str | None:
     if not actor.position or not can_cast_combat_spell(actor, "magic_missile"):
         return None
@@ -1460,6 +1558,14 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     has_adjacent_enemy = any(
         actor.position and target.position and get_distance_between_units(actor, target) <= 1 for target in conscious_enemies
     )
+
+    shocking_grasp_decision = build_shocking_grasp_decision(state, actor, conscious_enemies, move_squares)
+    if shocking_grasp_decision:
+        return shocking_grasp_decision
+
+    burning_hands_decision = build_burning_hands_decision(state, actor, move_squares, position_index)
+    if burning_hands_decision:
+        return burning_hands_decision
 
     magic_missile_target_id = choose_magic_missile_target_id(state, actor, conscious_enemies)
     if magic_missile_target_id:

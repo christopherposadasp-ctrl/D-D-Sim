@@ -39,6 +39,16 @@ def is_unit_conscious(unit: UnitState) -> bool:
     return unit.current_hp > 0 and not unit.conditions.dead and not unit.conditions.unconscious
 
 
+def unit_can_take_reactions(unit: UnitState) -> bool:
+    return (
+        unit.current_hp > 0
+        and not unit.conditions.dead
+        and not unit.conditions.unconscious
+        and unit.reaction_available
+        and not any(effect.kind == "no_reactions" for effect in unit.temporary_effects)
+    )
+
+
 def is_unit_dying(unit: UnitState) -> bool:
     return unit.current_hp == 0 and not unit.stable and not unit.conditions.dead
 

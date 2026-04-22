@@ -141,6 +141,35 @@ def test_level2_monk_sample_build_uses_focus_registry_metadata() -> None:
     assert monk.resource_pools == {"focus_points": 2, "uncanny_metabolism": 1}
 
 
+def test_wizard_sample_build_uses_spellcasting_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="wizard_sample_trio",
+        )
+    )
+    wizard = encounter.units["F1"]
+
+    assert wizard.class_id == "wizard"
+    assert wizard.level == 1
+    assert wizard.loadout_id == "wizard_sample_build"
+    assert wizard.behavior_profile == "arcane_artillery"
+    assert wizard.ac == 12
+    assert wizard.max_hp == 8
+    assert wizard.role_tags == ["caster"]
+    assert wizard.resources.spell_slots_level_1 == 2
+    assert wizard.combat_cantrip_ids == ["fire_bolt", "shocking_grasp"]
+    assert wizard.prepared_combat_spell_ids == ["magic_missile", "shield", "burning_hands"]
+    assert wizard.cantrips_known == 3
+    assert wizard.spellbook_spells == 6
+    assert wizard.prepared_spells == 4
+    assert "spellcasting" in wizard.feature_ids
+    assert "ritual_adept" in wizard.feature_ids
+    assert "arcane_recovery" in wizard.feature_ids
+    assert wizard.resource_pools == {"spell_slots_level_1": 2}
+
+
 def test_runtime_player_metadata_stays_out_of_live_api_payload() -> None:
     encounter = create_encounter(EncounterConfig(seed="player-registry-transport", placements=DEFAULT_POSITIONS))
     fighter = encounter.units["F1"]
@@ -154,6 +183,11 @@ def test_runtime_player_metadata_stays_out_of_live_api_payload() -> None:
     assert "resourcePools" not in payload
     assert "behaviorProfile" not in payload
     assert "combatSkillModifiers" not in payload
+    assert "combatCantripIds" not in payload
+    assert "preparedCombatSpellIds" not in payload
+    assert "cantripsKnown" not in payload
+    assert "spellbookSpells" not in payload
+    assert "preparedSpells" not in payload
 
 
 def test_player_attack_action_resolves_through_progression_metadata() -> None:
@@ -194,11 +228,26 @@ def test_monk_attack_action_uses_shortsword_and_unarmed_strike_choices() -> None
     assert tuple(sorted(attack_action.steps[0].allowed_weapon_ids)) == ("shortsword", "unarmed_strike")
 
 
+def test_wizard_attack_action_uses_dagger_fallback_choice() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-attack-action",
+            placements=build_trio_placements(),
+            player_preset_id="wizard_sample_trio",
+        )
+    )
+    attack_action = build_player_attack_action(encounter.units["F1"])
+
+    assert attack_action.action_id == "attack"
+    assert len(attack_action.steps) == 1
+    assert tuple(sorted(attack_action.steps[0].allowed_weapon_ids)) == ("dagger",)
+
+
 def test_player_catalog_reports_current_supported_sample_party() -> None:
     catalog = get_player_catalog()
 
     assert catalog.default_player_preset_id == "martial_mixed_party"
-    assert [entry.id for entry in catalog.classes] == ["barbarian", "fighter", "monk", "rogue"]
+    assert [entry.id for entry in catalog.classes] == ["barbarian", "fighter", "monk", "rogue", "wizard"]
     assert [entry.id for entry in catalog.loadouts] == [
         "barbarian_sample_build",
         "barbarian_level2_sample_build",
@@ -212,6 +261,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "rogue_melee_level2_sample_build",
         "rogue_ranged_level2_benchmark_archer",
         "rogue_ranged_level2_sample_build",
+        "wizard_sample_build",
     ]
     assert [entry.id for entry in catalog.player_presets] == [
         "fighter_sample_trio",
@@ -224,6 +274,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "barbarian_level2_sample_trio",
         "monk_sample_trio",
         "monk_level2_sample_trio",
+        "wizard_sample_trio",
         "martial_mixed_party",
     ]
     assert {entry.id: entry.max_supported_level for entry in catalog.classes} == {
@@ -231,6 +282,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "fighter": 2,
         "monk": 2,
         "rogue": 2,
+        "wizard": 1,
     }
 
 

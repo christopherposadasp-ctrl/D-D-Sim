@@ -20,15 +20,18 @@ from backend.engine.models.state import (
     DamageDetails,
     DodgingEffect,
     EncounterState,
+    GridPosition,
     GrappledEffect,
     HarriedEffect,
     HiddenEffect,
     MasteryType,
     MovementDetails,
+    NoReactionsEffect,
     RageEffect,
     RecklessAttackEffect,
     RestrainedEffect,
     SapEffect,
+    ShieldEffect,
     SlowEffect,
     TemporaryEffect,
     UnitState,
@@ -41,12 +44,14 @@ from backend.engine.rules.spatial import (
     build_position_index,
     can_attempt_hide_from_position,
     find_advance_path,
+    get_line_squares,
     get_attack_context,
     get_hide_passive_perception_dc,
     get_min_chebyshev_distance_between_footprints,
+    get_occupied_squares_for_position,
     get_unit_footprint,
 )
-from backend.engine.utils.helpers import unit_sort_key
+from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 from backend.engine.utils.rng import roll_die
 
 
@@ -56,11 +61,13 @@ class AttackRollOverrides:
         *,
         attack_rolls: list[int] | None = None,
         damage_rolls: list[int] | None = None,
+        save_rolls: list[int] | None = None,
         savage_damage_rolls: list[int] | None = None,
         advantage_damage_rolls: list[int] | None = None,
     ) -> None:
         self.attack_rolls = attack_rolls or []
         self.damage_rolls = damage_rolls or []
+        self.save_rolls = save_rolls or []
         self.savage_damage_rolls = savage_damage_rolls or []
         self.advantage_damage_rolls = advantage_damage_rolls or []
 
@@ -260,6 +267,7 @@ def unit_has_combat_spell(unit: UnitState, spell_id: str) -> bool:
 def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProfile:
     spell = get_spell_definition(spell_id)
     spell_attack_bonus = 2 + get_ability_modifier(attacker, spell.attack_ability or "int")
+    is_melee_spell = spell.targeting_mode == "melee_spell_attack"
     return WeaponProfile(
         id=spell_id,
         display_name=spell.display_name,
@@ -268,9 +276,27 @@ def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProf
         damage_dice=list(spell.damage_dice),
         damage_modifier=spell.damage_modifier,
         damage_type=spell.damage_type,
-        kind="ranged",
-        range=WeaponRange(normal=spell.range_feet, long=spell.range_feet),
+        kind="melee" if is_melee_spell else "ranged",
+        reach=spell.range_feet if is_melee_spell else None,
+        range=None if is_melee_spell else WeaponRange(normal=spell.range_feet, long=spell.range_feet),
     )
+
+
+def get_spell_save_dc(caster: UnitState, spell_id: str) -> int:
+    spell = get_spell_definition(spell_id)
+    return 8 + 2 + get_ability_modifier(caster, spell.attack_ability or "int")
+
+
+def unit_has_no_reactions_effect(unit: UnitState) -> bool:
+    return any(effect.kind == "no_reactions" for effect in unit.temporary_effects)
+
+
+def unit_has_shield_effect(unit: UnitState) -> bool:
+    return any(effect.kind == "shield" for effect in unit.temporary_effects)
+
+
+def get_shield_ac_bonus(unit: UnitState) -> int:
+    return sum(effect.ac_bonus for effect in unit.temporary_effects if effect.kind == "shield")
 
 
 def has_danger_sense(unit: UnitState) -> bool:
@@ -1399,12 +1425,163 @@ def can_trigger_attack_reaction(unit: UnitState, reaction_id: str) -> bool:
     return (
         unit.faction == "goblins"
         and
-        unit.current_hp > 0
-        and not unit.conditions.dead
-        and not unit.conditions.unconscious
-        and unit.reaction_available
+        unit_can_take_reactions(unit)
         and unit_has_reaction(unit, reaction_id)
     )
+
+
+def can_cast_shield_reaction(unit: UnitState) -> bool:
+    return (
+        unit_can_take_reactions(unit)
+        and not unit_has_shield_effect(unit)
+        and unit_has_combat_spell(unit, "shield")
+        and unit.resources.spell_slots_level_1 > 0
+    )
+
+
+def maybe_apply_shield_reaction(
+    state: EncounterState,
+    *,
+    attacker_id: str,
+    target_id: str,
+    trigger: str,
+    attack_total: int | None = None,
+    target_ac: int | None = None,
+    natural_twenty: bool = False,
+) -> dict[str, int | str] | None:
+    _ = attacker_id
+    target = state.units[target_id]
+    shield_spell = get_spell_definition("shield")
+    if not can_cast_shield_reaction(target):
+        return None
+
+    should_cast = trigger == "magic_missile"
+    if trigger == "attack_hit":
+        if attack_total is None or target_ac is None:
+            return None
+        if state.player_behavior == "smart":
+            should_cast = (not natural_twenty) and attack_total < (target_ac + shield_spell.ac_bonus)
+        else:
+            should_cast = True
+
+    if not should_cast:
+        return None
+
+    if not target.resources.spend_pool("spell_slots_level_1", 1):
+        return None
+
+    target.reaction_available = False
+    target.temporary_effects = [effect for effect in target.temporary_effects if effect.kind != "shield"]
+    target.temporary_effects.append(
+        ShieldEffect(
+            kind="shield",
+            source_id=target_id,
+            expires_at_turn_start_of=target_id,
+            ac_bonus=shield_spell.ac_bonus,
+        )
+    )
+    return {
+        "defenseReaction": "shield",
+        "defenseReactionActorId": target_id,
+        "defenseReactionTrigger": trigger,
+        "shieldAcBonus": shield_spell.ac_bonus,
+        "reactionSpellSlotsLevel1Remaining": target.resources.spell_slots_level_1,
+    }
+
+
+@dataclass(frozen=True)
+class BurningHandsTargeting:
+    primary_target_id: str
+    target_ids: tuple[str, ...]
+    enemy_target_ids: tuple[str, ...]
+    ally_target_ids: tuple[str, ...]
+
+
+BURNING_HANDS_CONE_ENDPOINTS: dict[str, tuple[tuple[int, int], ...]] = {
+    "n": ((-1, -3), (0, -3), (1, -3)),
+    "ne": ((1, -3), (3, -3), (3, -1)),
+    "e": ((3, -1), (3, 0), (3, 1)),
+    "se": ((1, 3), (3, 1), (3, 3)),
+    "s": ((-1, 3), (0, 3), (1, 3)),
+    "sw": ((-3, 1), (-3, 3), (-1, 3)),
+    "w": ((-3, -1), (-3, 0), (-3, 1)),
+    "nw": ((-3, -3), (-3, -1), (-1, -3)),
+}
+
+
+def get_burning_hands_cone_squares(origin: GridPosition, direction: str) -> list[GridPosition]:
+    square_keys: set[tuple[int, int]] = set()
+    for delta_x, delta_y in BURNING_HANDS_CONE_ENDPOINTS[direction]:
+        endpoint = GridPosition(x=origin.x + delta_x, y=origin.y + delta_y)
+        for square in get_line_squares(origin, endpoint)[1:]:
+            square_keys.add((square.x, square.y))
+    return [GridPosition(x=x, y=y) for x, y in sorted(square_keys)]
+
+
+def choose_burning_hands_targeting(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    actor_position: GridPosition | None = None,
+    required_primary_target_id: str | None = None,
+) -> BurningHandsTargeting | None:
+    actor = state.units[actor_id]
+    origin = actor_position or actor.position
+    if not origin:
+        return None
+
+    viable: list[BurningHandsTargeting] = []
+    live_units = [
+        unit
+        for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id))
+        if unit.position and not unit.conditions.dead
+    ]
+
+    for direction in sorted(BURNING_HANDS_CONE_ENDPOINTS):
+        cone_square_keys = {(square.x, square.y) for square in get_burning_hands_cone_squares(origin, direction)}
+        hit_units = [
+            unit
+            for unit in live_units
+            if any(
+                (occupied_square.x, occupied_square.y) in cone_square_keys
+                for occupied_square in get_occupied_squares_for_position(unit.position, get_unit_footprint(unit))
+            )
+        ]
+        if not hit_units:
+            continue
+
+        if required_primary_target_id and all(unit.id != required_primary_target_id for unit in hit_units):
+            continue
+
+        sorted_target_ids = tuple(unit.id for unit in hit_units)
+        enemy_target_ids = tuple(unit.id for unit in hit_units if unit.faction != actor.faction)
+        ally_target_ids = tuple(unit.id for unit in hit_units if unit.faction == actor.faction and unit.id != actor_id)
+        if not enemy_target_ids:
+            continue
+
+        primary_target_id = required_primary_target_id or sorted(enemy_target_ids, key=unit_sort_key)[0]
+        viable.append(
+            BurningHandsTargeting(
+                primary_target_id=primary_target_id,
+                target_ids=sorted_target_ids,
+                enemy_target_ids=enemy_target_ids,
+                ally_target_ids=ally_target_ids,
+            )
+        )
+
+    if not viable:
+        return None
+
+    return sorted(
+        viable,
+        key=lambda targeting: (
+            -len(targeting.enemy_target_ids),
+            len(targeting.ally_target_ids),
+            sum(state.units[target_id].current_hp for target_id in targeting.enemy_target_ids),
+            targeting.primary_target_id,
+            targeting.target_ids,
+        ),
+    )[0]
 
 
 def choose_redirect_attack_ally(state: EncounterState, reactor_id: str) -> UnitState | None:
@@ -1601,8 +1778,23 @@ def resolve_ranged_spell_attack(
     resolved_target_id = target_id
     reaction_actor_id: str | None = None
     attack_reaction: str | None = None
-    target_ac = target.ac + attack_context.cover_ac_bonus
+    defense_reaction_data: dict[str, int | str] | None = None
+    target_ac = target.ac + attack_context.cover_ac_bonus + get_shield_ac_bonus(target)
     hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+
+    if hit:
+        defense_reaction_data = maybe_apply_shield_reaction(
+            state,
+            attacker_id=attacker_id,
+            target_id=target_id,
+            trigger="attack_hit",
+            attack_total=attack_total,
+            target_ac=target_ac,
+            natural_twenty=natural_twenty,
+        )
+        if defense_reaction_data:
+            target_ac += int(defense_reaction_data["shieldAcBonus"])
+            hit = natural_twenty or (not natural_one and attack_total >= target_ac)
 
     if hit and can_trigger_attack_reaction(target, "redirect_attack"):
         redirect_target = choose_redirect_attack_ally(state, target_id)
@@ -1616,10 +1808,24 @@ def resolve_ranged_spell_attack(
             resolved_target_id = redirect_target.id
             target = redirect_target
             attack_context = get_attack_context(state, attacker_id, resolved_target_id, weapon)
-            target_ac = target.ac + attack_context.cover_ac_bonus
+            target_ac = target.ac + attack_context.cover_ac_bonus + get_shield_ac_bonus(target)
             hit = attack_context.legal and (natural_twenty or (not natural_one and attack_total >= target_ac))
             reaction_actor_id = target_id
             attack_reaction = "redirect_attack"
+
+    if (
+        not attack_reaction
+        and hit
+        and weapon.kind == "melee"
+        and can_trigger_attack_reaction(target, "parry")
+        and not natural_twenty
+        and attack_total < (target_ac + 2)
+    ):
+        target.reaction_available = False
+        target_ac += 2
+        hit = False
+        reaction_actor_id = target.id
+        attack_reaction = "parry"
 
     critical = hit and natural_twenty
     primary_candidate: DamageCandidate | None = None
@@ -1634,6 +1840,8 @@ def resolve_ranged_spell_attack(
 
     if attack_reaction == "redirect_attack":
         condition_deltas.append(f"{target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
+    elif attack_reaction == "parry" and reaction_actor_id:
+        condition_deltas.append(f"{reaction_actor_id} uses Parry and adds 2 AC against this attack.")
 
     condition_deltas.extend(end_hidden(attacker, reason=f"{attacker_id} is no longer hidden after attacking."))
 
@@ -1649,6 +1857,25 @@ def resolve_ranged_spell_attack(
         final_damage_to_hp = damage_result.final_damage_to_hp
         hp_delta = damage_result.hp_delta
         condition_deltas.extend(damage_result.condition_deltas)
+        if (
+            spell.on_hit_effect_kind == "no_reactions"
+            and state.units[resolved_target_id].current_hp > 0
+            and not state.units[resolved_target_id].conditions.dead
+        ):
+            shocked_target = state.units[resolved_target_id]
+            shocked_target.temporary_effects = [
+                effect
+                for effect in shocked_target.temporary_effects
+                if not (effect.kind == "no_reactions" and effect.source_id == attacker_id)
+            ]
+            shocked_target.temporary_effects.append(
+                NoReactionsEffect(
+                    kind="no_reactions",
+                    source_id=attacker_id,
+                    expires_at_turn_start_of=resolved_target_id,
+                )
+            )
+            condition_deltas.append(f"{resolved_target_id} cannot take reactions until the start of its next turn.")
 
     if sap_consumed > 0:
         condition_deltas.append(f"{attacker_id}'s sap disadvantage is consumed on this attack roll.")
@@ -1684,6 +1911,8 @@ def resolve_ranged_spell_attack(
             "originalTargetId": target_id,
             "attackReaction": attack_reaction,
             "reactionActorId": reaction_actor_id,
+            "shieldAcBonus": get_shield_ac_bonus(target),
+            **(defense_reaction_data or {}),
         },
         movement_details=None,
         damage_details=DamageDetails(
@@ -1734,18 +1963,43 @@ def resolve_magic_missile(
     if not attacker.resources.spend_pool("spell_slots_level_1", 1):
         return build_spell_skip_event(state, attacker_id, "magic_missile", "No level 1 spell slots remain.")
 
-    damage_overrides = AttackRollOverrides(damage_rolls=list(overrides.damage_rolls if overrides else []))
-    primary_candidate = roll_damage_candidate(state, weapon, damage_overrides.damage_rolls)
-    final_damage_components = build_final_damage_components(primary_candidate, None, 1)
-    damage_result = apply_damage(state, target_id, final_damage_components, False)
-    total_damage = sum(component.total_damage for component in final_damage_components)
-    condition_deltas = list(damage_result.condition_deltas)
+    target = state.units[target_id]
+    defense_reaction_data = (
+        maybe_apply_shield_reaction(state, attacker_id=attacker_id, target_id=target_id, trigger="magic_missile")
+        if not unit_has_shield_effect(target)
+        else None
+    )
+    blocked_by_shield = unit_has_shield_effect(state.units[target_id])
+
+    primary_candidate: DamageCandidate | None = None
+    final_damage_components: list[DamageComponentResult] = []
+    total_damage = 0
+    damage_result = DamageApplicationResult(
+        hp_delta=0,
+        condition_deltas=[],
+        resisted_damage=0,
+        amplified_damage=0,
+        temporary_hp_absorbed=0,
+        final_damage_to_hp=0,
+        final_total_damage=0,
+    )
+    condition_deltas: list[str] = []
+
+    if blocked_by_shield:
+        condition_deltas.append(f"{target_id}'s Shield blocks Magic Missile.")
+    else:
+        damage_overrides = AttackRollOverrides(damage_rolls=list(overrides.damage_rolls if overrides else []))
+        primary_candidate = roll_damage_candidate(state, weapon, damage_overrides.damage_rolls)
+        final_damage_components = build_final_damage_components(primary_candidate, None, 1)
+        damage_result = apply_damage(state, target_id, final_damage_components, False)
+        total_damage = sum(component.total_damage for component in final_damage_components)
+        condition_deltas = list(damage_result.condition_deltas)
 
     return CombatEvent(
         **event_base(state, attacker_id),
         target_ids=[target_id],
         event_type="attack",
-        raw_rolls={"damageRolls": primary_candidate.raw_rolls},
+        raw_rolls={"damageRolls": primary_candidate.raw_rolls if primary_candidate else []},
         resolved_totals={
             "spellId": "magic_missile",
             "spellLevel": 1,
@@ -1754,6 +2008,8 @@ def resolve_magic_missile(
             "distanceSquares": attack_context.distance_squares,
             "distanceFeet": attack_context.distance_feet,
             "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+            "blockedByShield": blocked_by_shield,
+            **(defense_reaction_data or {}),
         },
         movement_details=None,
         damage_details=DamageDetails(
@@ -1779,11 +2035,153 @@ def resolve_magic_missile(
         ),
         condition_deltas=condition_deltas,
         text_summary=(
-            f"{attacker_id} casts {spell.display_name} at {target_id} for {total_damage} damage"
-            f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
-            f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+            f"{attacker_id} casts {spell.display_name} at {target_id}, but Shield blocks it."
+            if blocked_by_shield
+            else (
+                f"{attacker_id} casts {spell.display_name} at {target_id} for {total_damage} damage"
+                f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+            )
         ),
     )
+
+
+def build_burning_hands_damage_component(
+    base_rolls: list[int],
+    applied_damage: int,
+    damage_type: str,
+) -> list[DamageComponentResult]:
+    return [
+        DamageComponentResult(
+            damage_type=damage_type,
+            raw_rolls=list(base_rolls),
+            adjusted_rolls=list(base_rolls),
+            subtotal=sum(base_rolls),
+            flat_modifier=0,
+            total_damage=applied_damage,
+        )
+    ]
+
+
+def resolve_burning_hands(
+    state: EncounterState,
+    attacker_id: str,
+    target_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    attacker = state.units[attacker_id]
+    spell = get_spell_definition("burning_hands")
+
+    if not unit_has_combat_spell(attacker, "burning_hands"):
+        return [build_spell_skip_event(state, attacker_id, "burning_hands", "is not prepared.")]
+    if not attacker.position:
+        return [build_spell_skip_event(state, attacker_id, "burning_hands", "requires a map position.")]
+
+    targeting = choose_burning_hands_targeting(state, attacker_id, required_primary_target_id=target_id)
+    if not targeting:
+        return [build_spell_skip_event(state, attacker_id, "burning_hands", "has no legal cone from the current position.")]
+    if not attacker.resources.spend_pool("spell_slots_level_1", 1):
+        return [build_spell_skip_event(state, attacker_id, "burning_hands", "No level 1 spell slots remain.")]
+
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    damage_rolls = [pull_die(state, 6, damage_rolls_override.pop(0) if damage_rolls_override else None) for _ in range(3)]
+    full_damage = sum(damage_rolls)
+    save_dc = get_spell_save_dc(attacker, "burning_hands")
+
+    events = [
+        CombatEvent(
+            **event_base(state, attacker_id),
+            target_ids=list(targeting.target_ids),
+            event_type="phase_change",
+            raw_rolls={},
+            resolved_totals={
+                "spellId": "burning_hands",
+                "spellLevel": 1,
+                "enemyTargetCount": len(targeting.enemy_target_ids),
+                "allyTargetCount": len(targeting.ally_target_ids),
+                "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+            },
+            movement_details=None,
+            damage_details=None,
+            condition_deltas=[],
+            text_summary=(
+                f"{attacker_id} casts {spell.display_name}, catching "
+                f"{len(targeting.enemy_target_ids)} enemies and {len(targeting.ally_target_ids)} allies."
+            ),
+        )
+    ]
+
+    for resolved_target_id in targeting.target_ids:
+        target = state.units[resolved_target_id]
+        save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "dex")
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [
+            save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))
+        ]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=resolved_target_id,
+                ability=spell.save_ability or "dex",
+                dc=save_dc,
+                reason=spell.display_name,
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        applied_damage = full_damage // 2 if save_success and spell.half_on_success else full_damage
+        damage_components = build_burning_hands_damage_component(damage_rolls, applied_damage, spell.damage_type)
+        damage_result = apply_damage(state, resolved_target_id, damage_components, False)
+        events.append(save_event)
+        events.append(
+            CombatEvent(
+                **event_base(state, attacker_id),
+                target_ids=[resolved_target_id],
+                event_type="attack",
+                raw_rolls={"damageRolls": list(damage_rolls)},
+                resolved_totals={
+                    "spellId": "burning_hands",
+                    "spellLevel": 1,
+                    "saveAbility": spell.save_ability,
+                    "saveDc": save_dc,
+                    "saveSucceeded": save_success,
+                    "fullDamage": full_damage,
+                    "halfOnSuccess": spell.half_on_success,
+                },
+                movement_details=None,
+                damage_details=DamageDetails(
+                    weapon_id="burning_hands",
+                    weapon_name=spell.display_name,
+                    damage_components=damage_components,
+                    primary_candidate=None,
+                    savage_candidate=None,
+                    chosen_candidate=None,
+                    critical_applied=False,
+                    critical_multiplier=1,
+                    flat_modifier=0,
+                    advantage_bonus_candidate=None,
+                    mastery_applied=None,
+                    mastery_notes=None,
+                    attack_riders_applied=None,
+                    total_damage=applied_damage,
+                    resisted_damage=damage_result.resisted_damage,
+                    amplified_damage=damage_result.amplified_damage or None,
+                    temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                    final_damage_to_hp=damage_result.final_damage_to_hp,
+                    hp_delta=damage_result.hp_delta,
+                ),
+                condition_deltas=list(damage_result.condition_deltas),
+                text_summary=(
+                    f"{attacker_id}'s {spell.display_name} hits {resolved_target_id} for {applied_damage} damage"
+                    f"{' after a successful save' if save_success else ' after a failed save'}"
+                    f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                    f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+                ),
+            )
+        )
+
+    return events
 
 
 def resolve_cast_spell(
@@ -1802,7 +2200,7 @@ def resolve_cast_spell(
     if spell.level > 0 and spell_id in actor.prepared_combat_spell_ids and spell.level == 1 and actor.resources.spell_slots_level_1 <= 0:
         return build_spell_skip_event(state, actor_id, spell_id, "No level 1 spell slots remain.")
 
-    if spell.targeting_mode == "ranged_spell_attack":
+    if spell.targeting_mode in {"ranged_spell_attack", "melee_spell_attack"}:
         return resolve_ranged_spell_attack(state, actor_id, target_id, spell_id, overrides)
     if spell.targeting_mode == "auto_hit_single_target":
         return resolve_magic_missile(state, actor_id, target_id, overrides)
@@ -1868,8 +2266,23 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     resolved_target_id = args.target_id
     reaction_actor_id: str | None = None
     attack_reaction: str | None = None
-    target_ac = target.ac + attack_context.cover_ac_bonus
+    defense_reaction_data: dict[str, int | str] | None = None
+    target_ac = target.ac + attack_context.cover_ac_bonus + get_shield_ac_bonus(target)
     hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+
+    if hit:
+        defense_reaction_data = maybe_apply_shield_reaction(
+            state,
+            attacker_id=args.attacker_id,
+            target_id=args.target_id,
+            trigger="attack_hit",
+            attack_total=attack_total,
+            target_ac=target_ac,
+            natural_twenty=natural_twenty,
+        )
+        if defense_reaction_data:
+            target_ac += int(defense_reaction_data["shieldAcBonus"])
+            hit = natural_twenty or (not natural_one and attack_total >= target_ac)
 
     if hit and can_trigger_attack_reaction(target, "redirect_attack"):
         redirect_target = choose_redirect_attack_ally(state, args.target_id)
@@ -1883,7 +2296,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             resolved_target_id = redirect_target.id
             target = redirect_target
             attack_context = get_attack_context(state, args.attacker_id, resolved_target_id, weapon)
-            target_ac = target.ac + attack_context.cover_ac_bonus
+            target_ac = target.ac + attack_context.cover_ac_bonus + get_shield_ac_bonus(target)
             hit = attack_context.legal and (natural_twenty or (not natural_one and attack_total >= target_ac))
             reaction_actor_id = args.target_id
             attack_reaction = "redirect_attack"
@@ -2072,8 +2485,11 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         "originalTargetId": args.target_id,
         "attackReaction": attack_reaction,
         "reactionActorId": reaction_actor_id,
+        "shieldAcBonus": get_shield_ac_bonus(target),
         "targetWasBloodiedBeforeHit": target_was_bloodied_before_hit,
     }
+    if defense_reaction_data:
+        resolved_totals.update(defense_reaction_data)
     if undead_fortitude_triggered:
         resolved_totals["undeadFortitudeTriggered"] = True
         resolved_totals["undeadFortitudeSuccess"] = undead_fortitude_success

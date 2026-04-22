@@ -3,11 +3,13 @@ from __future__ import annotations
 import pytest
 
 import backend.engine.rules.combat_rules as combat_rules_module
+from backend.content.enemies import unit_has_reaction
 from backend.content.feature_definitions import unit_has_granted_bonus_action
 from backend.engine import create_encounter, run_encounter, step_encounter, summarize_encounter
 from backend.engine.ai.decision import MovementPlan, TurnDecision, choose_turn_decision
 from backend.engine.combat.engine import (
     execute_decision,
+    execute_movement,
     expire_turn_end_effects,
     get_opportunity_attack_weapon_id,
     get_total_movement_budget,
@@ -29,8 +31,10 @@ from backend.engine.models.state import (
     GrappledEffect,
     GridPosition,
     HiddenEffect,
+    NoReactionsEffect,
     RageEffect,
     RecklessAttackEffect,
+    ShieldEffect,
     SlowEffect,
     WeaponRange,
 )
@@ -43,6 +47,7 @@ from backend.engine.rules.combat_rules import (
     apply_great_weapon_fighting,
     attempt_hide,
     attempt_uncanny_metabolism,
+    can_trigger_attack_reaction,
     choose_damage_candidate,
     clear_invalid_hidden_effects,
     expire_turn_effects,
@@ -265,6 +270,183 @@ def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert len(spell_events) == 1
     assert spell_events[0].event_type == "skip"
     assert "No level 1 spell slots remain" in spell_events[0].text_summary
+
+
+def test_shocking_grasp_is_a_melee_spell_attack_and_applies_no_reactions() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shocking-grasp-hit"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "shocking_grasp"
+    assert attack_event.resolved_totals["attackMode"] == "normal"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.damage_details.total_damage == 5
+    assert any(effect.kind == "no_reactions" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_shocking_grasp_prevents_opportunity_attacks_until_target_turn_start() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shocking-grasp-escape"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+    movement_events, interrupted = execute_movement(
+        encounter,
+        "F1",
+        MovementPlan(path=[GridPosition(x=5, y=5), GridPosition(x=4, y=5)], mode="move"),
+        False,
+        "after_action",
+    )
+
+    assert interrupted is False
+    assert [event.event_type for event in movement_events] == ["move"]
+
+    expire_turn_effects(encounter, "E1")
+    assert any(effect.kind == "no_reactions" for effect in encounter.units["E1"].temporary_effects) is False
+
+
+def test_no_reactions_effect_blocks_monster_reaction_triggers() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-no-reactions-monster"))
+    reactor = next(
+        unit
+        for unit in encounter.units.values()
+        if unit.faction == "goblins" and (unit_has_reaction(unit, "parry") or unit_has_reaction(unit, "redirect_attack"))
+    )
+    reactor.temporary_effects.append(
+        NoReactionsEffect(kind="no_reactions", source_id="F1", expires_at_turn_start_of=reactor.id)
+    )
+
+    if unit_has_reaction(reactor, "parry"):
+        assert can_trigger_attack_reaction(reactor, "parry") is False
+    if unit_has_reaction(reactor, "redirect_attack"):
+        assert can_trigger_attack_reaction(reactor, "redirect_attack") is False
+
+
+def test_shield_reaction_turns_a_stoppable_hit_into_a_miss() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shield-hit-to-miss"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["defenseReaction"] == "shield"
+    assert attack_event.resolved_totals["hit"] is False
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+    assert encounter.units["F1"].reaction_available is False
+    assert any(effect.kind == "shield" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_smart_shield_skips_unstoppable_hits_while_dumb_shield_still_casts() -> None:
+    smart = create_encounter(build_wizard_config("wizard-shield-smart-skip", player_behavior="smart"))
+    dumb = create_encounter(build_wizard_config("wizard-shield-dumb-cast", player_behavior="dumb"))
+    for encounter in (smart, dumb):
+        defeat_other_enemies(encounter, "E1")
+        encounter.units["F1"].position = GridPosition(x=5, y=5)
+        encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    smart_attack, _ = resolve_attack(
+        smart,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+    dumb_attack, _ = resolve_attack(
+        dumb,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    assert smart_attack.resolved_totals.get("defenseReaction") is None
+    assert smart.units["F1"].resources.spell_slots_level_1 == 2
+    assert any(effect.kind == "shield" for effect in smart.units["F1"].temporary_effects) is False
+
+    assert dumb_attack.resolved_totals["defenseReaction"] == "shield"
+    assert dumb.units["F1"].resources.spell_slots_level_1 == 1
+    assert any(effect.kind == "shield" for effect in dumb.units["F1"].temporary_effects)
+
+
+def test_magic_missile_triggers_shield_and_is_fully_blocked() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-magic-missile-shield"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=7, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "magic_missile", "target_id": "F2"},
+    )
+
+    assert [event.event_type for event in spell_events] == ["phase_change", "attack"]
+    assert spell_events[0].resolved_totals["reaction"] == "shield"
+    assert spell_events[1].resolved_totals["blockedByShield"] is True
+    assert spell_events[1].damage_details.total_damage == 0
+    assert encounter.units["F2"].resources.spell_slots_level_1 == 1
+    assert any(effect.kind == "shield" for effect in encounter.units["F2"].temporary_effects)
+
+
+def test_burning_hands_rolls_saves_uses_one_damage_roll_and_can_hit_allies() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-burning-hands-rules"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=7, y=6)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=7, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "burning_hands", "target_id": "E2"},
+        overrides=AttackRollOverrides(damage_rolls=[3, 2, 1], save_rolls=[4, 5, 15]),
+    )
+
+    assert [event.event_type for event in spell_events[:7]] == [
+        "phase_change",
+        "saving_throw",
+        "attack",
+        "saving_throw",
+        "attack",
+        "saving_throw",
+        "attack",
+    ]
+    attack_events = [event for event in spell_events if event.event_type == "attack"]
+    assert [event.target_ids[0] for event in attack_events] == ["F2", "E1", "E2"]
+    assert [event.damage_details.total_damage for event in attack_events] == [6, 6, 3]
+    assert all(event.raw_rolls["damageRolls"] == [3, 2, 1] for event in attack_events)
 
 
 def test_wizard_sample_trio_smoke_run_completes() -> None:

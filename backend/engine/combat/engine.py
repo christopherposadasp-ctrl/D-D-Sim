@@ -8,6 +8,7 @@ from backend.content.enemies import (
     unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
+from backend.content.spell_definitions import get_spell_definition
 from backend.content.special_actions import get_special_action
 from backend.engine.ai.decision import (
     MovementPlan,
@@ -50,6 +51,7 @@ from backend.engine.rules.combat_rules import (
     get_attack_mode,
     maybe_commit_reckless_attack,
     pull_die,
+    resolve_burning_hands,
     resolve_cast_spell,
     resolve_attack,
     resolve_death_save,
@@ -74,6 +76,7 @@ from backend.engine.utils.helpers import (
     get_units_by_faction,
     is_unit_conscious,
     is_unit_stable_at_zero,
+    unit_can_take_reactions,
     unit_sort_key,
 )
 
@@ -126,6 +129,32 @@ def add_unit_phase_event(
         condition_deltas=condition_deltas or [],
         text_summary=text_summary,
     )
+
+
+def build_attack_reaction_pre_events(state: EncounterState, attack_event: CombatEvent) -> list[CombatEvent]:
+    reaction_kind = attack_event.resolved_totals.get("defenseReaction")
+    reaction_actor_id = attack_event.resolved_totals.get("defenseReactionActorId")
+    if not reaction_kind or not reaction_actor_id or reaction_actor_id not in state.units:
+        return []
+
+    if reaction_kind == "shield":
+        return [
+            add_unit_phase_event(
+                state,
+                reaction_actor_id,
+                attack_event.actor_id,
+                f"{reaction_actor_id} casts Shield.",
+                condition_deltas=[f"{reaction_actor_id} gains +5 AC until the start of its next turn."],
+                resolved_totals={
+                    "reaction": "shield",
+                    "shieldAcBonus": attack_event.resolved_totals.get("shieldAcBonus", 5),
+                    "spellSlotsLevel1Remaining": attack_event.resolved_totals.get("reactionSpellSlotsLevel1Remaining"),
+                    "trigger": attack_event.resolved_totals.get("defenseReactionTrigger"),
+                },
+            )
+        ]
+
+    return []
 
 
 def build_attack_reaction_phase_events(state: EncounterState, attack_event: CombatEvent) -> list[CombatEvent]:
@@ -940,6 +969,7 @@ def maybe_resolve_rampage_follow_up(state: EncounterState, actor_id: str, trigge
             savage_attacker_available=unit_has_feature(actor, "savage_attacker"),
         ),
     )
+    events.extend(build_attack_reaction_pre_events(state, follow_up_attack))
     events.extend(build_attack_reaction_phase_events(state, follow_up_attack))
     events.append(follow_up_attack)
 
@@ -1087,6 +1117,7 @@ def resolve_attack_action(
                 overrides=step_overrides[step_index] if step_overrides and step_index < len(step_overrides) else None,
             ),
         )
+        attack_events.extend(build_attack_reaction_pre_events(state, attack_event))
         attack_events.extend(build_attack_reaction_phase_events(state, attack_event))
         attack_events.append(attack_event)
         cleave_events: list[CombatEvent] = []
@@ -1133,6 +1164,19 @@ def resolve_cast_spell_action(
     *,
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
+    spell = get_spell_definition(action["spell_id"])
+    if spell.targeting_mode == "self_cone_save":
+        spell_events = resolve_burning_hands(state, actor_id, action["target_id"], overrides)
+        follow_up_events: list[CombatEvent] = []
+        for event in spell_events:
+            if event.event_type != "attack":
+                continue
+            for target_id in event.target_ids:
+                if state.units[target_id].conditions.dead:
+                    follow_up_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
+                    follow_up_events.extend(release_swallowed_units_from_source(state, target_id))
+        return spell_events + follow_up_events
+
     spell_event = resolve_cast_spell(
         state,
         actor_id,
@@ -1140,7 +1184,9 @@ def resolve_cast_spell_action(
         action["target_id"],
         overrides,
     )
-    spell_events = build_attack_reaction_phase_events(state, spell_event) if spell_event.event_type == "attack" else []
+    spell_events = build_attack_reaction_pre_events(state, spell_event) if spell_event.event_type == "attack" else []
+    if spell_event.event_type == "attack":
+        spell_events.extend(build_attack_reaction_phase_events(state, spell_event))
     spell_events.append(spell_event)
 
     for target_id in spell_event.target_ids:
@@ -1223,9 +1269,7 @@ def execute_movement(
                 unit
                 for unit in state.units.values()
                 if unit.faction != actor.faction
-                and unit.current_hp > 0
-                and not unit.conditions.dead
-                and unit.reaction_available
+                and unit_can_take_reactions(unit)
                 and unit.position
                 and get_min_chebyshev_distance_between_footprints(
                     unit.position,
@@ -1259,6 +1303,7 @@ def execute_movement(
                     is_opportunity_attack=True,
                 ),
             )
+            reaction_events.extend(build_attack_reaction_pre_events(state, attack_event))
             reaction_events.extend(build_attack_reaction_phase_events(state, attack_event))
             reaction_events.append(attack_event)
             resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else actor_id

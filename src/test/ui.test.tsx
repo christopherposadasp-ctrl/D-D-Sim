@@ -246,6 +246,7 @@ function buildUnit(
       actionSurgeUses: 0,
       focusPoints: 0,
       uncannyMetabolismUses: 0,
+      spellSlotsLevel1: 0,
     },
     position,
     temporaryEffects: [],

@@ -66,6 +66,7 @@ export interface ResourceState {
   actionSurgeUses: number;
   focusPoints: number;
   uncannyMetabolismUses: number;
+  spellSlotsLevel1: number;
 }
 
 export interface DiceSpec {
@@ -123,6 +124,12 @@ export interface SlowEffect {
   penalty: number;
 }
 
+export interface NoReactionsEffect {
+  kind: 'no_reactions';
+  sourceId: string;
+  expiresAtTurnStartOf: string;
+}
+
 export interface HiddenEffect {
   kind: 'hidden';
   sourceId?: string;
@@ -133,6 +140,13 @@ export interface DodgingEffect {
   kind: 'dodging';
   sourceId: string;
   expiresAtTurnStartOf: string;
+}
+
+export interface ShieldEffect {
+  kind: 'shield';
+  sourceId: string;
+  expiresAtTurnStartOf: string;
+  acBonus: number;
 }
 
 export interface InvisibleEffect {
@@ -187,8 +201,10 @@ export interface VexEffect {
 export type TemporaryEffect =
   | SapEffect
   | SlowEffect
+  | NoReactionsEffect
   | HiddenEffect
   | DodgingEffect
+  | ShieldEffect
   | InvisibleEffect
   | GrappledEffect
   | RestrainedEffect
