@@ -38,6 +38,11 @@ def test_fighter_audit_targets_cover_expected_presets_and_scenarios() -> None:
         "orc_push",
         "wolf_harriers",
         "marsh_predators",
+        "hobgoblin_kill_box",
+        "predator_rampage",
+        "bugbear_dragnet",
+        "deadwatch_phalanx",
+        "captains_crossfire",
     )
 
 

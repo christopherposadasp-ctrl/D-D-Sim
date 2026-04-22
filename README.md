@@ -46,6 +46,9 @@ Active enemy presets:
 - `marsh_predators`
 - `hobgoblin_kill_box`
 - `predator_rampage`
+- `bugbear_dragnet`
+- `deadwatch_phalanx`
+- `captains_crossfire`
 
 ## Planned Direction
 

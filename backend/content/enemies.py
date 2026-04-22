@@ -2453,6 +2453,9 @@ ACTIVE_ENEMY_PRESET_IDS: tuple[str, ...] = (
     "marsh_predators",
     "hobgoblin_kill_box",
     "predator_rampage",
+    "bugbear_dragnet",
+    "deadwatch_phalanx",
+    "captains_crossfire",
 )
 
 DEFAULT_ENEMY_PRESET_ID = "goblin_screen"

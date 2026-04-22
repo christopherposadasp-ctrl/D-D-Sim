@@ -320,21 +320,26 @@ def test_shocking_grasp_prevents_opportunity_attacks_until_target_turn_start() -
     assert any(effect.kind == "no_reactions" for effect in encounter.units["E1"].temporary_effects) is False
 
 
-def test_no_reactions_effect_blocks_monster_reaction_triggers() -> None:
-    encounter = create_encounter(build_wizard_config("wizard-no-reactions-monster"))
-    reactor = next(
-        unit
-        for unit in encounter.units.values()
-        if unit.faction == "goblins" and (unit_has_reaction(unit, "parry") or unit_has_reaction(unit, "redirect_attack"))
-    )
+@pytest.mark.parametrize(
+    ("seed", "variant_id", "reaction_id"),
+    [
+        ("bandit-captain-no-reactions", "bandit_captain", "parry"),
+        ("goblin-boss-no-reactions", "goblin_boss", "redirect_attack"),
+    ],
+)
+def test_no_reactions_effect_blocks_monster_attack_reactions(
+    seed: str, variant_id: str, reaction_id: str
+) -> None:
+    encounter = create_encounter(build_monster_benchmark_config(seed, variant_id))
+    reactor = encounter.units["E1"]
+
+    assert unit_has_reaction(reactor, reaction_id) is True
+
     reactor.temporary_effects.append(
         NoReactionsEffect(kind="no_reactions", source_id="F1", expires_at_turn_start_of=reactor.id)
     )
 
-    if unit_has_reaction(reactor, "parry"):
-        assert can_trigger_attack_reaction(reactor, "parry") is False
-    if unit_has_reaction(reactor, "redirect_attack"):
-        assert can_trigger_attack_reaction(reactor, "redirect_attack") is False
+    assert can_trigger_attack_reaction(reactor, reaction_id) is False
 
 
 def test_shield_reaction_turns_a_stoppable_hit_into_a_miss() -> None:
@@ -2235,6 +2240,11 @@ def test_opportunity_attacks_use_each_enemy_variant_melee_weapon() -> None:
         "orc_push",
         "wolf_harriers",
         "marsh_predators",
+        "hobgoblin_kill_box",
+        "predator_rampage",
+        "bugbear_dragnet",
+        "deadwatch_phalanx",
+        "captains_crossfire",
     ],
 )
 def test_level2_martial_mixed_party_completes_all_active_enemy_presets(enemy_preset_id: str) -> None:
