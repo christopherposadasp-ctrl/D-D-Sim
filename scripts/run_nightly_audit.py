@@ -15,6 +15,9 @@ DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "nightly_audit_latest.json"
 DEFAULT_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "nightly_audit_latest.md"
 DEFAULT_ROTATION_STATE_PATH = DEFAULT_REPORT_DIR / "rotation_state.json"
 DEFAULT_INTEGRATION_BRANCH = "integration"
+PYTHON_EXECUTABLE = Path(sys.executable)
+DEPENDENCIES_ROOT = PYTHON_EXECUTABLE.parent.parent
+BUNDLED_NODE_EXECUTABLE = DEPENDENCIES_ROOT / "node" / "bin" / "node.exe"
 
 Status = Literal["pass", "warn", "fail", "skipped"]
 ReportParser = Callable[[Path], tuple[Status, list[str]]]
@@ -196,34 +199,62 @@ def parse_code_health_report(path: Path) -> tuple[Status, list[str]]:
     return "pass", []
 
 
-def make_powershell_spec(
+def resolve_node_executable() -> str:
+    if BUNDLED_NODE_EXECUTABLE.exists():
+        return str(BUNDLED_NODE_EXECUTABLE)
+    return "node"
+
+
+def make_python_script_spec(
     step_id: str,
     label: str,
-    task: str,
+    script_relative_path: str,
     *,
     timeout_seconds: int,
+    extra_args: tuple[str, ...] = (),
     report_paths: tuple[Path, ...] = (),
     report_parser: ReportParser | None = None,
     hard_blocker_on_fail: bool = False,
+    display_command: str | None = None,
 ) -> CommandSpec:
-    script_path = REPO_ROOT / "scripts" / "dev.ps1"
+    script_path = REPO_ROOT / script_relative_path
     return CommandSpec(
         step_id=step_id,
         label=label,
-        argv=(
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script_path),
-            task,
-        ),
-        display_command=f".\\scripts\\dev.ps1 {task}",
+        argv=(sys.executable, str(script_path), *extra_args),
+        display_command=display_command or f"{Path(sys.executable).name} {script_relative_path}",
         timeout_seconds=timeout_seconds,
         report_paths=report_paths,
         report_parser=report_parser,
         hard_blocker_on_fail=hard_blocker_on_fail,
+    )
+
+
+def run_sequential_step(step_id: str, label: str, commands: list[CommandSpec], timeout_seconds: int) -> StepResult:
+    output_tail: list[str] = []
+    for command in commands:
+        result = run_command(command)
+        output_tail.extend(result.output_tail)
+        output_tail = output_tail[-12:]
+        if result.status == "fail":
+            return StepResult(
+                step_id=step_id,
+                label=label,
+                status="fail",
+                command=" && ".join(spec.display_command for spec in commands),
+                timeout_seconds=timeout_seconds,
+                detail=f"{command.label} failed. {result.detail or ''}".strip(),
+                output_tail=result.output_tail,
+                report_paths=[],
+            )
+
+    return StepResult(
+        step_id=step_id,
+        label=label,
+        status="pass",
+        command=" && ".join(spec.display_command for spec in commands),
+        timeout_seconds=timeout_seconds,
+        output_tail=output_tail,
     )
 
 
@@ -604,72 +635,120 @@ def main() -> None:
     if branch_gate.status == "fail":
         branch_gate.detail = f"Expected branch `{args.integration_branch}` but found `{context['branch']}`."
 
-    check_fast_spec = make_powershell_spec(
-        "check_fast",
-        "Backend gate",
-        "check-fast",
-        timeout_seconds=45 * 60,
-        hard_blocker_on_fail=True,
-    )
+    backend_gate_timeout = 45 * 60
+    backend_gate_commands = [
+        CommandSpec(
+            step_id="check_fast_ruff",
+            label="Backend lint",
+            argv=(sys.executable, "-m", "ruff", "check", "backend", "tests", "scripts"),
+            display_command=f"{Path(sys.executable).name} -m ruff check backend tests scripts",
+            timeout_seconds=10 * 60,
+        ),
+        CommandSpec(
+            step_id="check_fast_pytest",
+            label="Backend tests",
+            argv=(sys.executable, "-m", "pytest", "-q", "tests\\golden", "tests\\rules", "tests\\integration"),
+            display_command=f"{Path(sys.executable).name} -m pytest -q tests\\golden tests\\rules tests\\integration",
+            timeout_seconds=backend_gate_timeout,
+        ),
+    ]
+    node_executable = resolve_node_executable()
     npm_test_spec = CommandSpec(
         step_id="npm_test",
         label="Frontend tests",
-        argv=("npm", "run", "test"),
-        display_command="npm run test",
+        argv=(node_executable, str(REPO_ROOT / "node_modules" / "vitest" / "vitest.mjs"), "run"),
+        display_command="node ./node_modules/vitest/vitest.mjs run",
         timeout_seconds=20 * 60,
         hard_blocker_on_fail=True,
     )
-    npm_build_spec = CommandSpec(
-        step_id="npm_build",
-        label="Frontend build",
-        argv=("npm", "run", "build"),
-        display_command="npm run build",
-        timeout_seconds=20 * 60,
-        hard_blocker_on_fail=True,
-    )
+    frontend_build_timeout = 20 * 60
+    frontend_build_commands = [
+        CommandSpec(
+            step_id="npm_build_tsc",
+            label="TypeScript build",
+            argv=(node_executable, str(REPO_ROOT / "node_modules" / "typescript" / "bin" / "tsc")),
+            display_command="node ./node_modules/typescript/bin/tsc",
+            timeout_seconds=frontend_build_timeout,
+        ),
+        CommandSpec(
+            step_id="npm_build_vite",
+            label="Vite build",
+            argv=(node_executable, str(REPO_ROOT / "node_modules" / "vite" / "bin" / "vite.js"), "build"),
+            display_command="node ./node_modules/vite/bin/vite.js build",
+            timeout_seconds=frontend_build_timeout,
+        ),
+    ]
     scenario_quick_report = REPO_ROOT / "reports" / "scenario_audit_latest.json"
-    scenario_quick_spec = make_powershell_spec(
+    scenario_quick_spec = make_python_script_spec(
         "scenario_quick",
         "Scenario quick audit",
-        "audit-quick",
+        "scripts/run_scenario_audit.py",
         timeout_seconds=45 * 60,
         report_paths=(scenario_quick_report,),
         report_parser=parse_scenario_audit_report,
         hard_blocker_on_fail=True,
+        display_command="python ./scripts/run_scenario_audit.py",
     )
     code_health_report = REPO_ROOT / "reports" / "code_health_audit.json"
-    code_health_spec = make_powershell_spec(
+    code_health_spec = make_python_script_spec(
         "code_health",
         "Code health audit",
-        "audit-health",
+        "scripts/run_code_health_audit.py",
         timeout_seconds=30 * 60,
+        extra_args=("--write-report",),
         report_paths=(code_health_report,),
         report_parser=parse_code_health_report,
+        display_command="python ./scripts/run_code_health_audit.py --write-report",
     )
 
     step_results: dict[str, StepResult] = {"branch_gate": branch_gate}
     blocker_step: str | None = "branch_gate" if branch_gate.status == "fail" else None
     code_health_ran = False
 
-    execution_order = (check_fast_spec, npm_test_spec, npm_build_spec, scenario_quick_spec)
-    for spec in execution_order:
-        if blocker_step is not None:
-            step_results[spec.step_id] = make_skipped_step(spec, f"Skipped because {blocker_step} blocked the nightly run.")
-            continue
-
-        result = run_command(spec)
-        step_results[spec.step_id] = result
-        if result.status == "fail" and spec.hard_blocker_on_fail:
-            blocker_step = spec.step_id
+    if blocker_step is None:
+        backend_gate_result = run_sequential_step("check_fast", "Backend gate", backend_gate_commands, backend_gate_timeout)
+        step_results["check_fast"] = backend_gate_result
+        if backend_gate_result.status == "fail":
+            blocker_step = "check_fast"
+    else:
+        step_results["check_fast"] = make_skipped_step(
+            CommandSpec("check_fast", "Backend gate", tuple(), "", backend_gate_timeout),
+            f"Skipped because {blocker_step} blocked the nightly run.",
+        )
 
     if blocker_step is None:
-        step_results["code_health"] = run_command(code_health_spec)
-        code_health_ran = True
-        if step_results["code_health"].status == "fail":
-            blocker_step = "code_health"
+        frontend_test_result = run_command(npm_test_spec)
+        step_results["npm_test"] = frontend_test_result
+        if frontend_test_result.status == "fail":
+            blocker_step = "npm_test"
     else:
-        step_results["code_health"] = run_command(code_health_spec)
-        code_health_ran = True
+        step_results["npm_test"] = make_skipped_step(npm_test_spec, f"Skipped because {blocker_step} blocked the nightly run.")
+
+    if blocker_step is None:
+        frontend_build_result = run_sequential_step("npm_build", "Frontend build", frontend_build_commands, frontend_build_timeout)
+        step_results["npm_build"] = frontend_build_result
+        if frontend_build_result.status == "fail":
+            blocker_step = "npm_build"
+    else:
+        step_results["npm_build"] = make_skipped_step(
+            CommandSpec("npm_build", "Frontend build", tuple(), "", frontend_build_timeout),
+            f"Skipped because {blocker_step} blocked the nightly run.",
+        )
+
+    if blocker_step is None:
+        scenario_result = run_command(scenario_quick_spec)
+        step_results["scenario_quick"] = scenario_result
+        if scenario_result.status == "fail":
+            blocker_step = "scenario_quick"
+    else:
+        step_results["scenario_quick"] = make_skipped_step(
+            scenario_quick_spec,
+            f"Skipped because {blocker_step} blocked the nightly run.",
+        )
+    step_results["code_health"] = run_command(code_health_spec)
+    code_health_ran = True
+    if blocker_step is None and step_results["code_health"].status == "fail":
+        blocker_step = "code_health"
 
     if blocker_step is None:
         rotating_result = run_command(rotating_slice.command)

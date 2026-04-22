@@ -88,6 +88,10 @@ It should be updated whenever one of these changes:
   - Barbarian supported to level 2
   - Rogue supported to level 2
   - Monk supported to level 2
+- A narrow combat-only Wizard level 1 slice is also live with:
+  - cantrips: `fire_bolt`, `shocking_grasp`
+  - prepared combat spells: `magic_missile`, `shield`, `burning_hands`
+  - level 1 prepared-spell and cantrip counts tracked as runtime metadata
 - Rogue level 2 now includes combat-only Cunning Action support with:
   - bonus-action Dash
   - bonus-action Disengage
@@ -173,6 +177,7 @@ It should be updated whenever one of these changes:
 ### Current Working Version
 
 - `V4.2-C`: fighter, barbarian, rogue, and monk are live up to level 2
+- Wizard level 1 is live as a narrow combat-only spellcasting slice, not a full `V4.4` spell framework rollout
 
 ### Approved V4 Roadmap
 
