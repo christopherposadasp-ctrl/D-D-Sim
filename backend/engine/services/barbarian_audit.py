@@ -20,7 +20,7 @@ from backend.engine.ai.decision import (
     sort_player_combat_targets,
     sort_player_melee_targets,
 )
-from backend.engine.combat.engine import run_batch_serial
+from backend.engine.combat.engine import run_batch
 from backend.engine.combat.setup import resolve_player_behavior
 from backend.engine.models.state import BatchSummary, CombatEvent, EncounterConfig, RunEncounterResult, UnitState
 from backend.engine.utils.helpers import get_units_by_faction, unit_sort_key
@@ -663,7 +663,7 @@ def run_health_pass(
             },
         )
 
-    return run_batch_serial(
+    return run_batch(
         EncounterConfig(
             seed=f"{config.seed_prefix}-{player_preset_id}-{scenario_id}-health",
             enemy_preset_id=scenario_id,
@@ -672,10 +672,6 @@ def run_health_pass(
             player_behavior="balanced",
             monster_behavior="combined",
         ),
-        config.health_batch_size,
-        "balanced",
-        "combined",
-        f"{config.seed_prefix}-{player_preset_id}-{scenario_id}-health",
         on_progress if progress_callback else None,
     )
 

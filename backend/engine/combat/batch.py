@@ -4,7 +4,7 @@ import math
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Literal
 
 from backend.engine.combat.setup import clone_placements_for_unit_ids, resolve_placements, resolve_player_behavior
 from backend.engine.constants import (
@@ -51,6 +51,17 @@ class BatchChunkResult:
     monster_behavior: MonsterBehavior
     completed_runs: int
     accumulator: dict[str, float]
+
+
+BatchExecutionMode = Literal["parallel", "serial"]
+BATCH_WORKERS_ENV_VAR = "DND_SIM_BATCH_WORKERS"
+
+
+@dataclass(frozen=True)
+class BatchExecutionPlan:
+    execution_mode: BatchExecutionMode
+    worker_count: int
+    total_runs: int
 
 
 def create_empty_batch_accumulator() -> dict[str, float]:
@@ -300,9 +311,43 @@ def should_parallelize_batch(total_runs: int) -> bool:
     return total_runs >= PARALLEL_BATCH_MIN_TOTAL_RUNS
 
 
-def get_parallel_worker_count(total_runs: int) -> int:
+def get_requested_worker_count(worker_count: int | None = None) -> int | None:
+    requested_worker_count = worker_count
+    if requested_worker_count is None:
+        env_value = os.environ.get(BATCH_WORKERS_ENV_VAR)
+        if env_value is None or not env_value.strip():
+            return None
+        try:
+            requested_worker_count = int(env_value)
+        except ValueError as error:
+            raise ValueError(f"{BATCH_WORKERS_ENV_VAR} must be a positive integer.") from error
+
+    if requested_worker_count < 1:
+        raise ValueError("Worker count must be a positive integer.")
+    return min(MAX_PARALLEL_BATCH_WORKERS, requested_worker_count)
+
+
+def get_parallel_worker_count(total_runs: int, worker_count: int | None = None) -> int:
     cpu_count = os.cpu_count() or 1
+    requested_worker_count = get_requested_worker_count(worker_count)
+    if requested_worker_count is not None:
+        return max(1, min(requested_worker_count, total_runs))
     return max(1, min(MAX_PARALLEL_BATCH_WORKERS, cpu_count, total_runs))
+
+
+def resolve_batch_execution_plan(
+    total_runs: int,
+    force_serial: bool = False,
+    worker_count: int | None = None,
+) -> BatchExecutionPlan:
+    if force_serial or not should_parallelize_batch(total_runs):
+        return BatchExecutionPlan(execution_mode="serial", worker_count=1, total_runs=total_runs)
+
+    resolved_worker_count = get_parallel_worker_count(total_runs, worker_count)
+    if resolved_worker_count <= 1:
+        return BatchExecutionPlan(execution_mode="serial", worker_count=1, total_runs=total_runs)
+
+    return BatchExecutionPlan(execution_mode="parallel", worker_count=resolved_worker_count, total_runs=total_runs)
 
 
 def get_parallel_chunk_size(run_count: int, worker_count: int) -> int:
@@ -445,10 +490,11 @@ def run_batch_parallel(
     requested_monster_behavior: MonsterBehaviorSelection,
     seed: str,
     progress_callback: Callable[[int, int, MonsterBehavior], None] | None = None,
+    worker_count: int | None = None,
 ) -> BatchSummary:
     placements = resolve_placements(config)
     total_runs = get_total_batch_runs(requested_size, requested_monster_behavior)
-    worker_count = get_parallel_worker_count(total_runs)
+    resolved_worker_count = get_parallel_worker_count(total_runs, worker_count)
     preserve_history = should_capture_batch_history(requested_size)
     accumulators_by_monster = {
         monster_behavior: create_empty_batch_accumulator()
@@ -467,12 +513,12 @@ def run_batch_parallel(
                 config.player_preset_id,
                 requested_size,
                 preserve_history,
-                worker_count,
+                resolved_worker_count,
             )
         )
 
     completed_runs = 0
-    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+    with ProcessPoolExecutor(max_workers=resolved_worker_count) as executor:
         futures = [executor.submit(run_batch_chunk, task) for task in tasks]
         for future in as_completed(futures):
             result = future.result()
@@ -519,6 +565,9 @@ def run_batch_parallel(
 def run_batch(
     config: EncounterConfig,
     progress_callback: Callable[[int, int, MonsterBehavior], None] | None = None,
+    *,
+    force_serial: bool = False,
+    worker_count: int | None = None,
 ) -> BatchSummary:
     requested_size = config.batch_size or DEFAULT_BATCH_SIZE
     requested_player_behavior = config.player_behavior or DEFAULT_BATCH_PLAYER_BEHAVIOR
@@ -529,8 +578,9 @@ def run_batch(
 
     seed = config.seed.strip() or DEFAULT_SEED
     total_runs = get_total_batch_runs(requested_size, requested_monster_behavior)
+    execution_plan = resolve_batch_execution_plan(total_runs, force_serial=force_serial, worker_count=worker_count)
 
-    if should_parallelize_batch(total_runs):
+    if execution_plan.execution_mode == "parallel":
         return run_batch_parallel(
             config,
             requested_size,
@@ -538,6 +588,7 @@ def run_batch(
             requested_monster_behavior,
             seed,
             progress_callback,
+            worker_count=execution_plan.worker_count,
         )
 
     return run_batch_serial(
