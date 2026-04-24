@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("check-fast", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit")]
+    [ValidateSet("check-fast", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability")]
     [string]$Task,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -126,6 +126,9 @@ try {
         }
         "nightly-audit" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_nightly_audit.py") + $taskArgsOrEmpty))
+        }
+        "pass2-stability" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_pass2_stability.py") + $taskArgsOrEmpty))
         }
     }
 }
