@@ -114,6 +114,7 @@ hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
 zombie_ability_mods = AbilityModifiers(str=1, dex=-2, con=3, int=-4, wis=-2, cha=-3)
+ogre_zombie_ability_mods = AbilityModifiers(str=4, dex=-2, con=4, int=-4, wis=-2, cha=-3)
 giant_rat_ability_mods = AbilityModifiers(str=-2, dex=3, con=0, int=-4, wis=0, cha=-3)
 giant_fire_beetle_ability_mods = AbilityModifiers(str=-1, dex=0, con=1, int=-5, wis=-2, cha=-4)
 giant_weasel_ability_mods = AbilityModifiers(str=0, dex=3, con=0, int=-3, wis=1, cha=-3)
@@ -127,6 +128,7 @@ ogre_ability_mods = AbilityModifiers(str=4, dex=-1, con=3, int=-3, wis=-2, cha=-
 black_bear_ability_mods = AbilityModifiers(str=2, dex=1, con=2, int=-4, wis=1, cha=-2)
 brown_bear_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=-4, wis=1, cha=-2)
 tiger_ability_mods = AbilityModifiers(str=3, dex=3, con=2, int=-4, wis=1, cha=-1)
+saber_toothed_tiger_ability_mods = AbilityModifiers(str=4, dex=3, con=2, int=-4, wis=1, cha=-1)
 owlbear_ability_mods = AbilityModifiers(str=5, dex=1, con=3, int=-4, wis=1, cha=-2)
 ankylosaurus_ability_mods = AbilityModifiers(str=4, dex=0, con=2, int=-4, wis=1, cha=-3)
 berserker_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=-1)
@@ -1160,6 +1162,40 @@ MONSTER_DEFINITIONS.update(
             default_melee_attack_action_id="melee_attack",
             damage_immunities=("poison",),
         ),
+        "ogre_zombie": MonsterDefinition(
+            base_creature_id="ogre_zombie",
+            variant_id="ogre_zombie",
+            display_name="Ogre Zombie",
+            combat_role="ogre_zombie",
+            ai_profile_id="melee_brute",
+            max_hp=85,
+            ac=8,
+            speed=30,
+            initiative_mod=-2,
+            passive_perception=8,
+            ability_mods=ogre_zombie_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "slam": WeaponProfile(
+                    id="slam",
+                    display_name="Slam",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=2, sides=8)],
+                    damage_modifier=4,
+                    damage_type="bludgeoning",
+                    kind="melee",
+                )
+            },
+            tags=("undead", "zombie", "ogre", "melee"),
+            creature_tags=("undead",),
+            action_ids=("melee_attack",),
+            trait_ids=("undead_fortitude",),
+            attack_actions=(melee_attack_action("slam", "Slam"),),
+            default_melee_attack_action_id="melee_attack",
+            damage_immunities=("poison",),
+        ),
         "giant_rat": MonsterDefinition(
             base_creature_id="giant_rat",
             variant_id="giant_rat",
@@ -1606,6 +1642,38 @@ MONSTER_DEFINITIONS.update(
                     damage_type="slashing",
                     kind="melee",
                     on_hit_effects=[OnHitEffect(kind="prone_on_hit", max_target_size="large")],
+                )
+            },
+            tags=("beast", "cat", "melee"),
+            action_ids=("multiattack",),
+            trait_ids=("nimble_escape",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 2),),
+            default_melee_attack_action_id="multiattack",
+        ),
+        "saber_toothed_tiger": MonsterDefinition(
+            base_creature_id="saber_toothed_tiger",
+            variant_id="saber_toothed_tiger",
+            display_name="Saber-Toothed Tiger",
+            combat_role="saber_toothed_tiger",
+            ai_profile_id="melee_brute",
+            max_hp=52,
+            ac=13,
+            speed=40,
+            initiative_mod=3,
+            passive_perception=15,
+            ability_mods=saber_toothed_tiger_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=2, sides=6)],
+                    damage_modifier=4,
+                    damage_type="slashing",
+                    kind="melee",
                 )
             },
             tags=("beast", "cat", "melee"),
@@ -2237,7 +2305,7 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
     "goblin_screen": EnemyPresetDefinition(
         preset_id="goblin_screen",
         display_name="Goblin Screen",
-        description="Three raiders screening three archers.",
+        description="Five raiders screening three archers.",
         units=(
             EnemyPresetUnit("E1", "goblin_raider", GridPosition(x=14, y=6)),
             EnemyPresetUnit("E2", "goblin_raider", GridPosition(x=14, y=8)),
@@ -2245,6 +2313,8 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E4", "goblin_archer", GridPosition(x=15, y=5)),
             EnemyPresetUnit("E5", "goblin_archer", GridPosition(x=15, y=8)),
             EnemyPresetUnit("E6", "goblin_archer", GridPosition(x=15, y=11)),
+            EnemyPresetUnit("E7", "goblin_raider", GridPosition(x=14, y=4)),
+            EnemyPresetUnit("E8", "goblin_raider", GridPosition(x=14, y=12)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2278,14 +2348,13 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
     "orc_push": EnemyPresetDefinition(
         preset_id="orc_push",
         display_name="Orc Push",
-        description="Orc front line with goblin ranged support.",
+        description="Three orcs advancing with goblin ranged support.",
         units=(
             EnemyPresetUnit("E1", "orc_warrior", GridPosition(x=13, y=6)),
             EnemyPresetUnit("E2", "orc_warrior", GridPosition(x=13, y=8)),
             EnemyPresetUnit("E3", "orc_warrior", GridPosition(x=13, y=10)),
-            EnemyPresetUnit("E4", "orc_warrior", GridPosition(x=14, y=8)),
-            EnemyPresetUnit("E5", "goblin_archer", GridPosition(x=15, y=6)),
-            EnemyPresetUnit("E6", "goblin_archer", GridPosition(x=15, y=10)),
+            EnemyPresetUnit("E4", "goblin_archer", GridPosition(x=15, y=6)),
+            EnemyPresetUnit("E5", "goblin_archer", GridPosition(x=15, y=10)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2314,13 +2383,15 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
     "marsh_predators": EnemyPresetDefinition(
         preset_id="marsh_predators",
         display_name="Marsh Predators",
-        description="Two giant toads backed by three crocodiles clustered along the marsh edge.",
+        description="Two giant toads backed by five crocodiles clustered along the marsh edge.",
         units=(
             EnemyPresetUnit("E1", "giant_toad", GridPosition(x=9, y=7)),
             EnemyPresetUnit("E2", "crocodile", GridPosition(x=1, y=1)),
             EnemyPresetUnit("E3", "crocodile", GridPosition(x=4, y=1)),
             EnemyPresetUnit("E4", "crocodile", GridPosition(x=2, y=4)),
             EnemyPresetUnit("E5", "giant_toad", GridPosition(x=9, y=10)),
+            EnemyPresetUnit("E6", "crocodile", GridPosition(x=7, y=1)),
+            EnemyPresetUnit("E7", "crocodile", GridPosition(x=5, y=4)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2337,6 +2408,8 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E6", "hobgoblin_archer", GridPosition(x=14, y=8)),
             EnemyPresetUnit("E7", "hobgoblin_archer", GridPosition(x=14, y=11)),
             EnemyPresetUnit("E8", "goblin_boss", GridPosition(x=13, y=8)),
+            EnemyPresetUnit("E9", "hobgoblin_warrior", GridPosition(x=12, y=5)),
+            EnemyPresetUnit("E10", "hobgoblin_warrior", GridPosition(x=12, y=11)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2363,10 +2436,15 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E1", "bugbear_warrior", GridPosition(x=10, y=6)),
             EnemyPresetUnit("E2", "bugbear_warrior", GridPosition(x=10, y=10)),
             EnemyPresetUnit("E3", "goblin_boss", GridPosition(x=13, y=8)),
-            EnemyPresetUnit("E4", "goblin_archer", GridPosition(x=14, y=7)),
-            EnemyPresetUnit("E5", "goblin_minion", GridPosition(x=14, y=9)),
+            EnemyPresetUnit("E4", "goblin_archer", GridPosition(x=14, y=8)),
+            EnemyPresetUnit("E5", "goblin_minion", GridPosition(x=14, y=6)),
             EnemyPresetUnit("E6", "hobgoblin_archer", GridPosition(x=15, y=5)),
             EnemyPresetUnit("E7", "hobgoblin_archer", GridPosition(x=15, y=11)),
+            EnemyPresetUnit("E8", "bugbear_warrior", GridPosition(x=12, y=6)),
+            EnemyPresetUnit("E9", "bugbear_warrior", GridPosition(x=12, y=10)),
+            EnemyPresetUnit("E10", "goblin_minion", GridPosition(x=14, y=10)),
+            EnemyPresetUnit("E11", "goblin_minion", GridPosition(x=13, y=4)),
+            EnemyPresetUnit("E12", "goblin_minion", GridPosition(x=13, y=12)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2383,6 +2461,9 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E6", "skeleton", GridPosition(x=15, y=7)),
             EnemyPresetUnit("E7", "skeleton", GridPosition(x=15, y=10)),
             EnemyPresetUnit("E8", "skeleton", GridPosition(x=15, y=13)),
+            EnemyPresetUnit("E9", "zombie", GridPosition(x=12, y=8)),
+            EnemyPresetUnit("E10", "zombie", GridPosition(x=13, y=6)),
+            EnemyPresetUnit("E11", "zombie", GridPosition(x=13, y=10)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2421,6 +2502,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "goblin_minion",
     "skeleton",
     "zombie",
+    "ogre_zombie",
     "giant_rat",
     "giant_fire_beetle",
     "giant_weasel",
@@ -2434,6 +2516,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "black_bear",
     "brown_bear",
     "tiger",
+    "saber_toothed_tiger",
     "owlbear",
     "ankylosaurus",
     "berserker",
@@ -2683,6 +2766,7 @@ def create_enemy(unit_id: str, variant_id: str) -> UnitState:
             rage_uses=0,
             handaxes=0,
             action_surge_uses=0,
+            superiority_dice=0,
             focus_points=0,
             uncanny_metabolism_uses=0,
             spell_slots_level_1=0,

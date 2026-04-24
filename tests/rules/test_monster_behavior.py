@@ -45,6 +45,7 @@ FIXED_ATTACK_CASES = (
     ("skeleton", "shortsword", [3], ["piercing"], [6]),
     ("skeleton", "shortbow", [3], ["piercing"], [6]),
     ("zombie", "slam", [4], ["bludgeoning"], [5]),
+    ("ogre_zombie", "slam", [4, 5], ["bludgeoning"], [13]),
     ("giant_rat", "bite", [2], ["piercing"], [5]),
     ("giant_fire_beetle", "bite", [], ["fire"], [1]),
     ("giant_weasel", "bite", [2], ["piercing"], [5]),
@@ -61,6 +62,7 @@ FIXED_ATTACK_CASES = (
     ("brown_bear", "bite", [4], ["piercing"], [7]),
     ("brown_bear", "claw", [2], ["slashing"], [5]),
     ("tiger", "rend", [4, 3], ["slashing"], [10]),
+    ("saber_toothed_tiger", "rend", [4, 3], ["slashing"], [11]),
     ("owlbear", "rend", [4, 3], ["slashing"], [12]),
     ("ankylosaurus", "tail", [5], ["bludgeoning"], [9]),
     ("berserker", "greataxe", [6], ["slashing"], [9]),
@@ -456,6 +458,19 @@ def test_tiger_rend_prone_is_size_gated() -> None:
 
     assert blocked_attack.damage_details.attack_riders_applied is None
     assert blocked_encounter.units["F1"].conditions.prone is False
+
+
+def test_saber_toothed_tiger_multiattack_resolves_two_rend_attacks() -> None:
+    encounter = build_monster_benchmark_encounter("saber_toothed_tiger")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend"]
 
 
 def test_owlbear_multiattack_resolves_two_rend_attacks() -> None:
