@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -20,8 +18,16 @@ from backend.api.app import app
 from backend.content.scenario_definitions import ACTIVE_SCENARIO_IDS
 from backend.engine import run_batch, run_encounter
 from backend.engine.models.state import EncounterConfig, MonsterBehavior
-
-Status = Literal["pass", "warn", "fail", "skipped"]
+from scripts.audit_common import (
+    Status,
+    build_status_counts,
+    collect_git_context,
+    relative_path,
+    text_tail,
+    write_json_report,
+    write_text_report,
+)
+from scripts.audit_findings import get_active_waivers, get_monitored_findings
 
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "pass2"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "pass2_stability_latest.json"
@@ -39,60 +45,6 @@ DEFAULT_ASYNC_ROWS = (
     ("martial_mixed_party", "orc_push"),
     ("rogue_level2_ranged_trio", "marsh_predators"),
     ("fighter_level2_sample_trio", "hobgoblin_kill_box"),
-)
-KNOWN_PASS1_WARNINGS = (
-    {
-        "id": "scenario_hobgoblin_kill_box_smart_under_dumb",
-        "area": "scenario",
-        "summary": "Scenario smart-under-dumb warning in hobgoblin_kill_box remains monitored.",
-    },
-    {
-        "id": "rogue_wolf_harriers_monitored_note",
-        "area": "rogue",
-        "summary": "Rogue wolf_harriers note remains monitored from Pass 1.",
-    },
-    {
-        "id": "rogue_marsh_predators_hide_effectiveness",
-        "area": "rogue",
-        "summary": "Rogue marsh_predators hide-effectiveness warning remains monitored.",
-    },
-    {
-        "id": "fighter_martial_mixed_party_orc_push",
-        "area": "fighter",
-        "summary": "Mixed-party Fighter orc_push warning remains monitored.",
-    },
-    {
-        "id": "fighter_martial_mixed_party_predator_rampage",
-        "area": "fighter",
-        "summary": "Mixed-party Fighter predator_rampage warning remains monitored.",
-    },
-    {
-        "id": "fighter_martial_mixed_party_captains_crossfire",
-        "area": "fighter",
-        "summary": "Mixed-party Fighter captains_crossfire warning remains monitored.",
-    },
-    {
-        "id": "barbarian_martial_mixed_party_wolf_harriers",
-        "area": "barbarian",
-        "summary": "Mixed-party Barbarian wolf_harriers warning remains monitored.",
-    },
-)
-ACTIVE_WAIVERS = (
-    {
-        "id": "monk_audit_runner_missing",
-        "area": "classAudit",
-        "summary": "Dedicated Monk audit runner remains waived; live Monk preset is still covered by determinism.",
-    },
-    {
-        "id": "wizard_audit_runner_missing",
-        "area": "classAudit",
-        "summary": "Dedicated Wizard audit runner remains waived; live Wizard preset is still covered by determinism.",
-    },
-    {
-        "id": "monster_audit_runner_missing",
-        "area": "monsterAudit",
-        "summary": "Dedicated Monster audit runner remains waived; live monsters are still covered by scenario/batch determinism.",
-    },
 )
 
 
@@ -162,40 +114,8 @@ class CommandRow:
         }
 
 
-def split_tail(text: str, limit: int = 24) -> list[str]:
-    return [line for line in text.splitlines() if line.strip()][-limit:]
-
-
-def relative_path(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(REPO_ROOT)).replace("\\", "/")
-    except ValueError:
-        return str(path)
-
-
 def collect_context() -> dict[str, Any]:
-    branch = run_git(["rev-parse", "--abbrev-ref", "HEAD"])
-    commit = run_git(["rev-parse", "--short", "HEAD"])
-    status = run_git(["status", "--short"])
-    return {
-        "generatedAt": datetime.now(tz=UTC).isoformat(),
-        "branch": branch.strip(),
-        "commit": commit.strip(),
-        "gitStatusShort": [line for line in status.splitlines() if line.strip()],
-    }
-
-
-def run_git(args: list[str]) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    return completed.stdout if completed.returncode == 0 else completed.stderr
+    return collect_git_context()
 
 
 def build_seed(player_preset_id: str, scenario_id: str, suffix: str | None = None) -> str:
@@ -511,8 +431,8 @@ def run_command(row_id: str, command: list[str], timeout_seconds: int) -> Comman
             exit_code=completed.returncode,
             elapsed_seconds=time.monotonic() - started,
             timeout_seconds=timeout_seconds,
-            stdout_tail=split_tail(completed.stdout),
-            stderr_tail=split_tail(completed.stderr),
+            stdout_tail=text_tail(completed.stdout),
+            stderr_tail=text_tail(completed.stderr),
         )
     except subprocess.TimeoutExpired as error:
         stdout = error.stdout.decode("utf-8", errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
@@ -524,8 +444,8 @@ def run_command(row_id: str, command: list[str], timeout_seconds: int) -> Comman
             exit_code=None,
             elapsed_seconds=time.monotonic() - started,
             timeout_seconds=timeout_seconds,
-            stdout_tail=split_tail(stdout),
-            stderr_tail=split_tail(stderr),
+            stdout_tail=text_tail(stdout),
+            stderr_tail=text_tail(stderr),
         )
 
 
@@ -596,13 +516,6 @@ def determine_overall_status(
     return "pass"
 
 
-def build_status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
-    counts = {"pass": 0, "warn": 0, "fail": 0, "skipped": 0}
-    for row in rows:
-        counts[row["status"]] += 1
-    return counts
-
-
 def build_report_payload(
     *,
     context: dict[str, Any],
@@ -613,8 +526,8 @@ def build_report_payload(
     json_path: Path,
     markdown_path: Path,
 ) -> dict[str, Any]:
-    known_warnings = [dict(item) for item in KNOWN_PASS1_WARNINGS]
-    waivers = [dict(item) for item in ACTIVE_WAIVERS]
+    known_warnings = get_monitored_findings()
+    waivers = get_active_waivers()
     overall_status = determine_overall_status(
         replay_rows=replay_rows,
         batch_rows=batch_rows,
@@ -700,11 +613,6 @@ def format_report_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Pass 2 stability and determinism checks.")
     parser.add_argument("--player-preset", action="append", dest="player_preset_ids", help="Restrict player presets.")
@@ -787,8 +695,8 @@ def main() -> None:
         markdown_path=args.markdown_path,
     )
     markdown = format_report_markdown(payload)
-    write_text(args.json_path, json.dumps(payload, indent=2) + "\n")
-    write_text(args.markdown_path, markdown)
+    write_json_report(args.json_path, payload)
+    write_text_report(args.markdown_path, markdown)
     print(f"Wrote {relative_path(args.json_path)}")
     print(f"Wrote {relative_path(args.markdown_path)}")
     print(f"Overall status: {payload['overallStatus']}")

@@ -106,6 +106,14 @@ It should be updated whenever one of these changes:
 - A backend-owned player catalog endpoint now exists at `GET /api/catalog/classes`
 - Scenario audit expectations now resolve through a scenario-definition registry instead of being fully hardcoded inside the audit service
 
+### Current Audit Snapshot
+
+- Pass 1 closed on `integration` at commit `01cecc3` with warnings and waivers.
+- Pass 2 stability completed on top of the Pass 1 closure snapshot with deterministic replay, deterministic batch, async job, and long-audit evidence.
+- Pass 3 clarity is the current audit-maintainability pass; it is behavior-preserving and does not change gameplay, scenario balance, API payloads, or catalog data.
+- Active monitored findings remain the scenario smart-under-dumb warning, Rogue notes, and mixed-party Fighter/Barbarian warnings documented in the audit reports.
+- Active waivers remain for dedicated Monk, Wizard, and Monster audit runners until those focused runners are implemented.
+
 ### Current V4.1.x Large-Creature and Control Work
 
 - The live roster now also includes:

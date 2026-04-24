@@ -27,6 +27,7 @@ Current live martial class support:
 - Barbarian supported to level 2
 - Rogue supported to level 2
 - Monk supported to level 2
+- Wizard supported to level 1 as a narrow combat spellcasting slice
 
 Current default player preset:
 
@@ -110,6 +111,11 @@ Use the PowerShell task runner for the standard checks:
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
+.\scripts\dev.ps1 rogue-audit-quick
+.\scripts\dev.ps1 class-audit-slices
+.\scripts\dev.ps1 nightly-audit
+.\scripts\dev.ps1 pass2-stability
+.\scripts\dev.ps1 pass3-clarity
 ```
 
 These map to:
@@ -118,6 +124,11 @@ These map to:
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile
 - `audit-health`: the code-health and benchmark audit
+- `rogue-audit-quick`: the dedicated level 2 ranged Rogue audit
+- `class-audit-slices`: timeout-safe segmented Fighter/Barbarian audit slices
+- `nightly-audit`: the nightly layered audit protocol
+- `pass2-stability`: the deterministic replay/batch and async stability gate
+- `pass3-clarity`: the clarity, docs, report, and audit-maintainability gate
 
 The task runner passes through extra arguments to the underlying script. Examples:
 

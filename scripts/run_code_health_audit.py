@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.engine import run_batch
 from backend.engine.models.state import EncounterConfig
+from scripts.audit_common import relative_path, write_json_report, write_text_report
 
 LIVE_SOURCE_ROOTS = (
     REPO_ROOT / "backend",
@@ -159,11 +160,12 @@ def format_report(report: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def maybe_write_report(report: dict[str, object]) -> Path:
-    output_path = REPO_ROOT / "reports" / "code_health_audit.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, indent=2))
-    return output_path
+def maybe_write_report(report: dict[str, object]) -> tuple[Path, Path]:
+    json_path = REPO_ROOT / "reports" / "code_health_audit.json"
+    markdown_path = REPO_ROOT / "reports" / "code_health_audit.md"
+    write_json_report(json_path, report)
+    write_text_report(markdown_path, format_report(report))
+    return json_path, markdown_path
 
 
 def main() -> None:
@@ -171,8 +173,8 @@ def main() -> None:
     report = build_report(args.benchmark_batch_size, args.largest_limit)
 
     if args.write_report:
-        output_path = maybe_write_report(report)
-        print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
+        json_path, markdown_path = maybe_write_report(report)
+        print(f"Wrote {relative_path(json_path)} and {relative_path(markdown_path)}")
 
     if args.json:
         print(json.dumps(report, indent=2))

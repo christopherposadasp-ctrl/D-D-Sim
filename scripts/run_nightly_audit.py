@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Callable, Literal
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "nightly"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "nightly_audit_latest.json"
 DEFAULT_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "nightly_audit_latest.md"
@@ -18,6 +20,8 @@ DEFAULT_INTEGRATION_BRANCH = "integration"
 PYTHON_EXECUTABLE = Path(sys.executable)
 DEPENDENCIES_ROOT = PYTHON_EXECUTABLE.parent.parent
 BUNDLED_NODE_EXECUTABLE = DEPENDENCIES_ROOT / "node" / "bin" / "node.exe"
+
+from scripts.audit_common import load_json_object, output_tail
 
 Status = Literal["pass", "warn", "fail", "skipped"]
 ReportParser = Callable[[Path], tuple[Status, list[str]]]
@@ -103,8 +107,7 @@ def split_lines(text: str | None) -> list[str]:
 
 
 def build_output_tail(stdout: str | None, stderr: str | None, limit: int = 12) -> list[str]:
-    lines = [*split_lines(stdout), *split_lines(stderr)]
-    return lines[-limit:]
+    return output_tail(stdout, stderr, limit)
 
 
 def relative_path(path: Path) -> str:
@@ -115,12 +118,7 @@ def relative_path(path: Path) -> str:
 
 
 def load_json(path: Path) -> dict[str, object]:
-    if not path.exists():
-        raise FileNotFoundError(f"Expected report file was not created: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"Expected a JSON object in {path}")
-    return payload
+    return load_json_object(path)
 
 
 def parse_scenario_audit_report(path: Path) -> tuple[Status, list[str]]:

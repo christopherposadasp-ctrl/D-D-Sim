@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("check-fast", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability")]
+    [ValidateSet("check-fast", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "barbarian-audit-quick", "barbarian-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability", "pass3-clarity")]
     [string]$Task,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -112,6 +112,12 @@ try {
         "fighter-audit-full" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_fighter_audit.py", "--full") + $taskArgsOrEmpty))
         }
+        "barbarian-audit-quick" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_barbarian_audit.py") + $taskArgsOrEmpty))
+        }
+        "barbarian-audit-full" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_barbarian_audit.py", "--full") + $taskArgsOrEmpty))
+        }
         "rogue-audit-quick" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_rogue_audit.py") + $taskArgsOrEmpty))
         }
@@ -129,6 +135,9 @@ try {
         }
         "pass2-stability" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_pass2_stability.py") + $taskArgsOrEmpty))
+        }
+        "pass3-clarity" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_pass3_clarity.py") + $taskArgsOrEmpty))
         }
     }
 }

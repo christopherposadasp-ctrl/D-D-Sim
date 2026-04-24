@@ -127,7 +127,7 @@ Use V4.2 to establish the player-content framework:
 
 ## V4.3 Non-Spell Monsters Below CR 3
 
-Status: `approved`
+Status: `complete for the audited V4.2/V4.3 live set`
 
 ### Scope Target
 
@@ -153,7 +153,13 @@ Status: `approved`
 |---|---|---|
 | V4.3-A | monster intake schema, trait library, audit checklist | approved |
 | V4.3-B | first 25 monsters | approved |
-| V4.3-C | second 25 monsters plus 5 scenarios | approved |
+| V4.3-C | second 25 monsters plus 5 scenarios | complete |
+
+### Audit Follow-Up
+
+- `monster_audit_runner_missing` remains an active audit tooling waiver.
+- The live monster surface is covered by scenario signatures, catalog/API checks, and Pass 2 determinism until a dedicated Monster audit runner is implemented.
+- Dedicated Monk and Wizard audit runners are also follow-up audit tooling, not V4.3 content blockers.
 
 ## V4.4 Spellcaster Classes Up To Level 2
 
