@@ -31,14 +31,105 @@ def test_current_player_sample_build_uses_content_registry_metadata() -> None:
     fighter = encounter.units["F1"]
 
     assert fighter.class_id == "fighter"
-    assert fighter.level == 2
-    assert fighter.loadout_id == "fighter_level2_sample_build"
+    assert fighter.level == 5
+    assert fighter.loadout_id == "fighter_level5_sample_build"
     assert fighter.behavior_profile == "martial_striker"
     assert "second_wind" in fighter.feature_ids
     assert "action_surge" in fighter.feature_ids
+    assert "combat_superiority" in fighter.feature_ids
+    assert "student_of_war" in fighter.feature_ids
+    assert "great_weapon_master" in fighter.feature_ids
+    assert "extra_attack" in fighter.feature_ids
+    assert "tactical_shift" in fighter.feature_ids
     assert "savage_attacker" in fighter.feature_ids
-    assert fighter.resource_pools == {"second_wind": 2, "action_surge": 1, "javelins": 8}
+    assert fighter.resource_pools == {"second_wind": 3, "action_surge": 1, "superiority_dice": 4, "javelins": 8}
     assert fighter.resources.action_surge_uses == 1
+    assert fighter.resources.superiority_dice == 4
+
+
+def test_level3_fighter_battle_master_sample_build_uses_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-level3-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="fighter_level3_sample_trio",
+        )
+    )
+    fighter = encounter.units["F1"]
+
+    assert fighter.class_id == "fighter"
+    assert fighter.level == 3
+    assert fighter.loadout_id == "fighter_level3_sample_build"
+    assert fighter.max_hp == 29
+    assert fighter.ac == 18
+    assert tuple(sorted(fighter.attacks.keys())) == ("flail", "greatsword", "javelin")
+    assert "second_wind" in fighter.feature_ids
+    assert "action_surge" in fighter.feature_ids
+    assert "combat_superiority" in fighter.feature_ids
+    assert "student_of_war" in fighter.feature_ids
+    assert fighter.resource_pools == {"second_wind": 2, "action_surge": 1, "superiority_dice": 4, "javelins": 8}
+    assert fighter.resources.superiority_dice == 4
+
+
+def test_level4_fighter_great_weapon_master_sample_build_uses_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-level4-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="fighter_level4_sample_trio",
+        )
+    )
+    fighter = encounter.units["F1"]
+
+    assert fighter.class_id == "fighter"
+    assert fighter.level == 4
+    assert fighter.loadout_id == "fighter_level4_sample_build"
+    assert fighter.max_hp == 37
+    assert fighter.ac == 18
+    assert fighter.ability_mods.str == 4
+    assert tuple(sorted(fighter.attacks.keys())) == ("flail", "greatsword", "javelin")
+    assert fighter.attacks["greatsword"].attack_bonus == 6
+    assert fighter.attacks["greatsword"].damage_modifier == 4
+    assert "second_wind" in fighter.feature_ids
+    assert "action_surge" in fighter.feature_ids
+    assert "combat_superiority" in fighter.feature_ids
+    assert "student_of_war" in fighter.feature_ids
+    assert "great_weapon_master" in fighter.feature_ids
+    assert fighter.resource_pools == {"second_wind": 2, "action_surge": 1, "superiority_dice": 4, "javelins": 8}
+    assert fighter.resources.superiority_dice == 4
+
+
+def test_level5_fighter_extra_attack_sample_build_uses_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-level5-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="fighter_level5_sample_trio",
+        )
+    )
+    fighter = encounter.units["F1"]
+    attack_action = build_player_attack_action(fighter)
+
+    assert fighter.class_id == "fighter"
+    assert fighter.level == 5
+    assert fighter.loadout_id == "fighter_level5_sample_build"
+    assert fighter.max_hp == 45
+    assert fighter.ac == 18
+    assert fighter.ability_mods.str == 4
+    assert tuple(sorted(fighter.attacks.keys())) == ("flail", "greatsword", "javelin")
+    assert fighter.attacks["greatsword"].attack_bonus == 7
+    assert fighter.attacks["greatsword"].damage_modifier == 4
+    assert "second_wind" in fighter.feature_ids
+    assert "action_surge" in fighter.feature_ids
+    assert "combat_superiority" in fighter.feature_ids
+    assert "student_of_war" in fighter.feature_ids
+    assert "great_weapon_master" in fighter.feature_ids
+    assert "extra_attack" in fighter.feature_ids
+    assert "tactical_shift" in fighter.feature_ids
+    assert fighter.resource_pools == {"second_wind": 3, "action_surge": 1, "superiority_dice": 4, "javelins": 8}
+    assert fighter.resources.second_wind_uses == 3
+    assert fighter.resources.superiority_dice == 4
+    assert len(attack_action.steps) == 2
 
 
 def test_barbarian_sample_build_uses_content_registry_metadata() -> None:
@@ -191,13 +282,14 @@ def test_runtime_player_metadata_stays_out_of_live_api_payload() -> None:
     assert "preparedSpells" not in payload
 
 
-def test_player_attack_action_resolves_through_progression_metadata() -> None:
+def test_current_fighter_attack_action_resolves_extra_attack_through_progression_metadata() -> None:
     encounter = create_encounter(EncounterConfig(seed="player-attack-action", placements=DEFAULT_POSITIONS))
     attack_action = build_player_attack_action(encounter.units["F1"])
 
     assert attack_action.action_id == "attack"
-    assert len(attack_action.steps) == 1
+    assert len(attack_action.steps) == 2
     assert tuple(sorted(attack_action.steps[0].allowed_weapon_ids)) == ("flail", "greatsword", "javelin")
+    assert tuple(sorted(attack_action.steps[1].allowed_weapon_ids)) == ("flail", "greatsword", "javelin")
 
 
 def test_level2_fighter_still_gets_one_attack_per_attack_action() -> None:
@@ -255,6 +347,9 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "fighter_sample_build",
         "fighter_level2_benchmark_tank",
         "fighter_level2_sample_build",
+        "fighter_level3_sample_build",
+        "fighter_level4_sample_build",
+        "fighter_level5_sample_build",
         "monk_sample_build",
         "monk_level2_sample_build",
         "rogue_melee_sample_build",
@@ -267,6 +362,9 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
     assert [entry.id for entry in catalog.player_presets] == [
         "fighter_sample_trio",
         "fighter_level2_sample_trio",
+        "fighter_level3_sample_trio",
+        "fighter_level4_sample_trio",
+        "fighter_level5_sample_trio",
         "rogue_ranged_trio",
         "rogue_melee_trio",
         "rogue_level2_ranged_trio",
@@ -280,7 +378,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
     ]
     assert {entry.id: entry.max_supported_level for entry in catalog.classes} == {
         "barbarian": 2,
-        "fighter": 2,
+        "fighter": 5,
         "monk": 2,
         "rogue": 2,
         "wizard": 1,
@@ -290,8 +388,8 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
 def test_default_player_preset_loads_fighter_barbarian_and_two_rogues() -> None:
     encounter = create_encounter(EncounterConfig(seed="default-mixed-party", enemy_preset_id="goblin_screen"))
 
-    assert encounter.units["F1"].loadout_id == "fighter_level2_sample_build"
-    assert encounter.units["F1"].level == 2
+    assert encounter.units["F1"].loadout_id == "fighter_level5_sample_build"
+    assert encounter.units["F1"].level == 5
     assert encounter.units["F2"].loadout_id == "barbarian_level2_sample_build"
     assert encounter.units["F2"].level == 2
     assert encounter.units["F3"].loadout_id == "rogue_ranged_level2_sample_build"
@@ -299,7 +397,7 @@ def test_default_player_preset_loads_fighter_barbarian_and_two_rogues() -> None:
     assert encounter.units["F4"].loadout_id == "rogue_melee_level2_sample_build"
     assert encounter.units["F4"].level == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 82
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 106
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:

@@ -1330,7 +1330,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "id": "fighter",
       "displayName": "Fighter",
       "category": "martial",
-      "maxSupportedLevel": 2
+      "maxSupportedLevel": 5
     },
     {
       "id": "monk",
@@ -1438,6 +1438,79 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "featureIds": [
         "second_wind",
         "action_surge",
+        "great_weapon_fighting",
+        "savage_attacker",
+        "weapon_mastery_graze",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "flail",
+        "greatsword",
+        "javelin"
+      ]
+    },
+    {
+      "id": "fighter_level3_sample_build",
+      "displayName": "Level 3 Fighter Battle Master Sample Build",
+      "classId": "fighter",
+      "level": 3,
+      "maxHp": 29,
+      "featureIds": [
+        "second_wind",
+        "action_surge",
+        "combat_superiority",
+        "student_of_war",
+        "great_weapon_fighting",
+        "savage_attacker",
+        "weapon_mastery_graze",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "flail",
+        "greatsword",
+        "javelin"
+      ]
+    },
+    {
+      "id": "fighter_level4_sample_build",
+      "displayName": "Level 4 Fighter Battle Master Sample Build",
+      "classId": "fighter",
+      "level": 4,
+      "maxHp": 37,
+      "featureIds": [
+        "second_wind",
+        "action_surge",
+        "combat_superiority",
+        "student_of_war",
+        "great_weapon_master",
+        "great_weapon_fighting",
+        "savage_attacker",
+        "weapon_mastery_graze",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "flail",
+        "greatsword",
+        "javelin"
+      ]
+    },
+    {
+      "id": "fighter_level5_sample_build",
+      "displayName": "Level 5 Fighter Battle Master Sample Build",
+      "classId": "fighter",
+      "level": 5,
+      "maxHp": 45,
+      "featureIds": [
+        "second_wind",
+        "action_surge",
+        "combat_superiority",
+        "student_of_war",
+        "great_weapon_master",
+        "extra_attack",
+        "tactical_shift",
         "great_weapon_fighting",
         "savage_attacker",
         "weapon_mastery_graze",
@@ -1608,6 +1681,63 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         {
           "unitId": "F3",
           "loadoutId": "fighter_level2_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "fighter_level3_sample_trio",
+      "displayName": "Level 3 Fighter Battle Master Trio",
+      "description": "Three level 3 great-weapon Battle Master fighters with Superiority Dice.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "fighter_level3_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "fighter_level3_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "fighter_level3_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "fighter_level4_sample_trio",
+      "displayName": "Level 4 Fighter Battle Master Trio",
+      "description": "Three level 4 great-weapon Battle Master fighters with Great Weapon Master.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "fighter_level4_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "fighter_level4_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "fighter_level4_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "fighter_level5_sample_trio",
+      "displayName": "Level 5 Fighter Battle Master Trio",
+      "description": "Three level 5 great-weapon Battle Master fighters with Extra Attack and Tactical Shift.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "fighter_level5_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "fighter_level5_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "fighter_level5_sample_build"
         }
       ]
     },
@@ -1785,11 +1915,11 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
     {
       "id": "martial_mixed_party",
       "displayName": "Mixed Martial Party",
-      "description": "One level 2 fighter, one level 2 barbarian, one level 2 ranged rogue, and one level 2 melee rogue.",
+      "description": "One level 5 Battle Master fighter, one level 2 barbarian, one level 2 ranged rogue, and one level 2 melee rogue.",
       "units": [
         {
           "unitId": "F1",
-          "loadoutId": "fighter_level2_sample_build"
+          "loadoutId": "fighter_level5_sample_build"
         },
         {
           "unitId": "F2",
@@ -1825,6 +1955,9 @@ const ACTIVE_ENEMY_PRESET_IDS = [
 const ACTIVE_PLAYER_PRESET_IDS = [
   'fighter_sample_trio',
   'fighter_level2_sample_trio',
+  'fighter_level3_sample_trio',
+  'fighter_level4_sample_trio',
+  'fighter_level5_sample_trio',
   'rogue_ranged_trio',
   'rogue_melee_trio',
   'rogue_level2_ranged_trio',
@@ -1899,6 +2032,7 @@ function buildUnit(
       rageUses: 0,
       handaxes: 0,
       actionSurgeUses: 0,
+      superiorityDice: 0,
       focusPoints: 0,
       uncannyMetabolismUses: 0,
       spellSlotsLevel1: 0,
@@ -2372,7 +2506,7 @@ describe('App', () => {
 
     const mixedParty = TEST_PLAYER_CATALOG.playerPresets.find((preset) => preset.id === 'martial_mixed_party');
     expect(mixedParty?.units).toEqual([
-      { unitId: 'F1', loadoutId: 'fighter_level2_sample_build' },
+      { unitId: 'F1', loadoutId: 'fighter_level5_sample_build' },
       { unitId: 'F2', loadoutId: 'barbarian_level2_sample_build' },
       { unitId: 'F3', loadoutId: 'rogue_ranged_level2_sample_build' },
       { unitId: 'F4', loadoutId: 'rogue_melee_level2_sample_build' },

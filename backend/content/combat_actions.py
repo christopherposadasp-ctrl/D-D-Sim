@@ -88,6 +88,12 @@ COMBAT_ACTIONS: dict[str, CombatActionDefinition] = {
         timing="bonus_action",
         description="Spend 1 Focus Point to make two unarmed strikes as a bonus action.",
     ),
+    "great_weapon_master_hewing": CombatActionDefinition(
+        action_id="great_weapon_master_hewing",
+        display_name="Hew",
+        timing="bonus_action",
+        description="Great Weapon Master bonus attack after a melee critical hit or dropping a target to 0 HP.",
+    ),
     "patient_defense": CombatActionDefinition(
         action_id="patient_defense",
         display_name="Patient Defense",

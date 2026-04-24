@@ -27,6 +27,7 @@ from backend.engine.models.state import (
 from backend.engine.rules.combat_rules import (
     build_spell_attack_profile,
     can_apply_sneak_attack,
+    can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
     get_damage_defense_flags,
     get_rage_damage_bonus,
@@ -57,6 +58,12 @@ from backend.engine.rules.spatial import (
     path_provokes_opportunity_attack,
 )
 from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions
+
+
+SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN = 2
+SMART_PRECISION_ATTACK_PRESSURE_MAX_MISS_MARGIN = 4
+SMART_PRECISION_ATTACK_FINISHER_MAX_MISS_MARGIN = 4
+DUMB_PRECISION_ATTACK_MAX_MISS_MARGIN = 8
 
 
 @dataclass
@@ -284,6 +291,33 @@ def can_use_action_surge(actor: UnitState) -> bool:
     )
 
 
+def can_use_tactical_shift(actor: UnitState, decision: TurnDecision) -> bool:
+    return bool(
+        is_player_fighter(actor)
+        and unit_has_feature(actor, "tactical_shift")
+        and decision.bonus_action
+        and decision.bonus_action.get("kind") == "second_wind"
+        and actor.resources.second_wind_uses > 0
+        and actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+    )
+
+
+def is_player_battle_master(actor: UnitState) -> bool:
+    return is_player_fighter(actor) and unit_has_feature(actor, "combat_superiority")
+
+
+def target_is_trip_eligible(target: UnitState) -> bool:
+    return (
+        target.current_hp > 0
+        and not target.conditions.dead
+        and not target.conditions.unconscious
+        and not target.conditions.prone
+        and target.size_category in {"tiny", "small", "medium", "large"}
+    )
+
+
 def is_barbarian_under_immediate_melee_threat(
     state: EncounterState,
     actor: UnitState,
@@ -340,6 +374,72 @@ def apply_barbarian_rage_upkeep(actor: UnitState, decision: TurnDecision) -> Tur
     if decision.action["kind"] != "attack":
         decision.bonus_action = {"kind": "rage", "timing": "after_action"}
 
+    return decision
+
+
+def get_tactical_shift_budget_squares(actor: UnitState, state: EncounterState) -> int:
+    return max(0, get_move_squares(actor, state) // 2)
+
+
+def choose_tactical_shift_movement(
+    state: EncounterState,
+    actor: UnitState,
+    position_index: PositionIndex | None = None,
+) -> MovementPlan | None:
+    if not actor.position:
+        return None
+
+    budget = get_tactical_shift_budget_squares(actor, state)
+    if budget <= 0:
+        return None
+
+    enemy_faction = "goblins" if actor.faction == "fighters" else "fighters"
+    actor_footprint = get_unit_footprint(actor)
+    current_adjacent_count = len(get_adjacent_conscious_enemies_at_position(state, actor, actor.position))
+    current_distance = get_min_distance_to_faction(state, actor.position, enemy_faction, position_index, actor_footprint)
+    candidates = [square for square in get_reachable_squares(state, actor.id, budget, position_index) if square.distance > 0]
+    improvements: list[tuple[ReachableSquare, int, int]] = []
+
+    for square in candidates:
+        adjacent_count = len(get_adjacent_conscious_enemies_at_position(state, actor, square.position))
+        distance_to_enemy = get_min_distance_to_faction(state, square.position, enemy_faction, position_index, actor_footprint)
+        if adjacent_count < current_adjacent_count or distance_to_enemy > current_distance:
+            improvements.append((square, adjacent_count, distance_to_enemy))
+
+    if not improvements:
+        return None
+
+    if state.player_behavior == "smart":
+        best_square = sorted(
+            improvements,
+            key=lambda option: (
+                option[1],
+                -option[2],
+                option[0].distance,
+                option[0].position.x,
+                option[0].position.y,
+            ),
+        )[0][0]
+    else:
+        best_square = sorted(improvements, key=lambda option: (option[0].distance, option[0].position.x, option[0].position.y))[0][0]
+
+    return MovementPlan(path=best_square.path, mode="tactical_shift")
+
+
+def apply_fighter_tactical_shift(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    position_index: PositionIndex | None = None,
+) -> TurnDecision:
+    if not can_use_tactical_shift(actor, decision):
+        return decision
+    if decision.pre_action_movement or decision.between_action_movement or decision.post_action_movement:
+        return decision
+
+    tactical_shift = choose_tactical_shift_movement(state, actor, position_index)
+    if tactical_shift:
+        decision.post_action_movement = tactical_shift
     return decision
 
 
@@ -428,6 +528,138 @@ def apply_fighter_action_surge(
     return decision
 
 
+def attack_action_uses_melee_weapon(actor: UnitState, action: dict[str, str] | None) -> bool:
+    if not action or action.get("kind") != "attack":
+        return False
+    weapon = actor.attacks.get(action.get("weapon_id", ""))
+    return bool(weapon and weapon.kind == "melee")
+
+
+def estimate_average_weapon_damage(weapon: WeaponProfile) -> float:
+    if weapon.damage_components:
+        dice_average = sum(spec.count * (spec.sides + 1) / 2 for component in weapon.damage_components for spec in component.damage_dice)
+        modifier = sum(component.damage_modifier for component in weapon.damage_components)
+        return dice_average + modifier
+    return sum(spec.count * (spec.sides + 1) / 2 for spec in weapon.damage_dice) + weapon.damage_modifier
+
+
+def get_smart_precision_max_miss_margin(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    weapon: WeaponProfile,
+    dice_available: int,
+) -> int:
+    estimated_damage = estimate_average_weapon_damage(weapon)
+    if target.current_hp <= estimated_damage:
+        return SMART_PRECISION_ATTACK_FINISHER_MAX_MISS_MARGIN
+    if can_pressure_allies_now(state, target, actor.faction):
+        return SMART_PRECISION_ATTACK_PRESSURE_MAX_MISS_MARGIN
+    return SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN
+
+
+def get_player_attack_step_count(actor: UnitState, action: dict[str, str]) -> int:
+    if action.get("kind") != "attack":
+        return 0
+    try:
+        return len(
+            get_attack_action_definition_for_unit(
+                actor,
+                preferred_weapon_id=action.get("weapon_id"),
+                action_id=action.get("attack_action_id"),
+            ).steps
+        )
+    except ValueError:
+        return 1
+
+
+def set_attack_maneuver_intent(
+    action: dict[str, str],
+    step_index: int,
+    step_count: int,
+    maneuver_id: str,
+    precision_max_miss_margin: int | None = None,
+) -> None:
+    if step_count <= 1:
+        action["maneuver_id"] = maneuver_id
+        if precision_max_miss_margin is not None:
+            action["precision_max_miss_margin"] = precision_max_miss_margin
+        return
+
+    maneuver_intents = action.get("maneuver_intents")
+    if not isinstance(maneuver_intents, list) or len(maneuver_intents) != step_count:
+        maneuver_intents = [{} for _ in range(step_count)]
+        action["maneuver_intents"] = maneuver_intents
+
+    step_intent = {"maneuver_id": maneuver_id}
+    if precision_max_miss_margin is not None:
+        step_intent["precision_max_miss_margin"] = precision_max_miss_margin
+    maneuver_intents[step_index] = step_intent
+
+
+def apply_fighter_maneuver_intents(state: EncounterState, actor: UnitState, decision: TurnDecision) -> TurnDecision:
+    if not is_player_battle_master(actor) or actor.resources.superiority_dice <= 0:
+        return decision
+
+    attack_actions = [action for action in (decision.action, decision.surged_action) if action and action.get("kind") == "attack"]
+    if not attack_actions:
+        return decision
+
+    attack_steps: list[tuple[dict[str, str], int, int]] = []
+    for action in attack_actions:
+        step_count = get_player_attack_step_count(actor, action)
+        attack_steps.extend((action, step_index, step_count) for step_index in range(step_count))
+
+    if state.player_behavior == "dumb":
+        dice_available = actor.resources.superiority_dice
+        for action, step_index, step_count in attack_steps:
+            if dice_available <= 0:
+                break
+            if action.get("maneuver_id"):
+                continue
+            set_attack_maneuver_intent(action, step_index, step_count, "battle_master_auto", DUMB_PRECISION_ATTACK_MAX_MISS_MARGIN)
+            dice_available -= 1
+        return decision
+
+    dice_available = actor.resources.superiority_dice
+    trip_planned = False
+    for index, (action, step_index, step_count) in enumerate(attack_steps):
+        if action.get("maneuver_id"):
+            continue
+
+        target = state.units.get(action.get("target_id", ""))
+        weapon = actor.attacks.get(action.get("weapon_id", ""))
+        if not target or not weapon:
+            continue
+
+        has_follow_up_melee_attack = any(
+            later_action is not action or later_step_index != step_index
+            for later_action, later_step_index, _ in attack_steps[index + 1 :]
+            if attack_action_uses_melee_weapon(actor, later_action)
+        )
+        if (
+            weapon.kind == "melee"
+            and has_follow_up_melee_attack
+            and not trip_planned
+            and target_is_trip_eligible(target)
+            and dice_available > 1
+            and can_use_battle_master_maneuver(actor, "trip_attack")
+        ):
+            set_attack_maneuver_intent(action, step_index, step_count, "trip_attack")
+            dice_available -= 1
+            trip_planned = True
+            continue
+
+        precision_max_miss_margin = get_smart_precision_max_miss_margin(state, actor, target, weapon, dice_available)
+        if can_use_battle_master_maneuver(actor, "precision_attack") and (
+            dice_available > 1 or precision_max_miss_margin == SMART_PRECISION_ATTACK_FINISHER_MAX_MISS_MARGIN
+        ):
+            set_attack_maneuver_intent(action, step_index, step_count, "precision_attack", precision_max_miss_margin)
+            dice_available -= 1
+
+    return decision
+
+
 def should_commit_barbarian_rage(
     state: EncounterState,
     actor: UnitState,
@@ -453,7 +685,8 @@ def finalize_player_bonus_action_decision(
     decision = apply_monk_martial_arts(state, actor, decision)
     decision = apply_rogue_cunning_action(state, actor, decision, position_index)
     decision = apply_barbarian_opening_rage(state, actor, decision, position_index)
-    return apply_barbarian_rage_upkeep(actor, decision)
+    decision = apply_barbarian_rage_upkeep(actor, decision)
+    return apply_fighter_tactical_shift(state, actor, decision, position_index)
 
 
 def finalize_player_turn_decision(
@@ -464,6 +697,7 @@ def finalize_player_turn_decision(
     position_index: PositionIndex | None = None,
 ) -> TurnDecision:
     decision = apply_fighter_action_surge(state, actor, decision, melee_weapon_id, position_index)
+    decision = apply_fighter_maneuver_intents(state, actor, decision)
     return finalize_player_bonus_action_decision(state, actor, decision, position_index)
 
 

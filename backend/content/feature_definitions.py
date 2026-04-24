@@ -20,6 +20,7 @@ class FeatureDefinition:
     granted_action_ids: tuple[str, ...] = ()
     granted_bonus_action_ids: tuple[str, ...] = ()
     granted_reaction_ids: tuple[str, ...] = ()
+    granted_maneuver_ids: tuple[str, ...] = ()
 
 
 FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
@@ -35,6 +36,32 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         display_name="Action Surge",
         kind="class_feature",
         description="Once per encounter, take one additional action on your turn.",
+    ),
+    "combat_superiority": FeatureDefinition(
+        feature_id="combat_superiority",
+        display_name="Combat Superiority",
+        kind="class_feature",
+        description="Battle Master maneuvers fueled by d8 Superiority Dice.",
+        granted_maneuver_ids=("precision_attack", "riposte", "trip_attack"),
+    ),
+    "student_of_war": FeatureDefinition(
+        feature_id="student_of_war",
+        display_name="Student of War",
+        kind="class_feature",
+        description="Battle Master level 3 non-combat proficiency support tracked as metadata.",
+    ),
+    "great_weapon_master": FeatureDefinition(
+        feature_id="great_weapon_master",
+        display_name="Great Weapon Master",
+        kind="feat",
+        description="Strength increase plus heavy-weapon damage and Hew bonus attacks for great-weapon strikes.",
+        granted_bonus_action_ids=("great_weapon_master_hewing",),
+    ),
+    "tactical_shift": FeatureDefinition(
+        feature_id="tactical_shift",
+        display_name="Tactical Shift",
+        kind="class_feature",
+        description="When Second Wind is used, the fighter can shift up to half speed without provoking opportunity attacks.",
     ),
     "great_weapon_fighting": FeatureDefinition(
         feature_id="great_weapon_fighting",
@@ -176,7 +203,7 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         feature_id="extra_attack",
         display_name="Extra Attack",
         kind="class_feature",
-        description="Future multi-attack progression primitive for players.",
+        description="The fighter makes two weapon attacks when taking the Attack action.",
     ),
 }
 
@@ -201,3 +228,14 @@ def get_granted_bonus_action_ids_for_unit(unit: UnitState) -> tuple[str, ...]:
 
 def unit_has_granted_bonus_action(unit: UnitState, action_id: str) -> bool:
     return action_id in get_granted_bonus_action_ids_for_unit(unit)
+
+
+def get_granted_maneuver_ids_for_unit(unit: UnitState) -> tuple[str, ...]:
+    granted_maneuver_ids: set[str] = set()
+    for feature_id in unit.feature_ids:
+        granted_maneuver_ids.update(get_feature_definition(feature_id).granted_maneuver_ids)
+    return tuple(sorted(granted_maneuver_ids))
+
+
+def unit_has_granted_maneuver(unit: UnitState, maneuver_id: str) -> bool:
+    return maneuver_id in get_granted_maneuver_ids_for_unit(unit)

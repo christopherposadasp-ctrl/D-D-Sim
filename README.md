@@ -23,7 +23,7 @@ This repository now contains:
 
 Current live martial class support:
 
-- Fighter supported to level 2
+- Fighter supported to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian supported to level 2
 - Rogue supported to level 2
 - Monk supported to level 2
@@ -32,7 +32,7 @@ Current live martial class support:
 Current default player preset:
 
 - `martial_mixed_party`
-- level 2 fighter
+- level 5 Battle Master fighter
 - level 2 barbarian
 - level 2 ranged rogue
 - level 2 melee rogue

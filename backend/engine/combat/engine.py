@@ -16,6 +16,7 @@ from backend.engine.ai.decision import (
     choose_turn_decision,
     get_enemy_melee_weapon_id,
     get_ranked_attack_targets,
+    get_smart_precision_max_miss_margin,
 )
 from backend.engine.combat.setup import create_encounter
 from backend.engine.models.state import (
@@ -43,6 +44,7 @@ from backend.engine.rules.combat_rules import (
     attempt_second_wind,
     attempt_stabilize,
     attempt_step_of_the_wind,
+    can_use_battle_master_maneuver,
     clear_invalid_hidden_effects,
     create_skip_event,
     expire_turn_effects,
@@ -192,6 +194,74 @@ def build_attack_reaction_phase_events(state: EncounterState, attack_event: Comb
     return []
 
 
+def maybe_resolve_riposte_follow_up(state: EncounterState, attack_event: CombatEvent) -> list[CombatEvent]:
+    if attack_event.event_type != "attack" or attack_event.resolved_totals.get("hit") is not False:
+        return []
+    if attack_event.resolved_totals.get("spellId"):
+        return []
+    if not attack_event.target_ids or not attack_event.damage_details:
+        return []
+
+    defender_id = attack_event.target_ids[0]
+    attacker_id = attack_event.actor_id
+    defender = state.units.get(defender_id)
+    attacker = state.units.get(attacker_id)
+    if not defender or not attacker or defender.faction != "fighters" or attacker.faction == defender.faction:
+        return []
+
+    incoming_weapon = attacker.attacks.get(attack_event.damage_details.weapon_id)
+    if not incoming_weapon or incoming_weapon.kind != "melee":
+        return []
+    if not unit_can_take_reactions(defender) or not can_use_battle_master_maneuver(defender, "riposte"):
+        return []
+    if attacker.conditions.dead or attacker.current_hp <= 0 or not attacker.position or not defender.position:
+        return []
+
+    riposte_weapon_id = get_opportunity_attack_weapon_id(defender)
+    riposte_weapon = defender.attacks.get(riposte_weapon_id)
+    if not riposte_weapon or not get_attack_context(state, defender_id, attacker_id, riposte_weapon).legal:
+        return []
+
+    precision_max_miss_margin = None
+    if state.player_behavior == "smart":
+        precision_max_miss_margin = get_smart_precision_max_miss_margin(
+            state, defender, attacker, riposte_weapon, defender.resources.superiority_dice
+        )
+    elif state.player_behavior == "dumb":
+        precision_max_miss_margin = 8
+
+    defender.reaction_available = False
+    phase_event = add_unit_phase_event(
+        state,
+        defender_id,
+        attacker_id,
+        f"{defender_id} uses Riposte against {attacker_id}.",
+        condition_deltas=[f"{defender_id} spends a reaction on Riposte."],
+        resolved_totals={"reaction": "riposte"},
+    )
+    riposte_attack, _ = resolve_attack(
+        state,
+        ResolveAttackArgs(
+            attacker_id=defender_id,
+            target_id=attacker_id,
+            weapon_id=riposte_weapon_id,
+            savage_attacker_available=unit_has_feature(defender, "savage_attacker"),
+            maneuver_id="riposte",
+            precision_max_miss_margin=precision_max_miss_margin,
+        ),
+    )
+    events = [phase_event]
+    events.extend(build_attack_reaction_pre_events(state, riposte_attack))
+    events.extend(build_attack_reaction_phase_events(state, riposte_attack))
+    events.append(riposte_attack)
+
+    if state.units[attacker_id].conditions.dead:
+        events.extend(release_grappled_targets_from_source(state, attacker_id, "source_dead"))
+        events.extend(release_swallowed_units_from_source(state, attacker_id))
+
+    return events
+
+
 def update_encounter_phase(state: EncounterState, actor_id: str) -> list[CombatEvent]:
     events: list[CombatEvent] = []
 
@@ -206,6 +276,9 @@ def update_encounter_phase(state: EncounterState, actor_id: str) -> list[CombatE
 
 def clear_turn_flags(actor: UnitState) -> None:
     actor._cleave_used_this_turn = False
+    actor._bonus_action_used_this_turn = False
+    actor._great_weapon_master_hewing_used_this_turn = False
+    actor._savage_attacker_used_this_turn = False
     actor._rage_extended_this_turn = False
     actor._reckless_attack_available_this_turn = unit_has_feature(actor, "reckless_attack")
 
@@ -365,6 +438,34 @@ def get_total_movement_budget(
     bonus_multiplier = get_extra_movement_multiplier(bonus_action["kind"] if bonus_action else None)
     total_budget = move_squares * (1 + action_multiplier + bonus_multiplier)
     return max(0, total_budget - get_stand_up_cost_squares(actor))
+
+
+def get_tactical_shift_budget(actor: UnitState, state: EncounterState | None = None) -> int:
+    if not unit_has_feature(actor, "tactical_shift"):
+        return 0
+    return max(0, get_move_squares(state, actor) // 2)
+
+
+def movement_distance(movement: MovementPlan | None) -> int:
+    if not movement or len(movement.path) <= 1:
+        return 0
+    return len(movement.path) - 1
+
+
+def is_tactical_shift_movement(movement: MovementPlan | None) -> bool:
+    return bool(movement and movement.mode == "tactical_shift")
+
+
+def can_apply_tactical_shift(actor: UnitState, decision: TurnDecision) -> bool:
+    return bool(
+        unit_has_feature(actor, "tactical_shift")
+        and decision.bonus_action
+        and decision.bonus_action.get("kind") == "second_wind"
+        and actor.resources.second_wind_uses > 0
+        and actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+    )
 
 
 def bonus_action_applies_disengage(bonus_action: dict[str, str] | None) -> bool:
@@ -1132,6 +1233,126 @@ def maybe_resolve_cleave_follow_up(
     return [follow_up_event], savage_consumed, cleave_target_id
 
 
+def get_great_weapon_master_hewing_trigger(
+    events: list[CombatEvent],
+    actor_id: str,
+) -> CombatEvent | None:
+    for event in events:
+        if event.actor_id != actor_id or event.event_type != "attack":
+            continue
+        if event.resolved_totals.get("greatWeaponMasterHewingTrigger") is True:
+            return event
+    return None
+
+
+def get_great_weapon_master_hewing_target_id(
+    state: EncounterState,
+    actor_id: str,
+    trigger_event: CombatEvent,
+    weapon_id: str,
+) -> str | None:
+    actor = state.units[actor_id]
+    weapon = actor.attacks.get(weapon_id)
+    if not weapon:
+        return None
+
+    original_target_id = trigger_event.target_ids[0] if trigger_event.target_ids else None
+    if original_target_id:
+        original_target = state.units.get(original_target_id)
+        if (
+            original_target
+            and original_target.current_hp > 0
+            and not original_target.conditions.dead
+            and not original_target.conditions.unconscious
+            and get_attack_context(state, actor_id, original_target_id, weapon).legal
+        ):
+            return original_target_id
+
+    for target in get_ranked_attack_targets(state, actor, preferred_weapon_id=weapon_id):
+        if target.current_hp <= 0 or target.conditions.dead or target.conditions.unconscious:
+            continue
+        if get_attack_context(state, actor_id, target.id, weapon).legal:
+            return target.id
+
+    return None
+
+
+def maybe_resolve_great_weapon_master_hewing(
+    state: EncounterState,
+    actor_id: str,
+    turn_events: list[CombatEvent],
+    *,
+    planned_bonus_action: dict[str, str] | None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if planned_bonus_action or actor._bonus_action_used_this_turn:
+        return []
+    if actor._great_weapon_master_hewing_used_this_turn:
+        return []
+    if not unit_has_feature(actor, "great_weapon_master"):
+        return []
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return []
+
+    trigger_event = get_great_weapon_master_hewing_trigger(turn_events, actor_id)
+    if not trigger_event or not trigger_event.damage_details:
+        return []
+
+    weapon_id = trigger_event.damage_details.weapon_id
+    target_id = get_great_weapon_master_hewing_target_id(state, actor_id, trigger_event, weapon_id)
+    if not target_id:
+        return []
+
+    actor._bonus_action_used_this_turn = True
+    actor._great_weapon_master_hewing_used_this_turn = True
+    trigger_reason = trigger_event.resolved_totals.get("greatWeaponMasterHewingTriggerReason") or "trigger"
+    phase_event = add_unit_phase_event(
+        state,
+        actor_id,
+        target_id,
+        f"{actor_id} uses Great Weapon Master: Hew against {target_id}.",
+        condition_deltas=[f"{actor_id} makes a Hew bonus attack after a {trigger_reason}."],
+        resolved_totals={
+            "bonusAction": "great_weapon_master_hewing",
+            "triggerReason": trigger_reason,
+        },
+    )
+    hewing_attack, savage_consumed = resolve_attack(
+        state,
+        ResolveAttackArgs(
+            attacker_id=actor_id,
+            target_id=target_id,
+            weapon_id=weapon_id,
+            savage_attacker_available=unit_has_feature(actor, "savage_attacker")
+            and not actor._savage_attacker_used_this_turn,
+        ),
+    )
+    if savage_consumed:
+        actor._savage_attacker_used_this_turn = True
+
+    events = [phase_event]
+    events.extend(build_attack_reaction_pre_events(state, hewing_attack))
+    events.extend(build_attack_reaction_phase_events(state, hewing_attack))
+    events.append(hewing_attack)
+
+    for hewing_target_id in hewing_attack.target_ids:
+        if state.units[hewing_target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, hewing_target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, hewing_target_id))
+
+    return events
+
+
+def get_attack_step_maneuver_intent(action: dict[str, str], step_index: int) -> tuple[str | None, int | None]:
+    maneuver_intents = action.get("maneuver_intents")
+    if isinstance(maneuver_intents, list) and step_index < len(maneuver_intents):
+        step_intent = maneuver_intents[step_index]
+        if isinstance(step_intent, dict):
+            return step_intent.get("maneuver_id"), step_intent.get("precision_max_miss_margin")
+
+    return action.get("maneuver_id"), action.get("precision_max_miss_margin")
+
+
 def resolve_attack_action(
     state: EncounterState,
     actor_id: str,
@@ -1176,6 +1397,7 @@ def resolve_attack_action(
             reckless_event = maybe_commit_reckless_attack(state, actor_id, target_id, weapon_id)
             if reckless_event:
                 attack_events.append(reckless_event)
+        maneuver_id, precision_max_miss_margin = get_attack_step_maneuver_intent(action, step_index)
         attack_event, savage_consumed = resolve_attack(
             state,
             ResolveAttackArgs(
@@ -1184,16 +1406,21 @@ def resolve_attack_action(
                 weapon_id=weapon_id,
                 savage_attacker_available=savage_attacker_available,
                 overrides=step_overrides[step_index] if step_overrides and step_index < len(step_overrides) else None,
+                maneuver_id=maneuver_id,
+                precision_max_miss_margin=precision_max_miss_margin,
+                great_weapon_master_eligible=True,
             ),
         )
         attack_events.extend(build_attack_reaction_pre_events(state, attack_event))
         attack_events.extend(build_attack_reaction_phase_events(state, attack_event))
         attack_events.append(attack_event)
+        attack_events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
         cleave_events: list[CombatEvent] = []
         resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else target_id
 
         if savage_consumed:
             savage_attacker_available = False
+            actor._savage_attacker_used_this_turn = True
 
         if attack_event.resolved_totals.get("hit"):
             cleave_events, cleave_savage_consumed, cleave_target_id = maybe_resolve_cleave_follow_up(
@@ -1210,6 +1437,7 @@ def resolve_attack_action(
             attack_events.extend(cleave_events)
             if cleave_savage_consumed:
                 savage_attacker_available = False
+                actor._savage_attacker_used_this_turn = True
 
             attack_events.extend(maybe_resolve_rampage_follow_up(state, actor_id, attack_event))
 
@@ -1283,6 +1511,9 @@ def create_movement_event(
     start = path[0]
     end = path[-1]
     distance = len(path) - 1
+    tactical_shift_applied = mode == "tactical_shift"
+    movement_verb = "tactically shifts" if tactical_shift_applied else "dashes" if mode == "dash" else "moves"
+    protection_note = " using Tactical Shift" if tactical_shift_applied else " using Disengage" if disengage_applied else ""
     return CombatEvent(
         round=state.round,
         actor_id=actor_id,
@@ -1293,14 +1524,15 @@ def create_movement_event(
             "movementMode": mode,
             "movementPhase": phase,
             "disengageApplied": disengage_applied,
+            "tacticalShiftApplied": tactical_shift_applied,
             "opportunityAttackers": triggered_attackers,
         },
         movement_details=MovementDetails(start=start, end=end, path=path, distance=distance),
         damage_details=None,
         condition_deltas=condition_deltas or [],
         text_summary=(
-            f"{actor_id} {'dashes' if mode == 'dash' else 'moves'} {distance} square{'s' if distance != 1 else ''} "
-            f"from {format_position(start)} to {format_position(end)}{' using Disengage' if disengage_applied else ''} "
+            f"{actor_id} {movement_verb} {distance} square{'s' if distance != 1 else ''} "
+            f"from {format_position(start)} to {format_position(end)}{protection_note} "
             f"{'before acting' if phase == 'before_action' else 'between actions' if phase == 'between_actions' else 'after acting'}."
         ),
     )
@@ -1323,6 +1555,7 @@ def execute_movement(
     path_travelled = [movement.path[0]]
     reaction_events: list[CombatEvent] = []
     triggered_attackers: list[str] = []
+    opportunity_attacks_prevented = disengage_applied or movement.mode == "tactical_shift"
 
     for index in range(1, len(movement.path)):
         previous = movement.path[index - 1]
@@ -1330,7 +1563,7 @@ def execute_movement(
         actor.position = next_position.model_copy(deep=True)
         path_travelled.append(next_position.model_copy(deep=True))
 
-        if disengage_applied:
+        if opportunity_attacks_prevented:
             continue
 
         opportunity_attackers = sorted(
@@ -1370,11 +1603,13 @@ def execute_movement(
                     weapon_id=get_opportunity_attack_weapon_id(reaction_unit),
                     savage_attacker_available=unit_has_feature(reaction_unit, "savage_attacker"),
                     is_opportunity_attack=True,
+                    maneuver_id="precision_attack" if reaction_unit.faction == "fighters" else None,
                 ),
             )
             reaction_events.extend(build_attack_reaction_pre_events(state, attack_event))
             reaction_events.extend(build_attack_reaction_phase_events(state, attack_event))
             reaction_events.append(attack_event)
+            reaction_events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
             resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else actor_id
 
             if attack_event.resolved_totals.get("hit"):
@@ -1643,6 +1878,8 @@ def resolve_bonus_action_events(
     if not bonus_action:
         return []
 
+    state.units[actor_id]._bonus_action_used_this_turn = True
+
     if bonus_action["kind"] in {"bonus_unarmed_strike", "flurry_of_blows"}:
         return resolve_bonus_attack_action(state, actor_id, bonus_action)
 
@@ -1674,14 +1911,18 @@ def resolve_action_surge(state: EncounterState, actor_id: str) -> CombatEvent:
 
 
 def exceeds_movement_budget(state: EncounterState, actor: UnitState, decision: TurnDecision) -> bool:
-    total_distance = 0
-    if decision.pre_action_movement:
-        total_distance += len(decision.pre_action_movement.path) - 1
-    if decision.between_action_movement:
-        total_distance += len(decision.between_action_movement.path) - 1
-    if decision.post_action_movement:
-        total_distance += len(decision.post_action_movement.path) - 1
-    return total_distance > get_total_movement_budget(
+    movement_legs = [decision.pre_action_movement, decision.between_action_movement, decision.post_action_movement]
+    tactical_shift_distance = sum(movement_distance(movement) for movement in movement_legs if is_tactical_shift_movement(movement))
+    tactical_shift_legs = sum(1 for movement in movement_legs if is_tactical_shift_movement(movement) and movement_distance(movement) > 0)
+    normal_distance = sum(movement_distance(movement) for movement in movement_legs if not is_tactical_shift_movement(movement))
+
+    if tactical_shift_distance > 0:
+        if tactical_shift_legs > 1 or not can_apply_tactical_shift(actor, decision):
+            return True
+        if tactical_shift_distance > get_tactical_shift_budget(actor, state):
+            return True
+
+    return normal_distance > get_total_movement_budget(
         actor,
         decision.action,
         decision.bonus_action,
@@ -1821,6 +2062,7 @@ def execute_decision(
     )
     events.extend(pre_events)
 
+    action_sequence_start_index = len(events)
     if can_act_after_movement(state.units[actor_id]):
         resolve_turn_action(state, actor_id, decision.action, events, rescue_mode=rescue_mode)
 
@@ -1841,6 +2083,16 @@ def execute_decision(
 
         if action_surge_event.event_type != "skip" and can_act_after_movement(state.units[actor_id]):
             resolve_turn_action(state, actor_id, decision.surged_action, events, rescue_mode=rescue_mode)
+
+    if can_act_after_movement(state.units[actor_id]):
+        events.extend(
+            maybe_resolve_great_weapon_master_hewing(
+                state,
+                actor_id,
+                events[action_sequence_start_index:],
+                planned_bonus_action=decision.bonus_action,
+            )
+        )
 
     if can_act_after_movement(state.units[actor_id]) and decision.bonus_action and decision.bonus_action["timing"] == "after_action":
         events.extend(resolve_bonus_action_events(state, actor_id, decision.bonus_action))
@@ -1976,6 +2228,7 @@ def run_batch_parallel(
     requested_monster_behavior: str,
     seed: str,
     progress_callback=None,
+    worker_count=None,
 ):
     """Compatibility wrapper for the extracted parallel batch executor."""
 
@@ -1988,12 +2241,19 @@ def run_batch_parallel(
         requested_monster_behavior,
         seed,
         progress_callback,
+        worker_count=worker_count,
     )
 
 
-def run_batch(config: EncounterConfig, progress_callback=None):
+def run_batch(
+    config: EncounterConfig,
+    progress_callback=None,
+    *,
+    force_serial: bool = False,
+    worker_count: int | None = None,
+):
     """Compatibility wrapper for the extracted batch module."""
 
     from backend.engine.combat.batch import run_batch as run_batch_impl
 
-    return run_batch_impl(config, progress_callback)
+    return run_batch_impl(config, progress_callback, force_serial=force_serial, worker_count=worker_count)

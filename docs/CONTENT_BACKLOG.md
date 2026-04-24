@@ -106,13 +106,13 @@ Use V4.2 to establish the player-content framework:
 
 ### Current Live Snapshot
 
-- Fighter is live to level 2
+- Fighter is live to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian is live to level 2
 - Rogue is live to level 2
 - Monk is live to level 2 in `V4.2-C`
 - Wizard is live to level 1 as a narrow combat-only slice with `fire_bolt`, `shocking_grasp`, `magic_missile`, `shield`, `burning_hands`, and tracked spell access counts
 - The current default mixed party is:
-  - level 2 fighter
+  - level 5 Battle Master fighter
   - level 2 barbarian
   - level 2 ranged rogue
   - level 2 melee rogue

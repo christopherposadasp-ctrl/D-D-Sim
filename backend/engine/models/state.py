@@ -92,6 +92,7 @@ RESOURCE_FIELD_BY_POOL = {
     "rage": "rage_uses",
     "handaxes": "handaxes",
     "action_surge": "action_surge_uses",
+    "superiority_dice": "superiority_dice",
     "focus_points": "focus_points",
     "uncanny_metabolism": "uncanny_metabolism_uses",
     "spell_slots_level_1": "spell_slots_level_1",
@@ -104,6 +105,7 @@ class ResourceState(CamelModel):
     rage_uses: int
     handaxes: int
     action_surge_uses: int
+    superiority_dice: int
     focus_points: int
     uncanny_metabolism_uses: int
     spell_slots_level_1: int
@@ -351,6 +353,9 @@ class UnitState(CamelModel):
     _rage_qualified_since_turn_end: bool = PrivateAttr(default=False)
     _rage_extended_this_turn: bool = PrivateAttr(default=False)
     _cleave_used_this_turn: bool = PrivateAttr(default=False)
+    _bonus_action_used_this_turn: bool = PrivateAttr(default=False)
+    _great_weapon_master_hewing_used_this_turn: bool = PrivateAttr(default=False)
+    _savage_attacker_used_this_turn: bool = PrivateAttr(default=False)
     _reckless_attack_available_this_turn: bool = PrivateAttr(default=False)
     # Standing from prone consumes movement on the current turn, but that cost
     # should not leak into serialized encounter state.
@@ -386,6 +391,8 @@ class DamageDetails(CamelModel):
     advantage_bonus_candidate: DamageCandidate | None
     mastery_applied: MasteryType | None
     mastery_notes: str | None
+    maneuver_applied: str | None = None
+    maneuver_notes: str | None = None
     attack_riders_applied: list[AttackRiderType] | None = None
     total_damage: int
     resisted_damage: int
@@ -399,6 +406,10 @@ class DamageDetails(CamelModel):
         data = handler(self)
         if data.get("attackRidersApplied") is None:
             data.pop("attackRidersApplied", None)
+        if data.get("maneuverApplied") is None:
+            data.pop("maneuverApplied", None)
+        if data.get("maneuverNotes") is None:
+            data.pop("maneuverNotes", None)
         if data.get("amplifiedDamage") is None:
             data.pop("amplifiedDamage", None)
         return data

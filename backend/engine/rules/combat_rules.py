@@ -5,10 +5,18 @@ from dataclasses import dataclass
 from backend.content.class_progressions import (
     get_monk_focus_points_max,
     get_monk_martial_arts_die_sides,
+    get_proficiency_bonus,
     get_progression_scalar,
 )
 from backend.content.enemies import unit_has_reaction, unit_has_trait
 from backend.content.feature_definitions import unit_has_feature
+from backend.content.maneuver_definitions import (
+    get_maneuver_definition,
+    get_maneuver_save_dc,
+    get_superiority_die_sides,
+    spend_superiority_die,
+    unit_has_maneuver,
+)
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.models.state import (
     AttackId,
@@ -64,12 +72,14 @@ class AttackRollOverrides:
         save_rolls: list[int] | None = None,
         savage_damage_rolls: list[int] | None = None,
         advantage_damage_rolls: list[int] | None = None,
+        superiority_rolls: list[int] | None = None,
     ) -> None:
         self.attack_rolls = attack_rolls or []
         self.damage_rolls = damage_rolls or []
         self.save_rolls = save_rolls or []
         self.savage_damage_rolls = savage_damage_rolls or []
         self.advantage_damage_rolls = advantage_damage_rolls or []
+        self.superiority_rolls = superiority_rolls or []
 
 
 @dataclass
@@ -99,6 +109,9 @@ class ResolveAttackArgs:
         is_opportunity_attack: bool | None = None,
         overrides: AttackRollOverrides | None = None,
         omit_ability_modifier_damage: bool = False,
+        maneuver_id: str | None = None,
+        precision_max_miss_margin: int | None = None,
+        great_weapon_master_eligible: bool = False,
     ) -> None:
         self.attacker_id = attacker_id
         self.target_id = target_id
@@ -108,6 +121,9 @@ class ResolveAttackArgs:
         self.is_opportunity_attack = is_opportunity_attack
         self.overrides = overrides
         self.omit_ability_modifier_damage = omit_ability_modifier_damage
+        self.maneuver_id = maneuver_id
+        self.precision_max_miss_margin = precision_max_miss_margin
+        self.great_weapon_master_eligible = great_weapon_master_eligible
 
 
 class SavingThrowOverrides:
@@ -405,6 +421,97 @@ def get_monk_martial_arts_die_sides_for_unit(unit: UnitState) -> int:
     if unit.class_id != "monk" or unit.level is None:
         return 6
     return get_monk_martial_arts_die_sides(unit.level)
+
+
+def can_use_battle_master_maneuver(unit: UnitState, maneuver_id: str) -> bool:
+    return (
+        unit.current_hp > 0
+        and not unit.conditions.dead
+        and not unit.conditions.unconscious
+        and unit_has_maneuver(unit, maneuver_id)
+        and get_superiority_die_sides(unit) > 0
+        and unit.resources.superiority_dice > 0
+    )
+
+
+def get_great_weapon_master_damage_bonus(attacker: UnitState, weapon: WeaponProfile, eligible: bool) -> int:
+    if not eligible:
+        return 0
+    if not unit_has_feature(attacker, "great_weapon_master"):
+        return 0
+    if weapon.kind != "melee" or weapon.two_handed is not True:
+        return 0
+    if attacker.level is None or attacker.level <= 0:
+        return 0
+    return get_proficiency_bonus(attacker.level)
+
+
+def can_attempt_precision_attack(
+    attacker: UnitState,
+    *,
+    maneuver_intent: str | None,
+    max_miss_margin: int | None,
+    hit: bool,
+    natural_one: bool,
+    attack_total: int,
+    target_ac: int,
+) -> bool:
+    if maneuver_intent not in {"precision_attack", "battle_master_auto"} and not (
+        maneuver_intent == "riposte" and max_miss_margin is not None
+    ):
+        return False
+    if hit or natural_one:
+        return False
+    miss_margin = target_ac - attack_total
+    die_sides = get_superiority_die_sides(attacker)
+    allowed_margin = die_sides if max_miss_margin is None else min(die_sides, max(0, max_miss_margin))
+    return 1 <= miss_margin <= allowed_margin and can_use_battle_master_maneuver(attacker, "precision_attack")
+
+
+def can_attempt_trip_attack(
+    attacker: UnitState,
+    target: UnitState,
+    weapon: WeaponProfile,
+    *,
+    maneuver_intent: str | None,
+    hit: bool,
+    is_opportunity_attack: bool | None,
+) -> bool:
+    if maneuver_intent not in {"trip_attack", "battle_master_auto"}:
+        return False
+    if not hit or is_opportunity_attack:
+        return False
+    if weapon.kind != "melee":
+        return False
+    if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious or target.conditions.prone:
+        return False
+    if not is_within_max_target_size(target.size_category, get_maneuver_definition("trip_attack").max_target_size):
+        return False
+    return can_use_battle_master_maneuver(attacker, "trip_attack")
+
+
+def roll_superiority_damage_component(
+    state: EncounterState,
+    attacker: UnitState,
+    weapon: WeaponProfile,
+    critical_multiplier: int,
+    override_rolls: list[int] | None = None,
+) -> tuple[int, DamageComponentResult]:
+    roll = pull_die(state, get_superiority_die_sides(attacker), override_rolls.pop(0) if override_rolls else None)
+    damage_type = weapon.damage_type or (
+        weapon.damage_components[0].damage_type if weapon.damage_components else "damage"
+    )
+    return (
+        roll,
+        DamageComponentResult(
+            damage_type=damage_type,
+            raw_rolls=[roll],
+            adjusted_rolls=[roll],
+            subtotal=roll,
+            flat_modifier=0,
+            total_damage=roll * critical_multiplier,
+        ),
+    )
 
 
 def roll_sneak_attack_component(
@@ -2232,11 +2339,31 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     overrides = AttackRollOverrides(
         attack_rolls=list(args.overrides.attack_rolls if args.overrides else []),
         damage_rolls=list(args.overrides.damage_rolls if args.overrides else []),
+        save_rolls=list(args.overrides.save_rolls if args.overrides else []),
         savage_damage_rolls=list(args.overrides.savage_damage_rolls if args.overrides else []),
         advantage_damage_rolls=list(args.overrides.advantage_damage_rolls if args.overrides else []),
+        superiority_rolls=list(args.overrides.superiority_rolls if args.overrides else []),
     )
 
     target = state.units[args.target_id]
+    maneuver_intent = args.maneuver_id
+    maneuver_id: str | None = None
+    maneuver_notes: str | None = None
+    maneuver_condition_deltas: list[str] = []
+    superiority_dice_rolls: list[int] = []
+    maneuver_save_rolls: list[int] = []
+    maneuver_save_total: int | None = None
+    maneuver_save_dc: int | None = None
+    maneuver_save_success: bool | None = None
+    maneuver_prone_applied: bool | None = None
+    superiority_dice_remaining: int | None = None
+    precision_maneuver_applied = False
+
+    if maneuver_intent == "riposte" and can_use_battle_master_maneuver(attacker, "riposte"):
+        if spend_superiority_die(attacker):
+            maneuver_id = "riposte"
+            superiority_dice_remaining = attacker.resources.superiority_dice
+
     vex_available = has_vex_effect(attacker, args.target_id)
     harried_available = has_harried_effect(target)
     mode, advantage_sources, disadvantage_sources = get_attack_mode(
@@ -2274,6 +2401,32 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     defense_reaction_data: dict[str, int | str] | None = None
     target_ac = target.ac + attack_context.cover_ac_bonus + get_shield_ac_bonus(target)
     hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+
+    if can_attempt_precision_attack(
+        attacker,
+        maneuver_intent=maneuver_intent,
+        max_miss_margin=args.precision_max_miss_margin,
+        hit=hit,
+        natural_one=natural_one,
+        attack_total=attack_total,
+        target_ac=target_ac,
+    ):
+        if spend_superiority_die(attacker):
+            if maneuver_id == "riposte":
+                precision_maneuver_applied = True
+            else:
+                maneuver_id = "precision_attack"
+            superiority_dice_remaining = attacker.resources.superiority_dice
+            precision_roll = pull_die(
+                state,
+                get_superiority_die_sides(attacker),
+                overrides.superiority_rolls.pop(0) if overrides.superiority_rolls else None,
+            )
+            superiority_dice_rolls.append(precision_roll)
+            attack_total += precision_roll
+            hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+            maneuver_notes = f"{args.attacker_id} uses Precision Attack, adding {precision_roll} to the attack roll."
+            maneuver_condition_deltas.append(maneuver_notes)
 
     if hit:
         defense_reaction_data = maybe_apply_shield_reaction(
@@ -2321,6 +2474,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         attack_reaction = "parry"
 
     target_was_bloodied_before_hit = unit_is_bloodied(target)
+    target_was_alive_before_hit = target.current_hp > 0 and not target.conditions.dead
     automatic_critical = weapon.kind == "melee" and target.conditions.unconscious
     critical = hit and (natural_twenty or automatic_critical)
 
@@ -2342,6 +2496,13 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     undead_fortitude_success: bool | None = None
     undead_fortitude_dc: int | None = None
     undead_fortitude_bypass_reason: str | None = None
+    great_weapon_master_damage_bonus = 0
+    great_weapon_master_attack_action_eligible = (
+        args.great_weapon_master_eligible
+        and not args.is_opportunity_attack
+        and args.maneuver_id != "riposte"
+        and not args.omit_ability_modifier_damage
+    )
     condition_deltas: list[str] = []
     savage_attacker_consumed = False
     final_damage_components: list[DamageComponentResult] = []
@@ -2399,6 +2560,31 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                     total_damage=rage_damage_bonus,
                 )
             )
+        great_weapon_master_damage_bonus = get_great_weapon_master_damage_bonus(
+            attacker,
+            weapon,
+            great_weapon_master_attack_action_eligible,
+        )
+        if great_weapon_master_damage_bonus > 0:
+            great_weapon_master_damage_type = (
+                final_damage_components[0].damage_type
+                if final_damage_components
+                else weapon.damage_type
+                or (weapon.damage_components[0].damage_type if weapon.damage_components else "damage")
+            )
+            final_damage_components.append(
+                DamageComponentResult(
+                    damage_type=great_weapon_master_damage_type,
+                    raw_rolls=[],
+                    adjusted_rolls=[],
+                    subtotal=0,
+                    flat_modifier=great_weapon_master_damage_bonus,
+                    total_damage=great_weapon_master_damage_bonus,
+                )
+            )
+            condition_deltas.append(
+                f"{args.attacker_id} applies Great Weapon Master for +{great_weapon_master_damage_bonus} damage."
+            )
         if can_apply_sneak_attack(state, attacker, target, weapon, mode):
             sneak_attack_component = roll_sneak_attack_component(state, get_sneak_attack_d6_count(attacker))
             if sneak_attack_component:
@@ -2412,6 +2598,43 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                         total_damage=sneak_attack_component.subtotal * critical_multiplier,
                     )
                 )
+
+        if maneuver_id is None and can_attempt_trip_attack(
+            attacker,
+            target,
+            weapon,
+            maneuver_intent=maneuver_intent,
+            hit=hit,
+            is_opportunity_attack=args.is_opportunity_attack,
+        ):
+            if spend_superiority_die(attacker):
+                maneuver_id = "trip_attack"
+                superiority_dice_remaining = attacker.resources.superiority_dice
+
+        if maneuver_id in {"trip_attack", "riposte"}:
+            superiority_roll, superiority_component = roll_superiority_damage_component(
+                state,
+                attacker,
+                weapon,
+                critical_multiplier,
+                overrides.superiority_rolls,
+            )
+            superiority_dice_rolls.append(superiority_roll)
+            final_damage_components.append(superiority_component)
+            base_maneuver_notes = f"{args.attacker_id} uses {get_maneuver_definition(maneuver_id).display_name}."
+            maneuver_notes = f"{maneuver_notes} {base_maneuver_notes}" if maneuver_notes else base_maneuver_notes
+            maneuver_condition_deltas.append(base_maneuver_notes)
+
+        trip_save_failed = False
+        if maneuver_id == "trip_attack":
+            maneuver_save_dc = get_maneuver_save_dc(attacker, weapon)
+            save_roll = pull_die(state, 20, overrides.save_rolls.pop(0) if overrides.save_rolls else None)
+            maneuver_save_rolls.append(save_roll)
+            save_modifier = get_ability_modifier(target, "str")
+            maneuver_save_total = save_roll + save_modifier
+            maneuver_save_success = maneuver_save_total >= maneuver_save_dc
+            trip_save_failed = not maneuver_save_success
+
         total_damage = sum(component.total_damage for component in final_damage_components)
 
         damage_result = apply_damage(state, resolved_target_id, final_damage_components, critical)
@@ -2425,6 +2648,22 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         undead_fortitude_dc = damage_result.undead_fortitude_dc
         undead_fortitude_bypass_reason = damage_result.undead_fortitude_bypass_reason
         condition_deltas.extend(damage_result.condition_deltas)
+
+        if maneuver_id == "trip_attack":
+            maneuver_prone_applied = False
+            if (
+                trip_save_failed
+                and not target.conditions.dead
+                and target.current_hp > 0
+                and not target.conditions.unconscious
+                and not target.conditions.prone
+                and is_within_max_target_size(target.size_category, get_maneuver_definition("trip_attack").max_target_size)
+            ):
+                target.conditions.prone = True
+                maneuver_prone_applied = True
+                maneuver_condition_deltas.append(f"{resolved_target_id} fails Trip Attack save and is knocked prone.")
+            elif maneuver_save_success is True:
+                maneuver_condition_deltas.append(f"{resolved_target_id} resists Trip Attack.")
 
         mastery_applied, mastery_notes, mastery_condition_deltas = apply_mastery(
             state, args.attacker_id, resolved_target_id, weapon.mastery, True, damage_result.final_total_damage
@@ -2472,9 +2711,24 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         condition_deltas.append(f"{args.attacker_id}'s vex advantage is consumed on this attack roll.")
     if harried_consumed:
         condition_deltas.append(f"{args.target_id}'s harried defense is consumed on this attack roll.")
+    condition_deltas.extend(maneuver_condition_deltas)
 
     critical_multiplier = 2 if critical else 1
     hit_label = "critical hit" if critical else "hit" if hit else "miss"
+    target_dropped_to_zero = bool(
+        hit
+        and target_was_alive_before_hit
+        and resolved_target_id in state.units
+        and (state.units[resolved_target_id].conditions.dead or state.units[resolved_target_id].current_hp <= 0)
+    )
+    great_weapon_master_hewing_trigger = bool(
+        great_weapon_master_attack_action_eligible
+        and unit_has_feature(attacker, "great_weapon_master")
+        and weapon.kind == "melee"
+        and weapon.two_handed is True
+        and hit
+        and (critical or target_dropped_to_zero)
+    )
     resolved_totals = {
         "attackMode": mode,
         "selectedRoll": selected_roll,
@@ -2492,7 +2746,14 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         "reactionActorId": reaction_actor_id,
         "shieldAcBonus": get_shield_ac_bonus(target),
         "targetWasBloodiedBeforeHit": target_was_bloodied_before_hit,
+        "targetWasAliveBeforeHit": target_was_alive_before_hit,
+        "targetDroppedToZero": target_dropped_to_zero,
     }
+    if great_weapon_master_damage_bonus > 0:
+        resolved_totals["greatWeaponMasterDamageBonus"] = great_weapon_master_damage_bonus
+    if great_weapon_master_hewing_trigger:
+        resolved_totals["greatWeaponMasterHewingTrigger"] = True
+        resolved_totals["greatWeaponMasterHewingTriggerReason"] = "critical" if critical else "dropped_to_zero"
     if defense_reaction_data:
         resolved_totals.update(defense_reaction_data)
     if undead_fortitude_triggered:
@@ -2502,16 +2763,32 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             resolved_totals["undeadFortitudeDc"] = undead_fortitude_dc
         if undead_fortitude_bypass_reason is not None:
             resolved_totals["undeadFortitudeBypassReason"] = undead_fortitude_bypass_reason
+    if maneuver_id:
+        resolved_totals["maneuverId"] = maneuver_id
+        resolved_totals["superiorityDiceRemaining"] = superiority_dice_remaining
+    if precision_maneuver_applied:
+        resolved_totals["precisionManeuverId"] = "precision_attack"
+    if maneuver_save_dc is not None:
+        resolved_totals["maneuverSaveAbility"] = "str"
+        resolved_totals["maneuverSaveDc"] = maneuver_save_dc
+        resolved_totals["maneuverSaveTotal"] = maneuver_save_total
+        resolved_totals["maneuverSaveSuccess"] = maneuver_save_success
+        resolved_totals["maneuverProneApplied"] = maneuver_prone_applied or False
+    raw_rolls = {
+        "attackRolls": attack_rolls,
+        "advantageSources": advantage_sources,
+        "disadvantageSources": disadvantage_sources,
+    }
+    if maneuver_id or precision_maneuver_applied:
+        raw_rolls["superiorityDiceRolls"] = superiority_dice_rolls
+    if maneuver_save_rolls:
+        raw_rolls["maneuverSaveRolls"] = maneuver_save_rolls
 
     event = CombatEvent(
         **event_base(state, args.attacker_id),
         target_ids=[resolved_target_id],
         event_type="attack",
-        raw_rolls={
-            "attackRolls": attack_rolls,
-            "advantageSources": advantage_sources,
-            "disadvantageSources": disadvantage_sources,
-        },
+        raw_rolls=raw_rolls,
         resolved_totals=resolved_totals,
         movement_details=args.movement_details,
         damage_details=DamageDetails(
@@ -2527,6 +2804,8 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             advantage_bonus_candidate=advantage_bonus_candidate,
             mastery_applied=mastery_applied,
             mastery_notes=mastery_notes,
+            maneuver_applied=maneuver_id,
+            maneuver_notes=maneuver_notes,
             attack_riders_applied=attack_riders_applied,
             total_damage=total_damage,
             resisted_damage=resisted_damage,

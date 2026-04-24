@@ -24,7 +24,7 @@ CLASS_DEFINITIONS: dict[str, ClassDefinition] = {
         category="martial",
         hit_die=10,
         primary_abilities=("str", "dex"),
-        max_supported_level=2,
+        max_supported_level=5,
     ),
     "rogue": ClassDefinition(
         class_id="rogue",

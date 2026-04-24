@@ -65,6 +65,7 @@ class PlayerPresetDefinition:
 
 
 fighter_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=0, wis=-1, cha=1)
+fighter_level4_ability_mods = AbilityModifiers(str=4, dex=1, con=2, int=0, wis=-1, cha=1)
 rogue_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=1, wis=1, cha=-1)
 barbarian_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=0)
 monk_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=0, wis=2, cha=-1)
@@ -213,6 +214,36 @@ player_weapons: dict[str, WeaponProfile] = {
     ),
 }
 
+fighter_level4_weapons: dict[str, WeaponProfile] = {
+    "greatsword": player_weapons["greatsword"].model_copy(
+        update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
+        deep=True,
+    ),
+    "flail": player_weapons["flail"].model_copy(
+        update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
+        deep=True,
+    ),
+    "javelin": player_weapons["javelin"].model_copy(
+        update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
+        deep=True,
+    ),
+}
+
+fighter_level5_weapons: dict[str, WeaponProfile] = {
+    "greatsword": fighter_level4_weapons["greatsword"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+    "flail": fighter_level4_weapons["flail"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+    "javelin": fighter_level4_weapons["javelin"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+}
+
 PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
     "fighter_sample_build": PlayerLoadoutDefinition(
         loadout_id="fighter_sample_build",
@@ -264,6 +295,99 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
             "greatsword": player_weapons["greatsword"],
             "flail": player_weapons["flail"],
             "javelin": player_weapons["javelin"],
+        },
+        extra_feature_ids=(
+            "great_weapon_fighting",
+            "savage_attacker",
+            "weapon_mastery_graze",
+            "weapon_mastery_sap",
+            "weapon_mastery_slow",
+        ),
+        extra_resource_pools={"javelins": 8},
+        default_melee_weapon_id="greatsword",
+        default_ranged_weapon_id="javelin",
+    ),
+    "fighter_level3_sample_build": PlayerLoadoutDefinition(
+        loadout_id="fighter_level3_sample_build",
+        display_name="Level 3 Fighter Battle Master Sample Build",
+        class_id="fighter",
+        level=3,
+        template_name="Level 3 Fighter Battle Master Sample Build",
+        behavior_profile="martial_striker",
+        max_hp=29,
+        ac=18,
+        speed=30,
+        initiative_mod=1,
+        passive_perception=11,
+        ability_mods=fighter_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "greatsword": player_weapons["greatsword"],
+            "flail": player_weapons["flail"],
+            "javelin": player_weapons["javelin"],
+        },
+        extra_feature_ids=(
+            "great_weapon_fighting",
+            "savage_attacker",
+            "weapon_mastery_graze",
+            "weapon_mastery_sap",
+            "weapon_mastery_slow",
+        ),
+        extra_resource_pools={"javelins": 8},
+        default_melee_weapon_id="greatsword",
+        default_ranged_weapon_id="javelin",
+    ),
+    "fighter_level4_sample_build": PlayerLoadoutDefinition(
+        loadout_id="fighter_level4_sample_build",
+        display_name="Level 4 Fighter Battle Master Sample Build",
+        class_id="fighter",
+        level=4,
+        template_name="Level 4 Fighter Battle Master Sample Build",
+        behavior_profile="martial_striker",
+        max_hp=37,
+        ac=18,
+        speed=30,
+        initiative_mod=1,
+        passive_perception=11,
+        ability_mods=fighter_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "greatsword": fighter_level4_weapons["greatsword"],
+            "flail": fighter_level4_weapons["flail"],
+            "javelin": fighter_level4_weapons["javelin"],
+        },
+        extra_feature_ids=(
+            "great_weapon_fighting",
+            "savage_attacker",
+            "weapon_mastery_graze",
+            "weapon_mastery_sap",
+            "weapon_mastery_slow",
+        ),
+        extra_resource_pools={"javelins": 8},
+        default_melee_weapon_id="greatsword",
+        default_ranged_weapon_id="javelin",
+    ),
+    "fighter_level5_sample_build": PlayerLoadoutDefinition(
+        loadout_id="fighter_level5_sample_build",
+        display_name="Level 5 Fighter Battle Master Sample Build",
+        class_id="fighter",
+        level=5,
+        template_name="Level 5 Fighter Battle Master Sample Build",
+        behavior_profile="martial_striker",
+        max_hp=45,
+        ac=18,
+        speed=30,
+        initiative_mod=1,
+        passive_perception=11,
+        ability_mods=fighter_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "greatsword": fighter_level5_weapons["greatsword"],
+            "flail": fighter_level5_weapons["flail"],
+            "javelin": fighter_level5_weapons["javelin"],
         },
         extra_feature_ids=(
             "great_weapon_fighting",
@@ -562,6 +686,30 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             PlayerPresetUnit(unit_id=fighter_id, loadout_id="fighter_level2_sample_build") for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "fighter_level3_sample_trio": PlayerPresetDefinition(
+        preset_id="fighter_level3_sample_trio",
+        display_name="Level 3 Fighter Battle Master Trio",
+        description="Three level 3 great-weapon Battle Master fighters with Superiority Dice.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="fighter_level3_sample_build") for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
+    "fighter_level4_sample_trio": PlayerPresetDefinition(
+        preset_id="fighter_level4_sample_trio",
+        display_name="Level 4 Fighter Battle Master Trio",
+        description="Three level 4 great-weapon Battle Master fighters with Great Weapon Master.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="fighter_level4_sample_build") for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
+    "fighter_level5_sample_trio": PlayerPresetDefinition(
+        preset_id="fighter_level5_sample_trio",
+        display_name="Level 5 Fighter Battle Master Trio",
+        description="Three level 5 great-weapon Battle Master fighters with Extra Attack and Tactical Shift.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="fighter_level5_sample_build") for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "rogue_ranged_trio": PlayerPresetDefinition(
         preset_id="rogue_ranged_trio",
         display_name="Ranged Rogue Trio",
@@ -635,9 +783,9 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 2 fighter, one level 2 barbarian, one level 2 ranged rogue, and one level 2 melee rogue.",
+        description="One level 5 Battle Master fighter, one level 2 barbarian, one level 2 ranged rogue, and one level 2 melee rogue.",
         units=(
-            PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level2_sample_build"),
+            PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
             PlayerPresetUnit(unit_id="F2", loadout_id="barbarian_level2_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level2_sample_build"),
             PlayerPresetUnit(unit_id="F4", loadout_id="rogue_melee_level2_sample_build"),
@@ -663,6 +811,9 @@ DEFAULT_PLAYER_PRESET_ID = "martial_mixed_party"
 ACTIVE_PLAYER_PRESET_IDS = (
     "fighter_sample_trio",
     "fighter_level2_sample_trio",
+    "fighter_level3_sample_trio",
+    "fighter_level4_sample_trio",
+    "fighter_level5_sample_trio",
     "rogue_ranged_trio",
     "rogue_melee_trio",
     "rogue_level2_ranged_trio",
@@ -767,6 +918,7 @@ def build_legacy_resource_state(resource_pools: dict[str, int]) -> ResourceState
         rage_uses=resource_pools.get("rage", 0),
         handaxes=resource_pools.get("handaxes", 0),
         action_surge_uses=resource_pools.get("action_surge", 0),
+        superiority_dice=resource_pools.get("superiority_dice", 0),
         focus_points=resource_pools.get("focus_points", 0),
         uncanny_metabolism_uses=resource_pools.get("uncanny_metabolism", 0),
         spell_slots_level_1=resource_pools.get("spell_slots_level_1", 0),

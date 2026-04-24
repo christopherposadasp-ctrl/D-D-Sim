@@ -19,6 +19,13 @@ It exists to keep class work:
 - Prefer reusable content metadata, action plumbing, and AI helpers over class-specific hardcoded branches.
 - Keep run, batch, and replay payload shapes stable unless a new backend capability truly needs a transport change.
 
+## Current Class Support Snapshot
+
+- Fighter is live through level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift.
+- Barbarian, Rogue, and Monk are live through level 2.
+- Wizard is live at level 1 as a narrow combat spellcasting slice.
+- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter.
+
 ## Primary Backend Files
 
 Class work usually starts in these files:

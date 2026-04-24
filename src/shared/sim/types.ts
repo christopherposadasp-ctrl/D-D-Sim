@@ -64,6 +64,7 @@ export interface ResourceState {
   rageUses: number;
   handaxes: number;
   actionSurgeUses: number;
+  superiorityDice: number;
   focusPoints: number;
   uncannyMetabolismUses: number;
   spellSlotsLevel1: number;
@@ -275,6 +276,8 @@ export interface DamageDetails {
   advantageBonusCandidate: DamageCandidate | null;
   masteryApplied: MasteryType | null;
   masteryNotes: string | null;
+  maneuverApplied?: string | null;
+  maneuverNotes?: string | null;
   attackRidersApplied?: Array<'prone_on_hit' | 'grapple_on_hit' | 'grapple_and_restrain'>;
   totalDamage: number;
   resistedDamage: number;

@@ -37,6 +37,47 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
         attack_count=1,
     ),
     (
+        "fighter",
+        3,
+    ): ClassProgressionDefinition(
+        class_id="fighter",
+        level=3,
+        feature_ids=("second_wind", "action_surge", "combat_superiority", "student_of_war"),
+        resource_pools={"second_wind": 2, "action_surge": 1, "superiority_dice": 4},
+        attack_count=1,
+        feature_scalars={"superiority_die_sides": 8},
+    ),
+    (
+        "fighter",
+        4,
+    ): ClassProgressionDefinition(
+        class_id="fighter",
+        level=4,
+        feature_ids=("second_wind", "action_surge", "combat_superiority", "student_of_war", "great_weapon_master"),
+        resource_pools={"second_wind": 2, "action_surge": 1, "superiority_dice": 4},
+        attack_count=1,
+        feature_scalars={"superiority_die_sides": 8},
+    ),
+    (
+        "fighter",
+        5,
+    ): ClassProgressionDefinition(
+        class_id="fighter",
+        level=5,
+        feature_ids=(
+            "second_wind",
+            "action_surge",
+            "combat_superiority",
+            "student_of_war",
+            "great_weapon_master",
+            "extra_attack",
+            "tactical_shift",
+        ),
+        resource_pools={"second_wind": 3, "action_surge": 1, "superiority_dice": 4},
+        attack_count=2,
+        feature_scalars={"superiority_die_sides": 8},
+    ),
+    (
         "rogue",
         1,
     ): ClassProgressionDefinition(

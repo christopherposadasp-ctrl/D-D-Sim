@@ -1072,6 +1072,7 @@ export function UnitStatePanel(props: { orderedUnits: UnitState[] }) {
                         unit.resources.rageUses > 0 ? `Rage ${unit.resources.rageUses}` : null,
                         unit.resources.handaxes > 0 ? `Handaxes ${unit.resources.handaxes}` : null,
                         unit.resources.actionSurgeUses > 0 ? `Action Surge ${unit.resources.actionSurgeUses}` : null,
+                        unit.resources.superiorityDice > 0 ? `Superiority Dice ${unit.resources.superiorityDice}` : null,
                         unit.resources.focusPoints > 0 ? `Focus ${unit.resources.focusPoints}` : null,
                         unit.resources.spellSlotsLevel1 > 0 ? `1st-level Slots ${unit.resources.spellSlotsLevel1}` : null,
                         unit.resources.uncannyMetabolismUses > 0

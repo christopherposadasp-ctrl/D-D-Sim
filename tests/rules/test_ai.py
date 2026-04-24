@@ -62,7 +62,7 @@ def keep_only_active_units(encounter, *active_unit_ids: str) -> None:
         unit.conditions.prone = False
 
 
-def test_level2_fighter_opens_with_dash_then_action_surge_melee_attack_from_default_layout() -> None:
+def test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-open-dash", placements=DEFAULT_POSITIONS))
 
     decision = choose_turn_decision(encounter, "F1")
@@ -70,7 +70,15 @@ def test_level2_fighter_opens_with_dash_then_action_surge_melee_attack_from_defa
     assert decision.action["kind"] == "dash"
     assert decision.between_action_movement is not None
     assert decision.between_action_movement.mode == "dash"
-    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.surged_action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "trip_attack"},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
     assert decision.post_action_movement is None
 
 
@@ -91,7 +99,7 @@ def test_level1_fighter_sample_still_opens_with_dash_from_default_layout() -> No
     assert decision.surged_action is None
 
 
-def test_level2_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallback() -> None:
+def test_level5_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallback() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-move-javelin", placements=DEFAULT_POSITIONS))
     encounter.units["F1"].position = GridPosition(x=1, y=1)
     encounter.units["G1"].position = GridPosition(x=9, y=1)
@@ -101,7 +109,15 @@ def test_level2_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallba
     assert decision.action["kind"] == "dash"
     assert decision.between_action_movement is not None
     assert decision.between_action_movement.mode == "dash"
-    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.surged_action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "trip_attack"},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
     assert [point.model_dump() for point in decision.between_action_movement.path] == [
         {"x": 1, "y": 1},
         {"x": 2, "y": 1},
@@ -115,15 +131,31 @@ def test_level2_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallba
     assert decision.post_action_movement is None
 
 
-def test_level2_fighter_uses_attack_plus_action_surge_when_already_in_melee() -> None:
+def test_level5_fighter_uses_trip_before_extra_attack_and_action_surge_when_already_in_melee() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-adjacent-action-surge", placements=DEFAULT_POSITIONS))
     encounter.units["F1"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
-    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "trip_attack"},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
+    assert decision.surged_action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
 
 
 def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -> None:
@@ -137,6 +169,96 @@ def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "javelin"
     assert decision.surged_action is None
+
+
+def test_smart_level3_fighter_uses_precision_when_no_action_surge_followup_is_available() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-smart-precision",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="fighter_level3_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].resources.action_surge_uses = 0
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_id": "precision_attack",
+        "precision_max_miss_margin": 4,
+    }
+    assert decision.surged_action is None
+
+
+def test_smart_level3_fighter_uses_pressure_precision_margin_against_healthy_melee_threat() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-smart-pressure-precision",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="fighter_level3_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].resources.action_surge_uses = 0
+    encounter.units["G1"].current_hp = 40
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_id": "precision_attack",
+        "precision_max_miss_margin": 4,
+    }
+
+
+def test_dumb_level3_fighter_uses_auto_maneuvers_opportunistically() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-dumb-auto-maneuver",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="fighter_level3_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    encounter.units["F1"].resources.action_surge_uses = 0
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_id": "battle_master_auto",
+        "precision_max_miss_margin": 8,
+    }
+    assert decision.surged_action is None
+
+
+def test_level3_fighter_selects_no_maneuver_when_superiority_dice_are_exhausted() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-no-superiority-dice",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="fighter_level3_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].resources.superiority_dice = 0
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
 
 
 def test_rogue_skirmisher_does_not_close_after_opening_shortbow_attack() -> None:
@@ -873,12 +995,26 @@ def test_raging_barbarian_uses_bonus_action_upkeep_when_no_attack_is_available()
 
 
 def test_smart_players_seek_flanking_while_dumb_players_take_first_adjacent_square() -> None:
-    smart = create_encounter(EncounterConfig(seed="smart-flank-choice", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    smart = create_encounter(
+        EncounterConfig(
+            seed="smart-flank-choice",
+            placements=build_trio_placements(),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
     smart.units["F1"].position = GridPosition(x=3, y=5)
     smart.units["F2"].position = GridPosition(x=5, y=4)
     smart.units["G1"].position = GridPosition(x=5, y=5)
 
-    dumb = create_encounter(EncounterConfig(seed="dumb-flank-choice", placements=DEFAULT_POSITIONS, player_behavior="dumb"))
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="dumb-flank-choice",
+            placements=build_trio_placements(),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="dumb",
+        )
+    )
     dumb.units["F1"].position = GridPosition(x=3, y=5)
     dumb.units["F2"].position = GridPosition(x=5, y=4)
     dumb.units["G1"].position = GridPosition(x=5, y=5)
@@ -1140,9 +1276,8 @@ def test_orc_aggressive_bonus_movement_extends_melee_reach() -> None:
     encounter.units["F4"].position = GridPosition(x=1, y=15)
     encounter.units["E2"].position = GridPosition(x=15, y=15)
     encounter.units["E3"].position = GridPosition(x=15, y=14)
-    encounter.units["E4"].position = GridPosition(x=15, y=13)
-    encounter.units["E5"].position = GridPosition(x=16, y=15)
-    encounter.units["E6"].position = GridPosition(x=16, y=14)
+    encounter.units["E4"].position = GridPosition(x=16, y=15)
+    encounter.units["E5"].position = GridPosition(x=16, y=14)
 
     decision = choose_turn_decision(encounter, "E1")
 

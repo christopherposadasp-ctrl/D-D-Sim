@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import pytest
 
+import backend.engine.combat.batch as batch_module
 import backend.engine.rules.combat_rules as combat_rules_module
 from backend.content.enemies import unit_has_reaction
 from backend.content.feature_definitions import unit_has_granted_bonus_action
 from backend.engine import create_encounter, run_encounter, step_encounter, summarize_encounter
 from backend.engine.ai.decision import MovementPlan, TurnDecision, choose_turn_decision
+from backend.engine.combat.batch import resolve_batch_execution_plan
 from backend.engine.combat.engine import (
     execute_decision,
     execute_movement,
     expire_turn_end_effects,
     get_opportunity_attack_weapon_id,
     get_total_movement_budget,
+    maybe_resolve_great_weapon_master_hewing,
     resolve_action_surge,
     resolve_attack_action,
     resolve_bonus_action,
@@ -106,6 +109,33 @@ def build_wizard_config(seed: str, *, player_behavior: str = "smart") -> Encount
     )
 
 
+def build_level3_fighter_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="fighter_level3_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level4_fighter_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="fighter_level4_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level5_fighter_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="fighter_level5_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
 def defeat_other_enemies(encounter, *active_enemy_ids: str) -> None:
     active_ids = set(active_enemy_ids)
     for unit in encounter.units.values():
@@ -185,6 +215,742 @@ def test_graze_damage_removes_goblin_at_zero_hp() -> None:
 
     assert attack.damage_details.mastery_applied == "graze"
     assert encounter.units["G1"].conditions.dead is True
+
+
+def test_precision_attack_converts_a_near_miss_into_a_hit() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-precision-hit"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="precision_attack",
+            overrides=AttackRollOverrides(attack_rolls=[8], damage_rolls=[4, 3], superiority_rolls=[2]),
+        ),
+    )
+
+    assert attack.resolved_totals["hit"] is True
+    assert attack.resolved_totals["attackTotal"] == 15
+    assert attack.resolved_totals["maneuverId"] == "precision_attack"
+    assert attack.raw_rolls["superiorityDiceRolls"] == [2]
+    assert encounter.units["F1"].resources.superiority_dice == 3
+    assert attack.damage_details.mastery_applied is None
+
+
+def test_precision_attack_failure_still_allows_graze() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-precision-graze"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="precision_attack",
+            overrides=AttackRollOverrides(attack_rolls=[8], superiority_rolls=[1]),
+        ),
+    )
+
+    assert attack.resolved_totals["hit"] is False
+    assert attack.resolved_totals["maneuverId"] == "precision_attack"
+    assert attack.damage_details.mastery_applied == "graze"
+    assert attack.damage_details.total_damage == 3
+    assert encounter.units["F1"].resources.superiority_dice == 3
+
+
+def test_smart_precision_attack_ignores_misses_wider_than_two() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-smart-precision-margin"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="precision_attack",
+            precision_max_miss_margin=2,
+            overrides=AttackRollOverrides(attack_rolls=[7], superiority_rolls=[3]),
+        ),
+    )
+
+    assert attack.resolved_totals["hit"] is False
+    assert attack.resolved_totals.get("maneuverId") is None
+    assert "superiorityDiceRolls" not in attack.raw_rolls
+    assert encounter.units["F1"].resources.superiority_dice == 4
+
+
+def test_uncapped_auto_precision_still_uses_full_superiority_die_margin() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-dumb-precision-margin"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="battle_master_auto",
+            overrides=AttackRollOverrides(attack_rolls=[7], damage_rolls=[4, 3], superiority_rolls=[3]),
+        ),
+    )
+
+    assert attack.resolved_totals["hit"] is True
+    assert attack.resolved_totals["maneuverId"] == "precision_attack"
+    assert attack.raw_rolls["superiorityDiceRolls"] == [3]
+    assert encounter.units["F1"].resources.superiority_dice == 3
+
+
+def test_trip_attack_adds_damage_and_knocks_failed_save_target_prone() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-trip-prone"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[2]),
+        ),
+    )
+
+    assert attack.resolved_totals["maneuverId"] == "trip_attack"
+    assert attack.resolved_totals["maneuverSaveDc"] == 13
+    assert attack.resolved_totals["maneuverSaveSuccess"] is False
+    assert attack.resolved_totals["maneuverProneApplied"] is True
+    assert attack.raw_rolls["superiorityDiceRolls"] == [5]
+    assert attack.raw_rolls["maneuverSaveRolls"] == [2]
+    assert encounter.units["E1"].conditions.prone is True
+    assert encounter.units["F1"].resources.superiority_dice == 3
+    assert any(component.total_damage == 5 for component in attack.damage_details.damage_components)
+
+
+def test_trip_attack_does_not_prone_on_successful_save() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-trip-save"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[20]),
+        ),
+    )
+
+    assert attack.resolved_totals["maneuverSaveSuccess"] is True
+    assert attack.resolved_totals["maneuverProneApplied"] is False
+    assert encounter.units["E1"].conditions.prone is False
+
+
+def test_trip_attack_superiority_damage_doubles_on_critical_hits() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-trip-crit"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 50
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[20]),
+        ),
+    )
+
+    superiority_component = next(component for component in attack.damage_details.damage_components if component.raw_rolls == [5])
+
+    assert attack.resolved_totals["critical"] is True
+    assert superiority_component.total_damage == 10
+
+
+def test_riposte_attack_spends_superiority_die_and_adds_damage_on_hit() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-riposte-damage"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="riposte",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3], superiority_rolls=[5]),
+        ),
+    )
+
+    assert attack.resolved_totals["maneuverId"] == "riposte"
+    assert attack.raw_rolls["superiorityDiceRolls"] == [5]
+    assert encounter.units["F1"].resources.superiority_dice == 3
+    assert any(component.total_damage == 5 for component in attack.damage_details.damage_components)
+
+
+def test_riposte_attack_can_use_precision_to_convert_a_tactical_near_miss() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-riposte-precision"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="riposte",
+            precision_max_miss_margin=4,
+            overrides=AttackRollOverrides(attack_rolls=[7], damage_rolls=[4, 3], superiority_rolls=[3, 5]),
+        ),
+    )
+
+    assert attack.resolved_totals["hit"] is True
+    assert attack.resolved_totals["maneuverId"] == "riposte"
+    assert attack.resolved_totals["precisionManeuverId"] == "precision_attack"
+    assert attack.raw_rolls["superiorityDiceRolls"] == [3, 5]
+    assert encounter.units["F1"].resources.superiority_dice == 2
+    assert any(component.total_damage == 5 for component in attack.damage_details.damage_components)
+
+
+def test_riposte_triggers_on_missed_melee_attack_and_spends_reaction() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-riposte-trigger"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    events = resolve_attack_action(
+        encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F1", "weapon_id": "scimitar"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[2])],
+    )
+
+    assert any(event.resolved_totals.get("reaction") == "riposte" for event in events)
+    riposte_attack = next(event for event in events if event.actor_id == "F1" and event.event_type == "attack")
+    assert riposte_attack.resolved_totals["maneuverId"] == "riposte"
+    assert encounter.units["F1"].reaction_available is False
+    assert encounter.units["F1"].resources.superiority_dice == 3
+
+
+def test_opportunity_attack_can_use_precision_but_not_trip() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-oa-maneuvers"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    precision_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            maneuver_id="precision_attack",
+            overrides=AttackRollOverrides(attack_rolls=[8], damage_rolls=[4, 3], superiority_rolls=[2]),
+        ),
+    )
+    trip_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[2]),
+        ),
+    )
+
+    assert precision_attack.resolved_totals["maneuverId"] == "precision_attack"
+    assert trip_attack.resolved_totals.get("maneuverId") is None
+    assert encounter.units["E1"].conditions.prone is False
+
+
+def test_action_surge_after_trip_attacks_prone_target_with_advantage() -> None:
+    encounter = create_encounter(build_level3_fighter_config("fighter-trip-action-surge-advantage"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[2]),
+        ),
+    )
+    follow_up, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 15], damage_rolls=[4, 3]),
+        ),
+    )
+
+    assert encounter.units["E1"].conditions.prone is True
+    assert follow_up.resolved_totals["attackMode"] == "advantage"
+    assert "target_prone" in follow_up.raw_rolls["advantageSources"]
+
+
+def test_level4_great_weapon_master_adds_proficiency_damage_on_greatsword_attack_action() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-damage"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            great_weapon_master_eligible=True,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+        ),
+    )
+
+    assert attack.resolved_totals["hit"] is True
+    assert attack.resolved_totals["greatWeaponMasterDamageBonus"] == 2
+    assert attack.damage_details.total_damage == 13
+    assert any(component.flat_modifier == 2 and component.raw_rolls == [] for component in attack.damage_details.damage_components)
+
+
+def test_level4_great_weapon_master_damage_does_not_double_on_critical_hits() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-critical-flat"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            great_weapon_master_eligible=True,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[4, 3]),
+        ),
+    )
+
+    great_weapon_master_component = next(
+        component for component in attack.damage_details.damage_components if component.flat_modifier == 2 and component.raw_rolls == []
+    )
+
+    assert attack.resolved_totals["critical"] is True
+    assert great_weapon_master_component.total_damage == 2
+    assert attack.damage_details.total_damage == 20
+
+
+def test_level4_great_weapon_master_does_not_apply_to_nonqualifying_attacks() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-nonqualifying"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    flail_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="flail",
+            savage_attacker_available=False,
+            great_weapon_master_eligible=True,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4]),
+        ),
+    )
+    opportunity_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            great_weapon_master_eligible=True,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+        ),
+    )
+    riposte_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="riposte",
+            great_weapon_master_eligible=True,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3], superiority_rolls=[1]),
+        ),
+    )
+
+    assert flail_attack.resolved_totals.get("greatWeaponMasterDamageBonus") is None
+    assert opportunity_attack.resolved_totals.get("greatWeaponMasterDamageBonus") is None
+    assert riposte_attack.resolved_totals.get("greatWeaponMasterDamageBonus") is None
+
+
+def test_level4_trip_attack_save_dc_uses_strength_eighteen() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-level4-trip-dc"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[2]),
+        ),
+    )
+
+    assert attack.resolved_totals["maneuverSaveDc"] == 14
+
+
+def test_level4_great_weapon_master_hewing_triggers_after_a_critical_hit() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-crit"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[20], damage_rolls=[4, 3])],
+    )
+    hewing_events = maybe_resolve_great_weapon_master_hewing(
+        encounter,
+        "F1",
+        attack_events,
+        planned_bonus_action=None,
+    )
+
+    assert any(event.resolved_totals.get("bonusAction") == "great_weapon_master_hewing" for event in hewing_events)
+    hewing_attack = next(event for event in hewing_events if event.event_type == "attack")
+    assert hewing_attack.actor_id == "F1"
+    assert hewing_attack.damage_details.weapon_id == "greatsword"
+    assert hewing_attack.resolved_totals.get("greatWeaponMasterDamageBonus") is None
+    assert encounter.units["F1"]._great_weapon_master_hewing_used_this_turn is True
+
+
+def test_level4_great_weapon_master_hewing_triggers_after_dropping_a_target() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-kill"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=5, y=6)
+    encounter.units["E1"].current_hp = 1
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3])],
+    )
+    hewing_events = maybe_resolve_great_weapon_master_hewing(
+        encounter,
+        "F1",
+        attack_events,
+        planned_bonus_action=None,
+    )
+
+    assert attack_events[-1].resolved_totals["targetDroppedToZero"] is True
+    assert any(event.resolved_totals.get("triggerReason") == "dropped_to_zero" for event in hewing_events)
+    hewing_attack = next(event for event in hewing_events if event.event_type == "attack")
+    assert hewing_attack.target_ids == ["E2"]
+
+
+def test_level4_great_weapon_master_hewing_respects_bonus_action_limit() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-bonus-used"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[20], damage_rolls=[4, 3])],
+    )
+    encounter.units["F1"]._bonus_action_used_this_turn = True
+
+    assert (
+        maybe_resolve_great_weapon_master_hewing(
+            encounter,
+            "F1",
+            attack_events,
+            planned_bonus_action=None,
+        )
+        == []
+    )
+
+
+def test_level5_attack_action_resolves_two_attacks() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-extra-attack"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5, 3]),
+        ],
+    )
+
+    attacks = [event for event in attack_events if event.event_type == "attack" and event.actor_id == "F1"]
+    assert len(attacks) == 2
+    assert [event.damage_details.weapon_id for event in attacks] == ["greatsword", "greatsword"]
+
+
+def test_level5_action_surge_resolves_two_more_attack_action_attacks() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-action-surge-attacks"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 100
+
+    first_action = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5, 3]),
+        ],
+    )
+    surge_event = resolve_action_surge(encounter, "F1")
+    second_action = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[14], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[5, 3]),
+        ],
+    )
+
+    attacks = [event for event in first_action + second_action if event.event_type == "attack" and event.actor_id == "F1"]
+    assert surge_event.event_type == "phase_change"
+    assert encounter.units["F1"].resources.action_surge_uses == 0
+    assert len(attacks) == 4
+
+
+def test_level5_extra_attack_retargets_after_dropping_first_target() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-extra-attack-retarget"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=5, y=6)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5, 3]),
+        ],
+    )
+
+    attacks = [event for event in attack_events if event.event_type == "attack" and event.actor_id == "F1"]
+    assert attacks[0].target_ids == ["E1"]
+    assert attacks[0].resolved_totals["targetDroppedToZero"] is True
+    assert attacks[1].target_ids == ["E2"]
+
+
+def test_level5_great_weapon_master_uses_proficiency_three_damage_bonus() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-gwm-damage"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            great_weapon_master_eligible=True,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+        ),
+    )
+
+    assert attack.resolved_totals["greatWeaponMasterDamageBonus"] == 3
+    assert attack.damage_details.total_damage == 14
+    assert any(component.flat_modifier == 3 and component.raw_rolls == [] for component in attack.damage_details.damage_components)
+
+
+def test_level5_trip_attack_save_dc_uses_proficiency_three() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-trip-dc"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            maneuver_id="trip_attack",
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3], superiority_rolls=[5], save_rolls=[2]),
+        ),
+    )
+
+    assert attack.resolved_totals["maneuverSaveDc"] == 15
+
+
+def test_level5_tactical_shift_movement_does_not_provoke_and_is_capped() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-tactical-shift"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].current_hp = 10
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    events: list = []
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            bonus_action={"kind": "second_wind", "timing": "before_action"},
+            action={"kind": "skip", "reason": "Testing Tactical Shift."},
+            post_action_movement=MovementPlan(
+                path=[GridPosition(x=5, y=5), GridPosition(x=5, y=4), GridPosition(x=5, y=3), GridPosition(x=5, y=2)],
+                mode="tactical_shift",
+            ),
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    move_event = next(event for event in events if event.event_type == "move")
+    assert move_event.resolved_totals["tacticalShiftApplied"] is True
+    assert move_event.resolved_totals["opportunityAttackers"] == []
+    assert encounter.units["E1"].reaction_available is True
+
+    too_far_events: list = []
+    execute_decision(
+        create_encounter(build_level5_fighter_config("fighter-level5-tactical-shift-cap")),
+        "F1",
+        TurnDecision(
+            bonus_action={"kind": "second_wind", "timing": "before_action"},
+            action={"kind": "skip", "reason": "Testing Tactical Shift cap."},
+            post_action_movement=MovementPlan(
+                path=[
+                    GridPosition(x=1, y=1),
+                    GridPosition(x=2, y=1),
+                    GridPosition(x=3, y=1),
+                    GridPosition(x=4, y=1),
+                    GridPosition(x=5, y=1),
+                ],
+                mode="tactical_shift",
+            ),
+        ),
+        too_far_events,
+        rescue_mode=False,
+    )
+
+    assert too_far_events[0].event_type == "skip"
+    assert too_far_events[0].text_summary == "F1 skips its turn: Planned movement exceeds the unit speed budget."
+
+
+def test_second_wind_does_not_protect_unrelated_normal_movement() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-second-wind-normal-move"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].current_hp = 10
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    events: list = []
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            bonus_action={"kind": "second_wind", "timing": "before_action"},
+            pre_action_movement=MovementPlan(
+                path=[GridPosition(x=5, y=5), GridPosition(x=5, y=4), GridPosition(x=5, y=3)],
+                mode="move",
+            ),
+            action={"kind": "skip", "reason": "Testing normal movement."},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    move_event = next(event for event in events if event.event_type == "move")
+    assert move_event.resolved_totals["tacticalShiftApplied"] is False
+    assert move_event.resolved_totals["opportunityAttackers"] == ["E1"]
+    assert encounter.units["E1"].reaction_available is False
 
 
 def test_barbarian_unarmored_defense_uses_dex_plus_con() -> None:
@@ -2209,7 +2975,7 @@ def test_melee_hits_against_unconscious_fighters_are_critical() -> None:
             target_id="F1",
             weapon_id="scimitar",
             savage_attacker_available=False,
-            overrides=AttackRollOverrides(attack_rolls=[12, 5], damage_rolls=[1], advantage_damage_rolls=[1]),
+            overrides=AttackRollOverrides(attack_rolls=[16, 5], damage_rolls=[1], advantage_damage_rolls=[1]),
         ),
     )
 
@@ -2348,6 +3114,42 @@ def test_parallel_batch_path_matches_serial_batch_path() -> None:
     assert parallel_summary.model_dump(by_alias=True) == serial_summary.model_dump(by_alias=True)
 
 
+def test_batch_execution_plan_uses_parallel_workers_up_to_eight(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DND_SIM_BATCH_WORKERS", raising=False)
+    monkeypatch.setattr(batch_module.os, "cpu_count", lambda: 32)
+
+    plan = resolve_batch_execution_plan(total_runs=500)
+
+    assert plan.execution_mode == "parallel"
+    assert plan.worker_count == 8
+    assert plan.total_runs == 500
+
+
+def test_batch_execution_plan_honors_explicit_worker_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DND_SIM_BATCH_WORKERS", raising=False)
+
+    plan = resolve_batch_execution_plan(total_runs=500, worker_count=4)
+
+    assert plan.execution_mode == "parallel"
+    assert plan.worker_count == 4
+
+
+def test_batch_execution_plan_caps_env_worker_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DND_SIM_BATCH_WORKERS", "99")
+
+    plan = resolve_batch_execution_plan(total_runs=500)
+
+    assert plan.execution_mode == "parallel"
+    assert plan.worker_count == 8
+
+
+def test_batch_execution_plan_forces_serial() -> None:
+    plan = resolve_batch_execution_plan(total_runs=500, force_serial=True, worker_count=8)
+
+    assert plan.execution_mode == "serial"
+    assert plan.worker_count == 1
+
+
 def test_action_surge_consumes_its_use_and_cannot_be_used_twice() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-action-surge-spend", placements=DEFAULT_POSITIONS))
 
@@ -2370,10 +3172,26 @@ def test_attack_plus_action_surge_attack_resolves_two_separate_attack_actions() 
     events: list = []
     execute_decision(encounter, "F1", decision, events, rescue_mode=False)
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
-    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
-    assert [event.event_type for event in events] == ["attack", "phase_change", "attack"]
-    assert [event.target_ids for event in events if event.event_type == "attack"] == [["G1"], ["G1"]]
+    assert decision.action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "trip_attack"},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
+    assert decision.surged_action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
+    assert [event.event_type for event in events] == ["attack", "attack", "phase_change", "attack", "attack"]
+    assert [event.target_ids for event in events if event.event_type == "attack"] == [["G1"], ["G1"], ["G1"], ["G1"]]
     assert encounter.units["F1"].resources.action_surge_uses == 0
 
 
@@ -2388,8 +3206,16 @@ def test_dash_plus_action_surge_attack_executes_with_between_action_movement() -
 
     assert decision.action["kind"] == "dash"
     assert decision.between_action_movement is not None
-    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
-    assert [event.event_type for event in events] == ["phase_change", "move", "attack"]
+    assert decision.surged_action == {
+        "kind": "attack",
+        "target_id": "G1",
+        "weapon_id": "greatsword",
+        "maneuver_intents": [
+            {"maneuver_id": "trip_attack"},
+            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+        ],
+    }
+    assert [event.event_type for event in events] == ["phase_change", "move", "attack", "attack"]
     assert events[1].resolved_totals["movementPhase"] == "between_actions"
     assert encounter.units["F1"].position.model_dump() == {"x": 8, "y": 1}
     assert encounter.units["F1"].resources.action_surge_uses == 0
@@ -2399,6 +3225,7 @@ def test_scout_multiattack_resolves_two_longbow_attacks() -> None:
     encounter = create_encounter(EncounterConfig(seed="scout-multiattack", enemy_preset_id="bandit_ambush", monster_behavior="balanced"))
     encounter.units["E5"].position = GridPosition(x=6, y=6)
     encounter.units["F1"].position = GridPosition(x=10, y=6)
+    encounter.units["F1"].current_hp = 10
     encounter.units["F2"].position = GridPosition(x=1, y=12)
     encounter.units["F2"].current_hp = 30
     encounter.units["F2"].ac = 25
