@@ -61,6 +61,8 @@ FIXED_ATTACK_CASES = (
     ("brown_bear", "bite", [4], ["piercing"], [7]),
     ("brown_bear", "claw", [2], ["slashing"], [5]),
     ("tiger", "rend", [4, 3], ["slashing"], [10]),
+    ("owlbear", "rend", [4, 3], ["slashing"], [12]),
+    ("ankylosaurus", "tail", [5], ["bludgeoning"], [9]),
     ("berserker", "greataxe", [6], ["slashing"], [9]),
     ("gnoll_warrior", "rend", [3], ["piercing"], [5]),
     ("gnoll_warrior", "bone_bow", [5], ["piercing"], [6]),
@@ -449,6 +451,60 @@ def test_tiger_rend_prone_is_size_gated() -> None:
             weapon_id="rend",
             savage_attacker_available=False,
             overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3]),
+        ),
+    )
+
+    assert blocked_attack.damage_details.attack_riders_applied is None
+    assert blocked_encounter.units["F1"].conditions.prone is False
+
+
+def test_owlbear_multiattack_resolves_two_rend_attacks() -> None:
+    encounter = build_monster_benchmark_encounter("owlbear")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend"]
+
+
+def test_ankylosaurus_tail_prone_is_size_gated() -> None:
+    encounter = build_monster_benchmark_encounter("ankylosaurus")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="tail",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[5]),
+        ),
+    )
+
+    assert attack.damage_details.attack_riders_applied == ["prone_on_hit"]
+    assert encounter.units["F1"].conditions.prone is True
+
+    blocked_encounter = build_monster_benchmark_encounter("ankylosaurus")
+    defeat_other_units(blocked_encounter, "E1", "F1")
+    blocked_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    blocked_encounter.units["F1"].position = GridPosition(x=8, y=5)
+    blocked_encounter.units["F1"].size_category = "gargantuan"
+
+    blocked_attack, _ = resolve_attack(
+        blocked_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="tail",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[5]),
         ),
     )
 

@@ -127,6 +127,8 @@ ogre_ability_mods = AbilityModifiers(str=4, dex=-1, con=3, int=-3, wis=-2, cha=-
 black_bear_ability_mods = AbilityModifiers(str=2, dex=1, con=2, int=-4, wis=1, cha=-2)
 brown_bear_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=-4, wis=1, cha=-2)
 tiger_ability_mods = AbilityModifiers(str=3, dex=3, con=2, int=-4, wis=1, cha=-1)
+owlbear_ability_mods = AbilityModifiers(str=5, dex=1, con=3, int=-4, wis=1, cha=-2)
+ankylosaurus_ability_mods = AbilityModifiers(str=4, dex=0, con=2, int=-4, wis=1, cha=-3)
 berserker_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=-1)
 gnoll_warrior_ability_mods = AbilityModifiers(str=2, dex=1, con=0, int=-2, wis=0, cha=-2)
 giant_hyena_ability_mods = AbilityModifiers(str=3, dex=2, con=2, int=-4, wis=1, cha=-2)
@@ -1612,6 +1614,70 @@ MONSTER_DEFINITIONS.update(
             attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 2),),
             default_melee_attack_action_id="multiattack",
         ),
+        "owlbear": MonsterDefinition(
+            base_creature_id="owlbear",
+            variant_id="owlbear",
+            display_name="Owlbear",
+            combat_role="owlbear",
+            ai_profile_id="melee_brute",
+            max_hp=59,
+            ac=13,
+            speed=40,
+            initiative_mod=1,
+            passive_perception=15,
+            ability_mods=owlbear_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=7,
+                    ability_modifier=5,
+                    damage_dice=[DiceSpec(count=2, sides=8)],
+                    damage_modifier=5,
+                    damage_type="slashing",
+                    kind="melee",
+                )
+            },
+            tags=("monstrosity", "owlbear", "melee"),
+            action_ids=("multiattack",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 2),),
+            default_melee_attack_action_id="multiattack",
+        ),
+        "ankylosaurus": MonsterDefinition(
+            base_creature_id="ankylosaurus",
+            variant_id="ankylosaurus",
+            display_name="Ankylosaurus",
+            combat_role="ankylosaurus",
+            ai_profile_id="melee_brute",
+            max_hp=68,
+            ac=15,
+            speed=30,
+            initiative_mod=0,
+            passive_perception=11,
+            ability_mods=ankylosaurus_ability_mods,
+            size_category="huge",
+            footprint=huge_footprint,
+            attacks={
+                "tail": WeaponProfile(
+                    id="tail",
+                    display_name="Tail",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=1, sides=10)],
+                    damage_modifier=4,
+                    damage_type="bludgeoning",
+                    kind="melee",
+                    reach=10,
+                    on_hit_effects=[OnHitEffect(kind="prone_on_hit", max_target_size="huge")],
+                )
+            },
+            tags=("beast", "dinosaur", "melee"),
+            action_ids=("multiattack",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("tail",), 2),),
+            default_melee_attack_action_id="multiattack",
+        ),
         "berserker": MonsterDefinition(
             base_creature_id="berserker",
             variant_id="berserker",
@@ -2368,6 +2434,8 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "black_bear",
     "brown_bear",
     "tiger",
+    "owlbear",
+    "ankylosaurus",
     "berserker",
     "gnoll_warrior",
     "giant_hyena",

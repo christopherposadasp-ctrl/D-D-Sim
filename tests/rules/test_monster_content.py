@@ -137,6 +137,8 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
             weapon_id = "claw"
         elif variant_id == "tiger":
             weapon_id = "rend"
+        elif variant_id == "ankylosaurus":
+            weapon_id = "tail"
         weapon = definition.attacks[weapon_id]
         assert weapon.on_hit_effects is not None
         assert [effect.kind for effect in weapon.on_hit_effects] == ["prone_on_hit"]
@@ -180,9 +182,16 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
             ("grapple_on_hit", "medium", expected_escape_dc)
         ]
 
-    if "prone_on_hit" in expectation.special_mechanics and variant_id in {"brown_bear", "tiger", "mastiff"}:
-        weapon_id = "claw" if variant_id == "brown_bear" else "rend" if variant_id == "tiger" else "bite"
-        expected_size = "large" if variant_id in {"brown_bear", "tiger"} else "medium"
+    if "prone_on_hit" in expectation.special_mechanics and variant_id in {"brown_bear", "tiger", "mastiff", "ankylosaurus"}:
+        if variant_id == "brown_bear":
+            weapon_id = "claw"
+        elif variant_id == "tiger":
+            weapon_id = "rend"
+        elif variant_id == "mastiff":
+            weapon_id = "bite"
+        else:
+            weapon_id = "tail"
+        expected_size = "huge" if variant_id == "ankylosaurus" else "large" if variant_id in {"brown_bear", "tiger"} else "medium"
         weapon = definition.attacks[weapon_id]
         assert weapon.on_hit_effects is not None
         assert [(effect.kind, effect.max_target_size) for effect in weapon.on_hit_effects] == [
