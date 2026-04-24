@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
-from backend.content.class_progressions import get_class_progression, get_progression_scalar
+from backend.content.class_progressions import get_class_progression, get_proficiency_bonus, get_progression_scalar
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import (
     AbilityModifiers,
@@ -12,6 +12,7 @@ from backend.engine.models.state import (
     Footprint,
     GridPosition,
     ResourceState,
+    RoleTag,
     UnitState,
     WeaponProfile,
     WeaponRange,
@@ -39,7 +40,7 @@ class PlayerLoadoutDefinition:
     attacks: dict[str, WeaponProfile]
     extra_feature_ids: tuple[str, ...] = ()
     extra_resource_pools: dict[str, int] | None = None
-    role_tags: tuple[str, ...] = ()
+    role_tags: tuple[RoleTag, ...] = ()
     medicine_modifier: int = -1
     default_melee_weapon_id: str | None = None
     default_ranged_weapon_id: str | None = None
@@ -70,6 +71,12 @@ monk_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=0, wis=2, cha=-1)
 wizard_ability_mods = AbilityModifiers(str=-1, dex=2, con=2, int=3, wis=1, cha=0)
 medium_footprint = Footprint(width=1, height=1)
 TRIO_PLAYER_IDS = ("F1", "F2", "F3")
+COMBAT_SKILL_ABILITY_IDS = {
+    "stealth": "dex",
+}
+EXPERTISE_SKILL_BY_FEATURE_ID = {
+    "expertise_stealth": "stealth",
+}
 
 AC_FORMULAS = {
     # Keeping AC formulas in one lookup keeps fixed-AC builds working while
@@ -291,7 +298,6 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
-        combat_skill_modifiers={"stealth": 5},
     ),
     "rogue_ranged_level2_sample_build": PlayerLoadoutDefinition(
         loadout_id="rogue_ranged_level2_sample_build",
@@ -315,7 +321,6 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
-        combat_skill_modifiers={"stealth": 5},
     ),
     "rogue_melee_sample_build": PlayerLoadoutDefinition(
         loadout_id="rogue_melee_sample_build",
@@ -339,7 +344,6 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_melee_weapon_id="rapier",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
-        combat_skill_modifiers={"stealth": 5},
     ),
     "rogue_melee_level2_sample_build": PlayerLoadoutDefinition(
         loadout_id="rogue_melee_level2_sample_build",
@@ -363,7 +367,6 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_melee_weapon_id="rapier",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
-        combat_skill_modifiers={"stealth": 5},
     ),
     "barbarian_sample_build": PlayerLoadoutDefinition(
         loadout_id="barbarian_sample_build",
@@ -540,7 +543,6 @@ PLAYER_LOADOUTS.update(
             default_melee_weapon_id="shortsword",
             default_ranged_weapon_id="shortbow",
             medicine_modifier=1,
-            combat_skill_modifiers={"stealth": 5},
         ),
     }
 )
@@ -722,6 +724,26 @@ def get_feature_ids_for_loadout(loadout: PlayerLoadoutDefinition) -> list[str]:
     return [*progression.feature_ids, *loadout.extra_feature_ids]
 
 
+def get_combat_skill_ability_modifier(loadout: PlayerLoadoutDefinition, skill_id: str) -> int:
+    ability_id = COMBAT_SKILL_ABILITY_IDS.get(skill_id)
+    if ability_id is None:
+        raise ValueError(f"Unsupported combat skill '{skill_id}'.")
+    return getattr(loadout.ability_mods, ability_id)
+
+
+def build_combat_skill_modifiers_for_loadout(loadout: PlayerLoadoutDefinition) -> dict[str, int]:
+    modifiers = deepcopy(loadout.combat_skill_modifiers or {})
+    proficiency_bonus = get_proficiency_bonus(loadout.level)
+
+    for feature_id in get_feature_ids_for_loadout(loadout):
+        skill_id = EXPERTISE_SKILL_BY_FEATURE_ID.get(feature_id)
+        if skill_id is None:
+            continue
+        modifiers[skill_id] = get_combat_skill_ability_modifier(loadout, skill_id) + (2 * proficiency_bonus)
+
+    return modifiers
+
+
 def get_resource_pools_for_loadout(loadout: PlayerLoadoutDefinition) -> dict[str, int]:
     progression = get_class_progression(loadout.class_id, loadout.level)
     pools = dict(progression.resource_pools)
@@ -788,7 +810,7 @@ def create_player_unit(unit_id: str, loadout_id: str) -> UnitState:
         feature_ids=get_feature_ids_for_loadout(loadout),
         resource_pools=resource_pools,
         behavior_profile=loadout.behavior_profile,
-        combat_skill_modifiers=deepcopy(loadout.combat_skill_modifiers or {}),
+        combat_skill_modifiers=build_combat_skill_modifiers_for_loadout(loadout),
         combat_cantrip_ids=list(loadout.combat_cantrip_ids),
         prepared_combat_spell_ids=list(loadout.prepared_combat_spell_ids),
         cantrips_known=get_progression_scalar(loadout.class_id, loadout.level, "cantrips_known", 0),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Literal
@@ -25,12 +26,18 @@ from backend.engine.models.state import BatchSummary, CombatEvent, EncounterConf
 from backend.engine.utils.helpers import get_units_by_faction, unit_sort_key
 
 AuditStatus = Literal["pass", "warn", "fail"]
+FindingSeverity = Literal["none", "note", "warn", "fail"]
 AuditProgressStage = Literal["replay", "behavior", "health", "comparison", "complete"]
 BarbarianAuditProgressCallback = Callable[[str, AuditProgressStage, dict[str, object]], None]
 
 BARBARIAN_AUDIT_PLAYER_PRESET_IDS = ("barbarian_level2_sample_trio", "martial_mixed_party")
 STRESS_SCENARIO_IDS = {"marsh_predators"}
 DEFAULT_BASELINE_PATH = Path(__file__).resolve().parents[3] / "reports" / "baselines" / "pre_barbarian_baseline_2026-04-20.json"
+SMART_UNDERPERFORMANCE_SMALL_SAMPLE_RUNS = 100
+SMART_UNDERPERFORMANCE_NOTE_MIN_DELTA = 0.05
+SMART_UNDERPERFORMANCE_WARN_MIN_DELTA = 0.10
+SMART_UNDERPERFORMANCE_WARN_Z_SCORE = 1.96
+SMART_UNDERPERFORMANCE_FAIL_Z_SCORE = 2.58
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,12 @@ class BarbarianAuditConfig:
     health_batch_size: int = 300
     seed_prefix: str = "barbarian-audit"
     baseline_report_path: Path = DEFAULT_BASELINE_PATH
+
+
+@dataclass(frozen=True)
+class SmartUnderperformanceAssessment:
+    severity: FindingSeverity = "none"
+    message: str | None = None
 
 
 def build_quick_barbarian_audit_config(seed_prefix: str = "barbarian-audit") -> BarbarianAuditConfig:
@@ -144,6 +157,7 @@ class BarbarianAuditRow:
     barbarian_death_count: int
     status: AuditStatus
     recommendation: str | None
+    notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
     replay_seeds: list[str] = field(default_factory=list)
@@ -181,6 +195,7 @@ class BarbarianAuditRow:
             "barbarianDeathCount": self.barbarian_death_count,
             "status": self.status,
             "recommendation": self.recommendation,
+            "notes": list(self.notes),
             "warnings": list(self.warnings),
             "failures": list(self.failures),
             "replaySeeds": list(self.replay_seeds),
@@ -196,7 +211,9 @@ class PresetAggregate:
     smart_player_win_rate: float | None
     dumb_player_win_rate: float | None
     status: AuditStatus
+    notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
 
     def to_report_dict(self) -> dict[str, object]:
         return {
@@ -206,7 +223,9 @@ class PresetAggregate:
             "smartPlayerWinRate": self.smart_player_win_rate,
             "dumbPlayerWinRate": self.dumb_player_win_rate,
             "status": self.status,
+            "notes": list(self.notes),
             "warnings": list(self.warnings),
+            "failures": list(self.failures),
         }
 
 
@@ -342,7 +361,13 @@ def extract_barbarian_run_metrics(result: RunEncounterResult) -> BarbarianRunMet
 
 def get_first_actor_event(turn_events: list[CombatEvent], actor_id: str) -> CombatEvent | None:
     for event in turn_events:
-        if event.actor_id == actor_id and event.event_type != "turn_start":
+        if event.actor_id != actor_id or event.event_type == "turn_start":
+            continue
+        if event.event_type == "effect_expired":
+            continue
+        if event.event_type == "move" and event.resolved_totals.get("movementPhase") == "stand_up":
+            continue
+        if event.actor_id == actor_id:
             return event
     return None
 
@@ -655,19 +680,26 @@ def run_health_pass(
     )
 
 
-def build_row_warnings(
+def build_row_findings(
     scenario_id: str,
     summary: BatchSummary,
     counter_totals: BarbarianCounterTotals,
-) -> list[str]:
+) -> tuple[list[str], list[str], list[str]]:
+    notes: list[str] = []
     warnings: list[str] = []
+    failures: list[str] = []
 
-    if (
-        summary.smart_player_win_rate is not None
-        and summary.dumb_player_win_rate is not None
-        and float(summary.smart_player_win_rate) < float(summary.dumb_player_win_rate)
-    ):
-        warnings.append("Smart players underperformed dumb players in the combined pass.")
+    add_smart_underperformance_assessment(
+        assess_smart_underperformance(
+            summary.smart_player_win_rate,
+            summary.dumb_player_win_rate,
+            summary.smart_run_count,
+            summary.dumb_run_count,
+        ),
+        notes,
+        warnings,
+        failures,
+    )
 
     if counter_totals.turn_one_handaxe_count > 0:
         warnings.append("The Barbarian opened with at least one round-1 handaxe attack.")
@@ -675,21 +707,115 @@ def build_row_warnings(
     if scenario_id not in STRESS_SCENARIO_IDS and counter_totals.greataxe_attack_count <= counter_totals.handaxe_attack_count:
         warnings.append("Handaxe volume matched or exceeded greataxe volume in a non-stress scenario.")
 
-    return warnings
+    return notes, warnings, failures
+
+
+def assess_smart_underperformance(
+    smart_rate: float | int | None,
+    dumb_rate: float | int | None,
+    smart_run_count: int,
+    dumb_run_count: int,
+) -> SmartUnderperformanceAssessment:
+    if smart_rate is None or dumb_rate is None or smart_run_count <= 0 or dumb_run_count <= 0:
+        return SmartUnderperformanceAssessment()
+
+    smart = float(smart_rate)
+    dumb = float(dumb_rate)
+    delta = dumb - smart
+    if delta < SMART_UNDERPERFORMANCE_NOTE_MIN_DELTA:
+        return SmartUnderperformanceAssessment()
+
+    min_run_count = min(smart_run_count, dumb_run_count)
+    detail = ""
+    if min_run_count < SMART_UNDERPERFORMANCE_SMALL_SAMPLE_RUNS:
+        severity: FindingSeverity = "warn" if delta >= SMART_UNDERPERFORMANCE_WARN_MIN_DELTA else "note"
+        detail = "small-sample signal"
+    else:
+        standard_error = math.sqrt(
+            (smart * (1.0 - smart) / smart_run_count)
+            + (dumb * (1.0 - dumb) / dumb_run_count)
+        )
+        if standard_error == 0:
+            z_score = math.inf if delta > 0 else 0.0
+        else:
+            z_score = delta / standard_error
+        if z_score >= SMART_UNDERPERFORMANCE_FAIL_Z_SCORE:
+            severity = "fail"
+        elif z_score >= SMART_UNDERPERFORMANCE_WARN_Z_SCORE:
+            severity = "warn"
+        else:
+            severity = "note"
+        detail = f"z={z_score:.2f}"
+
+    message = (
+        "Smart players underperformed dumb players in the combined pass "
+        f"(smart {smart:.1%}, dumb {dumb:.1%}, delta {delta * 100:.1f} pts over "
+        f"{smart_run_count} vs {dumb_run_count} runs; {detail})."
+    )
+    return SmartUnderperformanceAssessment(severity=severity, message=message)
+
+
+def add_smart_underperformance_assessment(
+    assessment: SmartUnderperformanceAssessment,
+    notes: list[str],
+    warnings: list[str],
+    failures: list[str],
+) -> None:
+    if assessment.message is None:
+        return
+
+    if assessment.severity == "note":
+        notes.append(assessment.message)
+        return
+    if assessment.severity == "warn":
+        warnings.append(assessment.message)
+        return
+    if assessment.severity == "fail":
+        failures.append(assessment.message)
+
+
+def classify_smart_underperformance(
+    smart_rate: float | int | None,
+    dumb_rate: float | int | None,
+    smart_run_count: int,
+    dumb_run_count: int,
+) -> FindingSeverity:
+    return assess_smart_underperformance(
+        smart_rate,
+        dumb_rate,
+        smart_run_count,
+        dumb_run_count,
+    ).severity
+
+
+def is_smart_underperformance_nontrivial(
+    smart_rate: float | int | None,
+    dumb_rate: float | int | None,
+    smart_run_count: int,
+    dumb_run_count: int,
+) -> bool:
+    return classify_smart_underperformance(
+        smart_rate,
+        dumb_rate,
+        smart_run_count,
+        dumb_run_count,
+    ) in {"warn", "fail"}
 
 
 def build_row_recommendation(
     scenario_id: str,
+    notes: list[str],
     warnings: list[str],
     failures: list[str],
 ) -> str | None:
-    if any("handaxe" in issue.lower() for issue in failures) or any("handaxe" in issue.lower() for issue in warnings):
+    issues = [*notes, *warnings, *failures]
+    if any("handaxe" in issue.lower() for issue in issues):
         return "Inspect melee-closure decision order before touching stats."
 
-    if any("rage drop" in issue.lower() or "rage" in issue.lower() for issue in failures):
+    if any("rage drop" in issue.lower() or "rage" in issue.lower() for issue in issues):
         return "Inspect rage upkeep decision timing before touching encounter balance."
 
-    if any("smart players underperformed dumb players" in issue.lower() for issue in warnings):
+    if any("smart players underperformed dumb players" in issue.lower() for issue in issues):
         if scenario_id == "orc_push":
             return "Inspect scenario-specific front-line pressure before changing Barbarian logic globally."
         return "Inspect flanking pathing and target ranking before touching numbers."
@@ -697,7 +823,7 @@ def build_row_recommendation(
     return None
 
 
-def determine_row_status(warnings: list[str], failures: list[str]) -> AuditStatus:
+def determine_row_status(notes: list[str], warnings: list[str], failures: list[str]) -> AuditStatus:
     if failures:
         return "fail"
     if warnings:
@@ -714,12 +840,13 @@ def audit_barbarian_pair(
     audit_config = config or BarbarianAuditConfig()
     scenario = get_scenario_definition(scenario_id)
 
-    failures, replay_seeds = review_fixed_seed_replays(player_preset_id, scenario_id, audit_config, progress_callback)
+    replay_failures, replay_seeds = review_fixed_seed_replays(player_preset_id, scenario_id, audit_config, progress_callback)
     counter_totals, behavior_win_rates = run_behavior_sanity_pass(player_preset_id, scenario_id, audit_config, progress_callback)
     summary = run_health_pass(player_preset_id, scenario_id, audit_config, progress_callback)
-    warnings = build_row_warnings(scenario_id, summary, counter_totals)
-    recommendation = build_row_recommendation(scenario_id, warnings, failures)
-    status = determine_row_status(warnings, failures)
+    notes, warnings, row_failures = build_row_findings(scenario_id, summary, counter_totals)
+    failures = [*replay_failures, *row_failures]
+    recommendation = build_row_recommendation(scenario_id, notes, warnings, failures)
+    status = determine_row_status(notes, warnings, failures)
 
     row = BarbarianAuditRow(
         scenario_id=scenario_id,
@@ -752,6 +879,7 @@ def audit_barbarian_pair(
         barbarian_death_count=counter_totals.barbarian_death_count,
         status=status,
         recommendation=recommendation,
+        notes=notes,
         warnings=warnings,
         failures=failures,
         replay_seeds=replay_seeds,
@@ -764,6 +892,7 @@ def audit_barbarian_pair(
         "complete",
         {
             "status": row.status,
+            "noteCount": len(row.notes),
             "warningCount": len(row.warnings),
             "failureCount": len(row.failures),
         },
@@ -803,13 +932,19 @@ def build_preset_aggregates(rows: list[BarbarianAuditRow]) -> list[PresetAggrega
         smart_wins = sum((row.smart_player_win_rate or 0.0) * row.smart_run_count for row in matching_rows)
         dumb_wins = sum((row.dumb_player_win_rate or 0.0) * row.dumb_run_count for row in matching_rows)
 
+        notes: list[str] = []
         warnings: list[str] = []
-        aggregate_status: AuditStatus = "pass"
+        failures: list[str] = []
         smart_rate = smart_wins / total_smart_runs if total_smart_runs > 0 else None
         dumb_rate = dumb_wins / total_dumb_runs if total_dumb_runs > 0 else None
-        if smart_rate is not None and dumb_rate is not None and smart_rate < dumb_rate:
-            warnings.append("Smart players underperformed dumb players in the aggregate combined pass.")
-            aggregate_status = "fail"
+        assessment = assess_smart_underperformance(smart_rate, dumb_rate, total_smart_runs, total_dumb_runs)
+        if assessment.message is not None:
+            assessment = SmartUnderperformanceAssessment(
+                severity=assessment.severity,
+                message=assessment.message.replace("the combined pass", "the aggregate combined pass", 1),
+            )
+        add_smart_underperformance_assessment(assessment, notes, warnings, failures)
+        aggregate_status = determine_row_status(notes, warnings, failures)
 
         aggregates.append(
             PresetAggregate(
@@ -819,7 +954,9 @@ def build_preset_aggregates(rows: list[BarbarianAuditRow]) -> list[PresetAggrega
                 smart_player_win_rate=smart_rate,
                 dumb_player_win_rate=dumb_rate,
                 status=aggregate_status,
+                notes=notes,
                 warnings=warnings,
+                failures=failures,
             )
         )
 
@@ -992,6 +1129,18 @@ def format_barbarian_audit_report(
             + " |"
         )
 
+    for aggregate in aggregates:
+        if not aggregate.failures and not aggregate.warnings and not aggregate.notes:
+            continue
+        lines.append("")
+        lines.append(f"### Aggregate / {aggregate.player_preset_id}")
+        for failure in aggregate.failures:
+            lines.append(f"- fail: {failure}")
+        for warning in aggregate.warnings:
+            lines.append(f"- warn: {warning}")
+        for note in aggregate.notes:
+            lines.append(f"- note: {note}")
+
     lines.append("")
     lines.append("## Scenario Rows")
     lines.append(
@@ -1020,7 +1169,7 @@ def format_barbarian_audit_report(
         )
 
     for row in rows:
-        if not row.failures and not row.warnings:
+        if not row.failures and not row.warnings and not row.notes:
             continue
         lines.append("")
         lines.append(f"### {row.player_preset_id} / {row.scenario_id}")
@@ -1028,6 +1177,8 @@ def format_barbarian_audit_report(
             lines.append(f"- fail: {failure}")
         for warning in row.warnings:
             lines.append(f"- warn: {warning}")
+        for note in row.notes:
+            lines.append(f"- note: {note}")
 
     if fighter_comparison:
         lines.append("")

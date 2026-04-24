@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.content.attack_sequences import build_player_attack_action
+from backend.content.class_progressions import get_proficiency_bonus
 from backend.engine import create_encounter
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import EncounterConfig, GridPosition
@@ -334,7 +335,8 @@ def test_player_preset_selection_changes_loaded_party_builds() -> None:
     assert rogue.resources.rage_uses == 0
     assert rogue.resources.handaxes == 0
     assert "sneak_attack" in rogue.feature_ids
-    assert rogue.combat_skill_modifiers == {"stealth": 5}
+    assert "expertise_stealth" in rogue.feature_ids
+    assert rogue.combat_skill_modifiers == {"stealth": 7}
 
 
 def test_level2_rogue_ranged_build_uses_cunning_action_metadata() -> None:
@@ -352,8 +354,9 @@ def test_level2_rogue_ranged_build_uses_cunning_action_metadata() -> None:
     assert rogue.loadout_id == "rogue_ranged_level2_sample_build"
     assert rogue.template_name == "Level 2 Ranged Rogue Sample Build"
     assert "sneak_attack" in rogue.feature_ids
+    assert "expertise_stealth" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
-    assert rogue.combat_skill_modifiers == {"stealth": 5}
+    assert rogue.combat_skill_modifiers == {"stealth": 7}
 
 
 def test_level2_rogue_melee_build_uses_cunning_action_metadata() -> None:
@@ -371,7 +374,15 @@ def test_level2_rogue_melee_build_uses_cunning_action_metadata() -> None:
     assert rogue.loadout_id == "rogue_melee_level2_sample_build"
     assert rogue.template_name == "Level 2 Melee Rogue Sample Build"
     assert "sneak_attack" in rogue.feature_ids
+    assert "expertise_stealth" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
+
+
+def test_proficiency_bonus_scales_with_level_breakpoints() -> None:
+    assert get_proficiency_bonus(1) == 2
+    assert get_proficiency_bonus(4) == 2
+    assert get_proficiency_bonus(5) == 3
+    assert get_proficiency_bonus(9) == 4
 
 
 def test_rapier_can_apply_sneak_attack_with_adjacent_ally() -> None:

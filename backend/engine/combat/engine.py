@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from backend.content.class_progressions import get_progression_scalar
 from backend.content.attack_sequences import AttackStepDefinition
+from backend.content.class_progressions import get_progression_scalar
 from backend.content.combat_actions import action_prevents_opportunity_attacks, get_extra_movement_multiplier
 from backend.content.enemies import (
     get_attack_action_definition_for_unit,
     unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
-from backend.content.spell_definitions import get_spell_definition
 from backend.content.special_actions import get_special_action
+from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.decision import (
     MovementPlan,
     TurnDecision,
@@ -38,9 +38,9 @@ from backend.engine.models.state import (
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
-    attempt_second_wind,
     attempt_hide,
     attempt_patient_defense,
+    attempt_second_wind,
     attempt_stabilize,
     attempt_step_of_the_wind,
     clear_invalid_hidden_effects,
@@ -51,16 +51,15 @@ from backend.engine.rules.combat_rules import (
     get_attack_mode,
     maybe_commit_reckless_attack,
     pull_die,
+    resolve_attack,
     resolve_burning_hands,
     resolve_cast_spell,
-    resolve_attack,
     resolve_death_save,
-    unit_is_raging,
 )
 from backend.engine.rules.spatial import (
-    get_active_grappler_ids,
     build_position_index,
     find_advance_path,
+    get_active_grappler_ids,
     get_attack_context,
     get_melee_reach_squares,
     get_min_chebyshev_distance_between_footprints,
@@ -909,10 +908,20 @@ def choose_attack_step_target_and_weapon(
     attack_step: AttackStepDefinition,
     preferred_target_id: str | None,
     preferred_weapon_id: str | None,
+    *,
+    action_id: str | None = None,
+    step_index: int = 0,
 ) -> tuple[str, str] | None:
     actor = state.units[actor_id]
 
-    for target in get_ranked_attack_targets(state, actor, preferred_target_id):
+    for target in get_ranked_attack_targets(
+        state,
+        actor,
+        preferred_target_id,
+        preferred_weapon_id=preferred_weapon_id,
+        action_id=action_id,
+        step_index=step_index,
+    ):
         if target.conditions.dead:
             continue
 
@@ -1154,6 +1163,8 @@ def resolve_attack_action(
             attack_step,
             preferred_target_id,
             preferred_weapon_id,
+            action_id=attack_action.action_id,
+            step_index=step_index,
         )
         if not selected_target_and_weapon:
             if step_index == 0 and not attack_events:

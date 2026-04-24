@@ -20,6 +20,7 @@ from backend.engine.models.state import (
     GridPosition,
     OnHitEffect,
     ResourceState,
+    RoleTag,
     SizeCategory,
     TerrainFeature,
     UnitState,
@@ -54,7 +55,7 @@ class MonsterDefinition:
     attacks: dict[str, WeaponProfile]
     tags: tuple[str, ...] = ()
     creature_tags: tuple[str, ...] = ()
-    role_tags: tuple[str, ...] = ()
+    role_tags: tuple[RoleTag, ...] = ()
     action_ids: tuple[str, ...] = ()
     special_action_ids: tuple[str, ...] = ()
     bonus_action_ids: tuple[str, ...] = ()

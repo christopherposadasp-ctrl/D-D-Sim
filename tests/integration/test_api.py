@@ -10,9 +10,62 @@ from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import EncounterConfig
 from backend.engine.services.catalog import get_enemy_catalog, get_player_catalog
 
+ACTIVE_SCENARIO_IDS = [
+    "goblin_screen",
+    "bandit_ambush",
+    "mixed_patrol",
+    "orc_push",
+    "wolf_harriers",
+    "marsh_predators",
+    "hobgoblin_kill_box",
+    "predator_rampage",
+    "bugbear_dragnet",
+    "deadwatch_phalanx",
+    "captains_crossfire",
+]
+
+ACTIVE_PLAYER_PRESET_IDS = [
+    "fighter_sample_trio",
+    "fighter_level2_sample_trio",
+    "rogue_ranged_trio",
+    "rogue_melee_trio",
+    "rogue_level2_ranged_trio",
+    "rogue_level2_melee_trio",
+    "barbarian_sample_trio",
+    "barbarian_level2_sample_trio",
+    "monk_sample_trio",
+    "monk_level2_sample_trio",
+    "wizard_sample_trio",
+    "martial_mixed_party",
+]
+
+CURRENT_MARSH_PREDATORS_UNITS = [
+    {"unitId": "E1", "variantId": "giant_toad", "position": {"x": 9, "y": 7}},
+    {"unitId": "E2", "variantId": "crocodile", "position": {"x": 1, "y": 1}},
+    {"unitId": "E3", "variantId": "crocodile", "position": {"x": 4, "y": 1}},
+    {"unitId": "E4", "variantId": "crocodile", "position": {"x": 2, "y": 4}},
+    {"unitId": "E5", "variantId": "giant_toad", "position": {"x": 9, "y": 10}},
+]
+
+CURRENT_MARTIAL_MIXED_PARTY_UNITS = [
+    {"unitId": "F1", "loadoutId": "fighter_level2_sample_build"},
+    {"unitId": "F2", "loadoutId": "barbarian_level2_sample_build"},
+    {"unitId": "F3", "loadoutId": "rogue_ranged_level2_sample_build"},
+    {"unitId": "F4", "loadoutId": "rogue_melee_level2_sample_build"},
+]
+
 
 def build_trio_placements():
     return {key: value.model_dump() for key, value in DEFAULT_POSITIONS.items() if key != "F4"}
+
+
+def test_health_endpoint_returns_ok() -> None:
+    client = TestClient(app)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_run_endpoint_matches_service_layer() -> None:
@@ -54,6 +107,20 @@ def test_enemy_catalog_exposes_fixed_rock_for_each_preset() -> None:
         ]
 
 
+def test_enemy_catalog_exposes_frozen_active_scenario_surface() -> None:
+    client = TestClient(app)
+
+    response = client.get("/api/catalog/enemies")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [preset["id"] for preset in payload["enemyPresets"]] == ACTIVE_SCENARIO_IDS
+    assert len(payload["enemyPresets"]) == 11
+
+    presets_by_id = {preset["id"]: preset for preset in payload["enemyPresets"]}
+    assert presets_by_id["marsh_predators"]["units"] == CURRENT_MARSH_PREDATORS_UNITS
+
+
 def test_player_catalog_endpoint_matches_service_layer() -> None:
     client = TestClient(app)
 
@@ -62,6 +129,24 @@ def test_player_catalog_endpoint_matches_service_layer() -> None:
     assert response.status_code == 200
     expected = get_player_catalog().model_dump(by_alias=True)
     assert response.json() == expected
+
+
+def test_player_catalog_exposes_frozen_active_player_surface() -> None:
+    client = TestClient(app)
+
+    response = client.get("/api/catalog/classes")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    classes_by_id = {player_class["id"]: player_class for player_class in payload["classes"]}
+    assert "wizard" in classes_by_id
+    assert classes_by_id["wizard"]["maxSupportedLevel"] == 1
+    assert [preset["id"] for preset in payload["playerPresets"]] == ACTIVE_PLAYER_PRESET_IDS
+    assert len(payload["playerPresets"]) == 12
+
+    presets_by_id = {preset["id"]: preset for preset in payload["playerPresets"]}
+    assert presets_by_id["martial_mixed_party"]["units"] == CURRENT_MARTIAL_MIXED_PARTY_UNITS
 
 
 def test_batch_endpoint_matches_service_layer() -> None:

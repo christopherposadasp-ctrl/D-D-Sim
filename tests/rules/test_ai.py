@@ -5,9 +5,17 @@ from backend.engine import create_encounter
 from backend.engine.ai.decision import can_intentionally_provoke_opportunity_attack, choose_turn_decision
 from backend.engine.combat.engine import clear_turn_flags, resolve_attack_action
 from backend.engine.constants import ARCHER_GOBLIN_IDS, DEFAULT_POSITIONS, MELEE_GOBLIN_IDS
-from backend.engine.models.state import EncounterConfig, GridPosition, HiddenEffect, NoReactionsEffect, RageEffect, WeaponRange
-from backend.engine.rules.spatial import can_attempt_hide_from_position
+from backend.engine.models.state import (
+    EncounterConfig,
+    GridPosition,
+    HiddenEffect,
+    NoReactionsEffect,
+    OnHitEffect,
+    RageEffect,
+    WeaponRange,
+)
 from backend.engine.rules.combat_rules import AttackRollOverrides
+from backend.engine.rules.spatial import can_attempt_hide_from_position
 
 
 def build_placements(**overrides):
@@ -41,6 +49,17 @@ def defeat_other_enemies(encounter, *active_enemy_ids: str) -> None:
             continue
         unit.current_hp = 0
         unit.conditions.dead = True
+
+
+def keep_only_active_units(encounter, *active_unit_ids: str) -> None:
+    active_ids = set(active_unit_ids)
+    for unit in encounter.units.values():
+        if unit.id in active_ids:
+            continue
+        unit.current_hp = 0
+        unit.conditions.dead = True
+        unit.conditions.unconscious = False
+        unit.conditions.prone = False
 
 
 def test_level2_fighter_opens_with_dash_then_action_surge_melee_attack_from_default_layout() -> None:
@@ -870,6 +889,226 @@ def test_smart_players_seek_flanking_while_dumb_players_take_first_adjacent_squa
     assert smart_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
     assert [point.model_dump() for point in smart_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 6}]
     assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
+
+
+def test_smart_players_prioritize_rider_over_non_rider_when_both_are_in_kill_band() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-kill-band-rider-priority",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 2, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 8
+    encounter.units["G1"].attacks["scimitar"].on_hit_effects = [OnHitEffect(kind="prone_on_hit")]
+    encounter.units["G2"].current_hp = 6
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_smart_players_prioritize_caster_over_medium_rider_when_both_are_in_kill_band() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-kill-band-caster-priority",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 2, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].role_tags = ["caster"]
+    encounter.units["G1"].current_hp = 8
+    encounter.units["G2"].attacks["scimitar"].on_hit_effects = [OnHitEffect(kind="prone_on_hit")]
+    encounter.units["G2"].current_hp = 6
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_smart_players_take_kill_confirm_over_higher_threat_outside_kill_band() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-kill-confirm-over-threat",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 2, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].role_tags = ["caster"]
+    encounter.units["G1"].current_hp = 30
+    encounter.units["G2"].current_hp = 1
+    encounter.units["G2"].ac = 14
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "greatsword"}
+
+
+def test_smart_players_prefer_immediate_rider_over_distant_caster_that_cannot_pressure_allies_soon() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-immediate-rider-over-distant-caster",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 14, "y": 15}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].attacks["scimitar"].on_hit_effects = [OnHitEffect(kind="prone_on_hit")]
+    encounter.units["G1"].current_hp = 18
+    encounter.units["G2"].role_tags = ["caster"]
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_extra_attack_targeting_uses_action_level_kill_band_before_the_first_swing() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-extra-attack-kill-band",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 2, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].feature_ids.append("extra_attack")
+    encounter.units["F1"].class_id = None
+    encounter.units["G1"].role_tags = ["caster"]
+    encounter.units["G1"].current_hp = 15
+    encounter.units["G1"].ac = 8
+    encounter.units["G2"].current_hp = 5
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_extra_attack_keeps_the_same_target_if_it_survives_the_first_hit() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="extra-attack-target-stickiness",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 2, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].feature_ids.append("extra_attack")
+    encounter.units["F1"].class_id = None
+    encounter.units["G1"].current_hp = 15
+    encounter.units["G1"].ac = 8
+    encounter.units["G2"].current_hp = 20
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3]),
+        ],
+    )
+
+    attack_target_ids = [event.target_ids[0] for event in attack_events if event.event_type == "attack"]
+
+    assert attack_target_ids == ["G1", "G1"]
+
+
+def test_extra_attack_retargets_after_the_first_kill() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="extra-attack-retarget-after-kill",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 2, "y": 1}, G2={"x": 2, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].feature_ids.append("extra_attack")
+    encounter.units["F1"].class_id = None
+    encounter.units["G1"].current_hp = 5
+    encounter.units["G1"].ac = 8
+    encounter.units["G2"].current_hp = 20
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4, 3]),
+        ],
+    )
+
+    attack_target_ids = [event.target_ids[0] for event in attack_events if event.event_type == "attack"]
+
+    assert attack_target_ids == ["G1", "G2"]
+
+
+def test_monster_multiattack_keeps_the_same_target_if_it_survives_the_first_hit() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monster-multiattack-stickiness",
+            enemy_preset_id="deadwatch_phalanx",
+            player_preset_id="fighter_sample_trio",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F2", "E1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F2"].position = GridPosition(x=6, y=6)
+    encounter.units["F1"].current_hp = 12
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F1", "weapon_id": "slam"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ],
+    )
+
+    attack_target_ids = [event.target_ids[0] for event in attack_events if event.event_type == "attack"]
+
+    assert attack_target_ids == ["F1", "F1"]
+
+
+def test_monster_multiattack_retargets_after_the_first_kill() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="monster-multiattack-retarget-after-kill",
+            enemy_preset_id="deadwatch_phalanx",
+            player_preset_id="fighter_sample_trio",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F2", "E1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F2"].position = GridPosition(x=6, y=6)
+    encounter.units["F1"].current_hp = 4
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F1", "weapon_id": "slam"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+            AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ],
+    )
+
+    attack_target_ids = [event.target_ids[0] for event in attack_events if event.event_type == "attack"]
+
+    assert attack_target_ids == ["F1", "F2"]
 
 
 def test_goblin_role_split_matches_expected_loadouts() -> None:

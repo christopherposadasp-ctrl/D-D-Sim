@@ -8,6 +8,7 @@ from backend.engine.services.fighter_audit import (
     build_full_fighter_audit_config,
     build_preset_aggregates,
     build_quick_fighter_audit_config,
+    classify_smart_underperformance,
     extract_fighter_run_metrics,
     format_fighter_audit_report,
     get_fighter_audit_player_preset_ids,
@@ -139,7 +140,27 @@ def test_build_preset_aggregates_flags_smart_underperforming_dumb() -> None:
     aggregates = build_preset_aggregates(rows)
 
     assert aggregates[0].status == "fail"
-    assert aggregates[0].warnings == ["Smart players underperformed dumb players in the aggregate combined pass."]
+    assert aggregates[0].notes == []
+    assert aggregates[0].warnings == []
+    assert len(aggregates[0].failures) == 1
+    assert "aggregate combined pass" in aggregates[0].failures[0]
+    assert "delta 20.0 pts" in aggregates[0].failures[0]
+
+
+def test_smart_underperformance_classifies_small_sample_signal_as_note() -> None:
+    assert classify_smart_underperformance(0.80, 0.8666666666666667, 45, 45) == "note"
+
+
+def test_smart_underperformance_classifies_small_sample_gap_as_warn() -> None:
+    assert classify_smart_underperformance(0.8, 0.9111111111111111, 45, 45) == "warn"
+
+
+def test_smart_underperformance_classifies_large_sample_gap_as_warn() -> None:
+    assert classify_smart_underperformance(0.5, 0.58, 450, 450) == "warn"
+
+
+def test_smart_underperformance_classifies_large_sample_gap_as_fail() -> None:
+    assert classify_smart_underperformance(0.5, 0.7, 450, 450) == "fail"
 
 
 def test_format_fighter_audit_report_includes_core_sections() -> None:
@@ -172,6 +193,7 @@ def test_format_fighter_audit_report_includes_core_sections() -> None:
         fighter_death_count=0,
         status="pass",
         recommendation=None,
+        notes=["Smart players underperformed dumb players in the combined pass (smart 50.0%, dumb 56.0%, delta 6.0 pts over 100 vs 100 runs; z=1.00)."],
         warnings=[],
         failures=[],
     )
@@ -186,3 +208,4 @@ def test_format_fighter_audit_report_includes_core_sections() -> None:
     assert "## Preset Aggregates" in report
     assert "## Scenario Rows" in report
     assert "fighter_level2_sample_trio" in report
+    assert "- note: Smart players underperformed dumb players" in report

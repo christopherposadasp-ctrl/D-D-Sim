@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 from backend.engine import run_encounter
 from backend.engine.models.state import EncounterConfig
 from backend.engine.services.barbarian_audit import (
@@ -8,12 +13,15 @@ from backend.engine.services.barbarian_audit import (
     build_full_barbarian_audit_config,
     build_preset_aggregates,
     build_quick_barbarian_audit_config,
+    classify_smart_underperformance,
     extract_barbarian_run_metrics,
     format_barbarian_audit_report,
     get_barbarian_audit_player_preset_ids,
     get_barbarian_audit_scenario_ids,
     review_fixed_seed_replays,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_barbarian_audit_profiles_expose_quick_and_full_defaults() -> None:
@@ -85,6 +93,57 @@ def test_review_fixed_seed_replays_returns_seed_list_for_small_probe() -> None:
     assert all("skipped opening rage" not in issue for issue in issues)
 
 
+def test_review_fixed_seed_replays_allows_stand_up_before_opening_rage() -> None:
+    issues, replay_seeds = review_fixed_seed_replays(
+        "barbarian_level2_sample_trio",
+        "predator_rampage",
+        BarbarianAuditConfig(
+            fixed_seed_runs=1,
+            behavior_batch_size=1,
+            health_batch_size=1,
+            seed_prefix="barbarian-audit",
+        ),
+    )
+
+    assert replay_seeds[0] == "barbarian-audit-barbarian_level2_sample_trio-predator_rampage-smart-00"
+    assert all("skipped opening rage" not in issue for issue in issues)
+
+
+def test_reported_barbarian_wolf_harriers_stall_seed_completes_metrics_probe() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "investigate_barbarian_stall.py"),
+            "--child",
+            "--child-behavior",
+            "smart",
+            "--child-run-index",
+            "6",
+            "--child-path",
+            "metrics",
+            "--timeout-seconds",
+            "15",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout.splitlines()[-1])
+
+    assert payload["status"] == "pass"
+    assert payload["seed"] == "barbarian-audit-martial_mixed_party-wolf_harriers-behavior-smart-006"
+    assert payload["terminalState"] == "complete"
+    assert payload["replayFrameCount"] > 0
+    assert payload["eventCount"] > 0
+    assert payload["metrics"]["openingRageOpportunities"] >= 0
+
+
 def test_build_preset_aggregates_flags_smart_underperforming_dumb() -> None:
     rows = [
         BarbarianAuditRow(
@@ -124,7 +183,27 @@ def test_build_preset_aggregates_flags_smart_underperforming_dumb() -> None:
     aggregates = build_preset_aggregates(rows)
 
     assert aggregates[0].status == "fail"
-    assert aggregates[0].warnings == ["Smart players underperformed dumb players in the aggregate combined pass."]
+    assert aggregates[0].notes == []
+    assert aggregates[0].warnings == []
+    assert len(aggregates[0].failures) == 1
+    assert "aggregate combined pass" in aggregates[0].failures[0]
+    assert "delta 20.0 pts" in aggregates[0].failures[0]
+
+
+def test_smart_underperformance_classifies_small_sample_signal_as_note() -> None:
+    assert classify_smart_underperformance(0.80, 0.8666666666666667, 45, 45) == "note"
+
+
+def test_smart_underperformance_classifies_small_sample_gap_as_warn() -> None:
+    assert classify_smart_underperformance(0.8, 0.9111111111111111, 45, 45) == "warn"
+
+
+def test_smart_underperformance_classifies_large_sample_gap_as_warn() -> None:
+    assert classify_smart_underperformance(0.5, 0.58, 450, 450) == "warn"
+
+
+def test_smart_underperformance_classifies_large_sample_gap_as_fail() -> None:
+    assert classify_smart_underperformance(0.5, 0.7, 450, 450) == "fail"
 
 
 def test_format_barbarian_audit_report_includes_core_sections() -> None:
@@ -159,6 +238,7 @@ def test_format_barbarian_audit_report_includes_core_sections() -> None:
         barbarian_death_count=0,
         status="pass",
         recommendation=None,
+        notes=["Smart players underperformed dumb players in the combined pass (smart 50.0%, dumb 56.0%, delta 6.0 pts over 100 vs 100 runs; z=1.00)."],
         warnings=[],
         failures=[],
     )
@@ -173,3 +253,4 @@ def test_format_barbarian_audit_report_includes_core_sections() -> None:
     assert "## Preset Aggregates" in report
     assert "## Scenario Rows" in report
     assert "barbarian_level2_sample_trio" in report
+    assert "- note: Smart players underperformed dumb players" in report

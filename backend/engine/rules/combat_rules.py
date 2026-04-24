@@ -20,8 +20,8 @@ from backend.engine.models.state import (
     DamageDetails,
     DodgingEffect,
     EncounterState,
-    GridPosition,
     GrappledEffect,
+    GridPosition,
     HarriedEffect,
     HiddenEffect,
     MasteryType,
@@ -43,14 +43,13 @@ from backend.engine.models.state import (
 from backend.engine.rules.spatial import (
     build_position_index,
     can_attempt_hide_from_position,
-    find_advance_path,
-    get_line_squares,
     get_attack_context,
     get_hide_passive_perception_dc,
+    get_line_squares,
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
-    is_active_grapple,
     get_unit_footprint,
+    is_active_grapple,
 )
 from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 from backend.engine.utils.rng import roll_die

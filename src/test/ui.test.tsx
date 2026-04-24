@@ -17,185 +17,1840 @@ import type {
 import { App } from '../ui/App';
 
 const TEST_ENEMY_CATALOG: EnemyCatalogResponse = {
-  defaultEnemyPresetId: 'goblin_screen',
-  enemyVariants: [
-    { id: 'goblin_raider', displayName: 'Goblin Raider', maxHp: 10, footprint: { width: 1, height: 1 } },
-    { id: 'goblin_archer', displayName: 'Goblin Archer', maxHp: 10, footprint: { width: 1, height: 1 } },
-    { id: 'bandit_melee', displayName: 'Bandit Melee', maxHp: 11, footprint: { width: 1, height: 1 } },
-    { id: 'bandit_archer', displayName: 'Bandit Archer', maxHp: 11, footprint: { width: 1, height: 1 } },
-    { id: 'guard', displayName: 'Guard', maxHp: 11, footprint: { width: 1, height: 1 } },
-    { id: 'scout', displayName: 'Scout', maxHp: 16, footprint: { width: 1, height: 1 } },
-    { id: 'orc_warrior', displayName: 'Orc Warrior', maxHp: 15, footprint: { width: 1, height: 1 } },
-    { id: 'wolf', displayName: 'Wolf', maxHp: 11, footprint: { width: 1, height: 1 } },
-    { id: 'giant_toad', displayName: 'Giant Toad', maxHp: 39, footprint: { width: 2, height: 2 } },
-    { id: 'crocodile', displayName: 'Crocodile', maxHp: 13, footprint: { width: 2, height: 2 } },
-  ],
-  enemyPresets: [
+  "defaultEnemyPresetId": "goblin_screen",
+  "enemyVariants": [
     {
-      id: 'goblin_screen',
-      displayName: 'Goblin Screen',
-      description: 'Three raiders screening three archers.',
-      terrainFeatures: [{ featureId: 'rock_1', kind: 'rock', position: { x: 5, y: 8 }, footprint: { width: 1, height: 1 } }],
-      units: [
-        { unitId: 'E1', variantId: 'goblin_raider', position: { x: 14, y: 6 } },
-        { unitId: 'E2', variantId: 'goblin_raider', position: { x: 14, y: 8 } },
-        { unitId: 'E3', variantId: 'goblin_raider', position: { x: 14, y: 10 } },
-        { unitId: 'E4', variantId: 'goblin_archer', position: { x: 15, y: 5 } },
-        { unitId: 'E5', variantId: 'goblin_archer', position: { x: 15, y: 8 } },
-        { unitId: 'E6', variantId: 'goblin_archer', position: { x: 15, y: 11 } },
-      ],
+      "id": "animated_armor",
+      "displayName": "Animated Armor",
+      "maxHp": 33,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
     },
     {
-      id: 'marsh_predators',
-      displayName: 'Marsh Predators',
-      description: 'A giant toad backed by two crocodiles that try to pin fighters in place.',
-      terrainFeatures: [{ featureId: 'rock_1', kind: 'rock', position: { x: 5, y: 8 }, footprint: { width: 1, height: 1 } }],
-      units: [
-        { unitId: 'E1', variantId: 'giant_toad', position: { x: 9, y: 7 } },
-        { unitId: 'E2', variantId: 'crocodile', position: { x: 11, y: 5 } },
-        { unitId: 'E3', variantId: 'crocodile', position: { x: 11, y: 9 } },
-      ],
+      "id": "awakened_shrub",
+      "displayName": "Awakened Shrub",
+      "maxHp": 10,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
     },
+    {
+      "id": "awakened_tree",
+      "displayName": "Awakened Tree",
+      "maxHp": 59,
+      "footprint": {
+        "width": 3,
+        "height": 3
+      }
+    },
+    {
+      "id": "axe_beak",
+      "displayName": "Axe Beak",
+      "maxHp": 19,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "bandit_archer",
+      "displayName": "Bandit Archer",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "bandit_captain",
+      "displayName": "Bandit Captain",
+      "maxHp": 52,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "bandit_melee",
+      "displayName": "Bandit Melee",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "berserker",
+      "displayName": "Berserker",
+      "maxHp": 67,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "black_bear",
+      "displayName": "Black Bear",
+      "maxHp": 19,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "brown_bear",
+      "displayName": "Brown Bear",
+      "maxHp": 22,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "bugbear_warrior",
+      "displayName": "Bugbear Warrior",
+      "maxHp": 33,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "camel",
+      "displayName": "Camel",
+      "maxHp": 17,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "commoner",
+      "displayName": "Commoner",
+      "maxHp": 4,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "crocodile",
+      "displayName": "Crocodile",
+      "maxHp": 13,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "cultist",
+      "displayName": "Cultist",
+      "maxHp": 9,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "dire_wolf",
+      "displayName": "Dire Wolf",
+      "maxHp": 22,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "draft_horse",
+      "displayName": "Draft Horse",
+      "maxHp": 15,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "giant_badger",
+      "displayName": "Giant Badger",
+      "maxHp": 15,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "giant_crab",
+      "displayName": "Giant Crab",
+      "maxHp": 13,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "giant_fire_beetle",
+      "displayName": "Giant Fire Beetle",
+      "maxHp": 4,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "giant_hyena",
+      "displayName": "Giant Hyena",
+      "maxHp": 45,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "giant_lizard",
+      "displayName": "Giant Lizard",
+      "maxHp": 19,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "giant_rat",
+      "displayName": "Giant Rat",
+      "maxHp": 7,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "giant_toad",
+      "displayName": "Giant Toad",
+      "maxHp": 39,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "giant_weasel",
+      "displayName": "Giant Weasel",
+      "maxHp": 9,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "gnoll_warrior",
+      "displayName": "Gnoll Warrior",
+      "maxHp": 27,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "goblin_archer",
+      "displayName": "Goblin Archer",
+      "maxHp": 10,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "goblin_boss",
+      "displayName": "Goblin Boss",
+      "maxHp": 21,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "goblin_minion",
+      "displayName": "Goblin Minion",
+      "maxHp": 7,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "goblin_raider",
+      "displayName": "Goblin Raider",
+      "maxHp": 10,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "guard",
+      "displayName": "Guard",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "guard_captain",
+      "displayName": "Guard Captain",
+      "maxHp": 75,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "hobgoblin_archer",
+      "displayName": "Hobgoblin Archer",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "hobgoblin_warrior",
+      "displayName": "Hobgoblin Warrior",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "hyena",
+      "displayName": "Hyena",
+      "maxHp": 5,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "jackal",
+      "displayName": "Jackal",
+      "maxHp": 3,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "lemure",
+      "displayName": "Lemure",
+      "maxHp": 9,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "mastiff",
+      "displayName": "Mastiff",
+      "maxHp": 5,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "mule",
+      "displayName": "Mule",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "noble",
+      "displayName": "Noble",
+      "maxHp": 9,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "ogre",
+      "displayName": "Ogre",
+      "maxHp": 68,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "orc_warrior",
+      "displayName": "Orc Warrior",
+      "maxHp": 15,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "polar_bear",
+      "displayName": "Polar Bear",
+      "maxHp": 42,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "pony",
+      "displayName": "Pony",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "riding_horse",
+      "displayName": "Riding Horse",
+      "maxHp": 13,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "scout",
+      "displayName": "Scout",
+      "maxHp": 16,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "skeleton",
+      "displayName": "Skeleton",
+      "maxHp": 13,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "tiger",
+      "displayName": "Tiger",
+      "maxHp": 30,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "tough",
+      "displayName": "Tough",
+      "maxHp": 32,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "violet_fungus",
+      "displayName": "Violet Fungus",
+      "maxHp": 18,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "warrior_infantry",
+      "displayName": "Warrior Infantry",
+      "maxHp": 9,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "wolf",
+      "displayName": "Wolf",
+      "maxHp": 11,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    },
+    {
+      "id": "worg",
+      "displayName": "Worg",
+      "maxHp": 26,
+      "footprint": {
+        "width": 2,
+        "height": 2
+      }
+    },
+    {
+      "id": "zombie",
+      "displayName": "Zombie",
+      "maxHp": 15,
+      "footprint": {
+        "width": 1,
+        "height": 1
+      }
+    }
   ],
+  "enemyPresets": [
+    {
+      "id": "goblin_screen",
+      "displayName": "Goblin Screen",
+      "description": "Three raiders screening three archers.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "goblin_raider",
+          "position": {
+            "x": 14,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "goblin_raider",
+          "position": {
+            "x": 14,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "goblin_raider",
+          "position": {
+            "x": 14,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 11
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "bandit_ambush",
+      "displayName": "Bandit Ambush",
+      "description": "Two melee bandits, two archers, and a scout.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "bandit_melee",
+          "position": {
+            "x": 14,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "bandit_melee",
+          "position": {
+            "x": 14,
+            "y": 9
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "bandit_archer",
+          "position": {
+            "x": 15,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "bandit_archer",
+          "position": {
+            "x": 15,
+            "y": 11
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "scout",
+          "position": {
+            "x": 15,
+            "y": 8
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "mixed_patrol",
+      "displayName": "Mixed Patrol",
+      "description": "Guards leading a mixed ranged patrol.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "guard",
+          "position": {
+            "x": 14,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "guard",
+          "position": {
+            "x": 14,
+            "y": 9
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 11
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "bandit_melee",
+          "position": {
+            "x": 14,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "scout",
+          "position": {
+            "x": 15,
+            "y": 8
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "orc_push",
+      "displayName": "Orc Push",
+      "description": "Orc front line with goblin ranged support.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "orc_warrior",
+          "position": {
+            "x": 13,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "orc_warrior",
+          "position": {
+            "x": 13,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "orc_warrior",
+          "position": {
+            "x": 13,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "orc_warrior",
+          "position": {
+            "x": 14,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 10
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "wolf_harriers",
+      "displayName": "Wolf Harriers",
+      "description": "Wolves rushing ahead of goblin support fire.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "wolf",
+          "position": {
+            "x": 13,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "wolf",
+          "position": {
+            "x": 13,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "wolf",
+          "position": {
+            "x": 13,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E7",
+          "variantId": "wolf",
+          "position": {
+            "x": 13,
+            "y": 12
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 15,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "goblin_raider",
+          "position": {
+            "x": 14,
+            "y": 8
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "marsh_predators",
+      "displayName": "Marsh Predators",
+      "description": "Two giant toads backed by three crocodiles clustered along the marsh edge.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "giant_toad",
+          "position": {
+            "x": 9,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "crocodile",
+          "position": {
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "crocodile",
+          "position": {
+            "x": 4,
+            "y": 1
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "crocodile",
+          "position": {
+            "x": 2,
+            "y": 4
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "giant_toad",
+          "position": {
+            "x": 9,
+            "y": 10
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "hobgoblin_kill_box",
+      "displayName": "Hobgoblin Kill Box",
+      "description": "A hobgoblin shield line locking lanes for archers and a goblin boss.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "hobgoblin_warrior",
+          "position": {
+            "x": 10,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "hobgoblin_warrior",
+          "position": {
+            "x": 10,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "hobgoblin_warrior",
+          "position": {
+            "x": 10,
+            "y": 11
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "hobgoblin_warrior",
+          "position": {
+            "x": 12,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "hobgoblin_archer",
+          "position": {
+            "x": 14,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "hobgoblin_archer",
+          "position": {
+            "x": 14,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E7",
+          "variantId": "hobgoblin_archer",
+          "position": {
+            "x": 14,
+            "y": 11
+          }
+        },
+        {
+          "unitId": "E8",
+          "variantId": "goblin_boss",
+          "position": {
+            "x": 13,
+            "y": 8
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "predator_rampage",
+      "displayName": "Predator Rampage",
+      "description": "Dire wolves and worgs crash in ahead of gnoll bows and a giant hyena finisher.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "dire_wolf",
+          "position": {
+            "x": 10,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "dire_wolf",
+          "position": {
+            "x": 10,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "giant_hyena",
+          "position": {
+            "x": 12,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "gnoll_warrior",
+          "position": {
+            "x": 14,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "gnoll_warrior",
+          "position": {
+            "x": 14,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "worg",
+          "position": {
+            "x": 12,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E7",
+          "variantId": "worg",
+          "position": {
+            "x": 12,
+            "y": 2
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "bugbear_dragnet",
+      "displayName": "Bugbear Dragnet",
+      "description": "Bugbears pin the front while a goblin boss and archers punish the approach lanes.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "bugbear_warrior",
+          "position": {
+            "x": 10,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "bugbear_warrior",
+          "position": {
+            "x": 10,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "goblin_boss",
+          "position": {
+            "x": 13,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "goblin_archer",
+          "position": {
+            "x": 14,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "goblin_minion",
+          "position": {
+            "x": 14,
+            "y": 9
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "hobgoblin_archer",
+          "position": {
+            "x": 15,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E7",
+          "variantId": "hobgoblin_archer",
+          "position": {
+            "x": 15,
+            "y": 11
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "deadwatch_phalanx",
+      "displayName": "Deadwatch Phalanx",
+      "description": "Animated armor and undead archers grind attackers down behind a rigid phalanx.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "animated_armor",
+          "position": {
+            "x": 10,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "animated_armor",
+          "position": {
+            "x": 10,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "zombie",
+          "position": {
+            "x": 12,
+            "y": 5
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "zombie",
+          "position": {
+            "x": 12,
+            "y": 11
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "skeleton",
+          "position": {
+            "x": 15,
+            "y": 4
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "skeleton",
+          "position": {
+            "x": 15,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E7",
+          "variantId": "skeleton",
+          "position": {
+            "x": 15,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E8",
+          "variantId": "skeleton",
+          "position": {
+            "x": 15,
+            "y": 13
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "captains_crossfire",
+      "displayName": "Captain's Crossfire",
+      "description": "A veteran captain anchors a layered crossfire with guard screens and parrying nobles.",
+      "units": [
+        {
+          "unitId": "E1",
+          "variantId": "guard",
+          "position": {
+            "x": 10,
+            "y": 7
+          }
+        },
+        {
+          "unitId": "E2",
+          "variantId": "guard",
+          "position": {
+            "x": 10,
+            "y": 9
+          }
+        },
+        {
+          "unitId": "E3",
+          "variantId": "bandit_captain",
+          "position": {
+            "x": 11,
+            "y": 8
+          }
+        },
+        {
+          "unitId": "E4",
+          "variantId": "noble",
+          "position": {
+            "x": 12,
+            "y": 6
+          }
+        },
+        {
+          "unitId": "E5",
+          "variantId": "noble",
+          "position": {
+            "x": 12,
+            "y": 10
+          }
+        },
+        {
+          "unitId": "E6",
+          "variantId": "scout",
+          "position": {
+            "x": 14,
+            "y": 4
+          }
+        },
+        {
+          "unitId": "E7",
+          "variantId": "scout",
+          "position": {
+            "x": 14,
+            "y": 12
+          }
+        }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": {
+            "x": 5,
+            "y": 8
+          },
+          "footprint": {
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    }
+  ]
 };
 
 const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
-  defaultPlayerPresetId: 'martial_mixed_party',
-  classes: [
-    { id: 'barbarian', displayName: 'Barbarian', category: 'martial', maxSupportedLevel: 2 },
-    { id: 'fighter', displayName: 'Fighter', category: 'martial', maxSupportedLevel: 2 },
-    { id: 'rogue', displayName: 'Rogue', category: 'martial', maxSupportedLevel: 1 },
+  "defaultPlayerPresetId": "martial_mixed_party",
+  "classes": [
+    {
+      "id": "barbarian",
+      "displayName": "Barbarian",
+      "category": "martial",
+      "maxSupportedLevel": 2
+    },
+    {
+      "id": "fighter",
+      "displayName": "Fighter",
+      "category": "martial",
+      "maxSupportedLevel": 2
+    },
+    {
+      "id": "monk",
+      "displayName": "Monk",
+      "category": "martial",
+      "maxSupportedLevel": 2
+    },
+    {
+      "id": "rogue",
+      "displayName": "Rogue",
+      "category": "martial",
+      "maxSupportedLevel": 2
+    },
+    {
+      "id": "wizard",
+      "displayName": "Wizard",
+      "category": "spellcaster",
+      "maxSupportedLevel": 1
+    }
   ],
-  loadouts: [
+  "loadouts": [
     {
-      id: 'barbarian_sample_build',
-      displayName: 'Level 1 Barbarian Sample Build',
-      classId: 'barbarian',
-      level: 1,
-      maxHp: 15,
-      featureIds: ['rage', 'unarmored_defense', 'weapon_mastery_cleave', 'weapon_mastery_vex'],
-      weaponIds: ['greataxe', 'handaxe'],
+      "id": "barbarian_sample_build",
+      "displayName": "Level 1 Barbarian Sample Build",
+      "classId": "barbarian",
+      "level": 1,
+      "maxHp": 15,
+      "featureIds": [
+        "rage",
+        "unarmored_defense",
+        "weapon_mastery_cleave",
+        "weapon_mastery_vex"
+      ],
+      "weaponIds": [
+        "greataxe",
+        "handaxe"
+      ]
     },
     {
-      id: 'barbarian_level2_sample_build',
-      displayName: 'Level 2 Barbarian Sample Build',
-      classId: 'barbarian',
-      level: 2,
-      maxHp: 25,
-      featureIds: ['rage', 'unarmored_defense', 'reckless_attack', 'danger_sense', 'weapon_mastery_cleave', 'weapon_mastery_vex'],
-      weaponIds: ['greataxe', 'handaxe'],
+      "id": "barbarian_level2_sample_build",
+      "displayName": "Level 2 Barbarian Sample Build",
+      "classId": "barbarian",
+      "level": 2,
+      "maxHp": 25,
+      "featureIds": [
+        "rage",
+        "unarmored_defense",
+        "reckless_attack",
+        "danger_sense",
+        "weapon_mastery_cleave",
+        "weapon_mastery_vex"
+      ],
+      "weaponIds": [
+        "greataxe",
+        "handaxe"
+      ]
     },
     {
-      id: 'fighter_sample_build',
-      displayName: 'Level 1 Fighter Sample Build',
-      classId: 'fighter',
-      level: 1,
-      maxHp: 13,
-      featureIds: ['second_wind', 'great_weapon_fighting', 'savage_attacker'],
-      weaponIds: ['flail', 'greatsword', 'javelin'],
+      "id": "fighter_sample_build",
+      "displayName": "Level 1 Fighter Sample Build",
+      "classId": "fighter",
+      "level": 1,
+      "maxHp": 13,
+      "featureIds": [
+        "second_wind",
+        "great_weapon_fighting",
+        "savage_attacker",
+        "weapon_mastery_graze",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "flail",
+        "greatsword",
+        "javelin"
+      ]
     },
     {
-      id: 'fighter_level2_sample_build',
-      displayName: 'Level 2 Fighter Sample Build',
-      classId: 'fighter',
-      level: 2,
-      maxHp: 21,
-      featureIds: ['second_wind', 'action_surge', 'great_weapon_fighting', 'savage_attacker'],
-      weaponIds: ['flail', 'greatsword', 'javelin'],
+      "id": "fighter_level2_benchmark_tank",
+      "displayName": "Level 2 Fighter Benchmark Tank",
+      "classId": "fighter",
+      "level": 2,
+      "maxHp": 100,
+      "featureIds": [
+        "second_wind",
+        "action_surge",
+        "great_weapon_fighting",
+        "savage_attacker",
+        "weapon_mastery_graze",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "flail",
+        "greatsword",
+        "javelin"
+      ]
     },
     {
-      id: 'rogue_ranged_sample_build',
-      displayName: 'Ranged Rogue Sample Build',
-      classId: 'rogue',
-      level: 1,
-      maxHp: 10,
-      featureIds: ['sneak_attack'],
-      weaponIds: ['shortbow', 'shortsword'],
+      "id": "fighter_level2_sample_build",
+      "displayName": "Level 2 Fighter Sample Build",
+      "classId": "fighter",
+      "level": 2,
+      "maxHp": 21,
+      "featureIds": [
+        "second_wind",
+        "action_surge",
+        "great_weapon_fighting",
+        "savage_attacker",
+        "weapon_mastery_graze",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "flail",
+        "greatsword",
+        "javelin"
+      ]
     },
     {
-      id: 'rogue_melee_sample_build',
-      displayName: 'Melee Rogue Sample Build',
-      classId: 'rogue',
-      level: 1,
-      maxHp: 10,
-      featureIds: ['sneak_attack'],
-      weaponIds: ['rapier', 'shortbow'],
+      "id": "monk_sample_build",
+      "displayName": "Level 1 Monk Sample Build",
+      "classId": "monk",
+      "level": 1,
+      "maxHp": 10,
+      "featureIds": [
+        "martial_arts",
+        "unarmored_defense"
+      ],
+      "weaponIds": [
+        "shortsword",
+        "unarmed_strike"
+      ]
     },
+    {
+      "id": "monk_level2_sample_build",
+      "displayName": "Level 2 Monk Sample Build",
+      "classId": "monk",
+      "level": 2,
+      "maxHp": 18,
+      "featureIds": [
+        "martial_arts",
+        "unarmored_defense",
+        "monks_focus",
+        "unarmored_movement",
+        "uncanny_metabolism"
+      ],
+      "weaponIds": [
+        "shortsword",
+        "unarmed_strike"
+      ]
+    },
+    {
+      "id": "rogue_melee_sample_build",
+      "displayName": "Melee Rogue Sample Build",
+      "classId": "rogue",
+      "level": 1,
+      "maxHp": 10,
+      "featureIds": [
+        "sneak_attack"
+      ],
+      "weaponIds": [
+        "rapier",
+        "shortbow"
+      ]
+    },
+    {
+      "id": "rogue_ranged_sample_build",
+      "displayName": "Ranged Rogue Sample Build",
+      "classId": "rogue",
+      "level": 1,
+      "maxHp": 10,
+      "featureIds": [
+        "sneak_attack"
+      ],
+      "weaponIds": [
+        "shortbow",
+        "shortsword"
+      ]
+    },
+    {
+      "id": "rogue_melee_level2_sample_build",
+      "displayName": "Level 2 Melee Rogue Sample Build",
+      "classId": "rogue",
+      "level": 2,
+      "maxHp": 18,
+      "featureIds": [
+        "sneak_attack",
+        "cunning_action"
+      ],
+      "weaponIds": [
+        "rapier",
+        "shortbow"
+      ]
+    },
+    {
+      "id": "rogue_ranged_level2_benchmark_archer",
+      "displayName": "Level 2 Ranged Rogue Benchmark Archer",
+      "classId": "rogue",
+      "level": 2,
+      "maxHp": 50,
+      "featureIds": [
+        "sneak_attack",
+        "cunning_action"
+      ],
+      "weaponIds": [
+        "shortbow",
+        "shortsword"
+      ]
+    },
+    {
+      "id": "rogue_ranged_level2_sample_build",
+      "displayName": "Level 2 Ranged Rogue Sample Build",
+      "classId": "rogue",
+      "level": 2,
+      "maxHp": 18,
+      "featureIds": [
+        "sneak_attack",
+        "cunning_action"
+      ],
+      "weaponIds": [
+        "shortbow",
+        "shortsword"
+      ]
+    },
+    {
+      "id": "wizard_sample_build",
+      "displayName": "Level 1 Wizard Sample Build",
+      "classId": "wizard",
+      "level": 1,
+      "maxHp": 8,
+      "featureIds": [
+        "spellcasting",
+        "ritual_adept",
+        "arcane_recovery"
+      ],
+      "weaponIds": [
+        "dagger"
+      ]
+    }
   ],
-  playerPresets: [
+  "playerPresets": [
     {
-      id: 'fighter_sample_trio',
-      displayName: 'Level 1 Fighter Trio',
-      description: 'Three level 1 fighters.',
-      units: [
-        { unitId: 'F1', loadoutId: 'fighter_sample_build' },
-        { unitId: 'F2', loadoutId: 'fighter_sample_build' },
-        { unitId: 'F3', loadoutId: 'fighter_sample_build' },
-      ],
+      "id": "fighter_sample_trio",
+      "displayName": "Level 1 Fighter Trio",
+      "description": "Three level 1 fighters using the original proof-of-concept build.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "fighter_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "fighter_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "fighter_sample_build"
+        }
+      ]
     },
     {
-      id: 'fighter_level2_sample_trio',
-      displayName: 'Level 2 Fighter Trio',
-      description: 'Three level 2 fighters.',
-      units: [
-        { unitId: 'F1', loadoutId: 'fighter_level2_sample_build' },
-        { unitId: 'F2', loadoutId: 'fighter_level2_sample_build' },
-        { unitId: 'F3', loadoutId: 'fighter_level2_sample_build' },
-      ],
+      "id": "fighter_level2_sample_trio",
+      "displayName": "Level 2 Fighter Trio",
+      "description": "Three level 2 great-weapon fighters with Action Surge.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "fighter_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "fighter_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "fighter_level2_sample_build"
+        }
+      ]
     },
     {
-      id: 'rogue_ranged_trio',
-      displayName: 'Ranged Rogue Trio',
-      description: 'Three ranged rogues.',
-      units: [
-        { unitId: 'F1', loadoutId: 'rogue_ranged_sample_build' },
-        { unitId: 'F2', loadoutId: 'rogue_ranged_sample_build' },
-        { unitId: 'F3', loadoutId: 'rogue_ranged_sample_build' },
-      ],
+      "id": "rogue_ranged_trio",
+      "displayName": "Ranged Rogue Trio",
+      "description": "Three level 1 ranged rogues with shortbows and shortsword fallback.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "rogue_ranged_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "rogue_ranged_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_ranged_sample_build"
+        }
+      ]
     },
     {
-      id: 'rogue_melee_trio',
-      displayName: 'Melee Rogue Trio',
-      description: 'Three melee rogues.',
-      units: [
-        { unitId: 'F1', loadoutId: 'rogue_melee_sample_build' },
-        { unitId: 'F2', loadoutId: 'rogue_melee_sample_build' },
-        { unitId: 'F3', loadoutId: 'rogue_melee_sample_build' },
-      ],
+      "id": "rogue_melee_trio",
+      "displayName": "Melee Rogue Trio",
+      "description": "Three level 1 melee rogues with rapiers and shortbow fallback.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "rogue_melee_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "rogue_melee_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_melee_sample_build"
+        }
+      ]
     },
     {
-      id: 'barbarian_sample_trio',
-      displayName: 'Level 1 Barbarian Trio',
-      description: 'Three level 1 barbarians.',
-      units: [
-        { unitId: 'F1', loadoutId: 'barbarian_sample_build' },
-        { unitId: 'F2', loadoutId: 'barbarian_sample_build' },
-        { unitId: 'F3', loadoutId: 'barbarian_sample_build' },
-      ],
+      "id": "rogue_level2_ranged_trio",
+      "displayName": "Level 2 Ranged Rogue Trio",
+      "description": "Three level 2 ranged rogues with shortbows, Cunning Action, and shortsword fallback.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "rogue_ranged_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "rogue_ranged_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_ranged_level2_sample_build"
+        }
+      ]
     },
     {
-      id: 'barbarian_level2_sample_trio',
-      displayName: 'Level 2 Barbarian Trio',
-      description: 'Three level 2 barbarians.',
-      units: [
-        { unitId: 'F1', loadoutId: 'barbarian_level2_sample_build' },
-        { unitId: 'F2', loadoutId: 'barbarian_level2_sample_build' },
-        { unitId: 'F3', loadoutId: 'barbarian_level2_sample_build' },
-      ],
+      "id": "rogue_level2_melee_trio",
+      "displayName": "Level 2 Melee Rogue Trio",
+      "description": "Three level 2 melee rogues with rapiers, Cunning Action, and shortbow fallback.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "rogue_melee_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "rogue_melee_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_melee_level2_sample_build"
+        }
+      ]
     },
     {
-      id: 'martial_mixed_party',
-      displayName: 'Mixed Martial Party',
-      description: 'One fighter, one barbarian, one ranged rogue, and one melee rogue.',
-      units: [
-        { unitId: 'F1', loadoutId: 'fighter_level2_sample_build' },
-        { unitId: 'F2', loadoutId: 'barbarian_level2_sample_build' },
-        { unitId: 'F3', loadoutId: 'rogue_ranged_sample_build' },
-        { unitId: 'F4', loadoutId: 'rogue_melee_sample_build' },
-      ],
+      "id": "barbarian_sample_trio",
+      "displayName": "Level 1 Barbarian Trio",
+      "description": "Three level 1 barbarians with greataxes and thrown handaxe fallback.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "barbarian_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "barbarian_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "barbarian_sample_build"
+        }
+      ]
     },
-  ],
+    {
+      "id": "barbarian_level2_sample_trio",
+      "displayName": "Level 2 Barbarian Trio",
+      "description": "Three level 2 barbarians with greataxes, handaxes, Reckless Attack, and Danger Sense.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "barbarian_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "barbarian_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "barbarian_level2_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "monk_sample_trio",
+      "displayName": "Level 1 Monk Trio",
+      "description": "Three level 1 monks with shortswords, Martial Arts, and Unarmored Defense.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "monk_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "monk_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "monk_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "monk_level2_sample_trio",
+      "displayName": "Level 2 Monk Trio",
+      "description": "Three level 2 monks with Focus, Unarmored Movement, and Uncanny Metabolism.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "monk_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "monk_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "monk_level2_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "wizard_sample_trio",
+      "displayName": "Level 1 Wizard Trio",
+      "description": "Three level 1 wizards with direct damage, melee escape, Shield, and Burning Hands pressure.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "wizard_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "wizard_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "wizard_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "martial_mixed_party",
+      "displayName": "Mixed Martial Party",
+      "description": "One level 2 fighter, one level 2 barbarian, one level 2 ranged rogue, and one level 2 melee rogue.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "fighter_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "barbarian_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_ranged_level2_sample_build"
+        },
+        {
+          "unitId": "F4",
+          "loadoutId": "rogue_melee_level2_sample_build"
+        }
+      ]
+    }
+  ]
 };
+
+const ACTIVE_ENEMY_PRESET_IDS = [
+  'goblin_screen',
+  'bandit_ambush',
+  'mixed_patrol',
+  'orc_push',
+  'wolf_harriers',
+  'marsh_predators',
+  'hobgoblin_kill_box',
+  'predator_rampage',
+  'bugbear_dragnet',
+  'deadwatch_phalanx',
+  'captains_crossfire',
+];
+
+const ACTIVE_PLAYER_PRESET_IDS = [
+  'fighter_sample_trio',
+  'fighter_level2_sample_trio',
+  'rogue_ranged_trio',
+  'rogue_melee_trio',
+  'rogue_level2_ranged_trio',
+  'rogue_level2_melee_trio',
+  'barbarian_sample_trio',
+  'barbarian_level2_sample_trio',
+  'monk_sample_trio',
+  'monk_level2_sample_trio',
+  'wizard_sample_trio',
+  'martial_mixed_party',
+];
+
+const FIXED_ROCK_TERRAIN = {
+  featureId: 'rock_1',
+  kind: 'rock',
+  position: { x: 5, y: 8 },
+  footprint: { width: 1, height: 1 },
+};
+
+const CURRENT_MARSH_PREDATORS_UNITS = [
+  { unitId: 'E1', variantId: 'giant_toad', position: { x: 9, y: 7 } },
+  { unitId: 'E2', variantId: 'crocodile', position: { x: 1, y: 1 } },
+  { unitId: 'E3', variantId: 'crocodile', position: { x: 4, y: 1 } },
+  { unitId: 'E4', variantId: 'crocodile', position: { x: 2, y: 4 } },
+  { unitId: 'E5', variantId: 'giant_toad', position: { x: 9, y: 10 } },
+];
 
 function buildUnit(
   id: string,
@@ -265,8 +1920,8 @@ function buildEncounterState(
   const units: Record<string, UnitState> = {
     F1: buildUnit('F1', 'Level 2 Fighter Sample Build', 'fighters', 'fighter', { x: 1, y: 7 }, 21),
     F2: buildUnit('F2', 'Level 2 Barbarian Sample Build', 'fighters', 'barbarian', { x: 1, y: 8 }, 25),
-    F3: buildUnit('F3', 'Level 1 Ranged Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 9 }, 10),
-    F4: buildUnit('F4', 'Level 1 Melee Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 10 }, 10),
+    F3: buildUnit('F3', 'Level 2 Ranged Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 9 }, 18),
+    F4: buildUnit('F4', 'Level 2 Melee Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 10 }, 18),
     E1: buildUnit('E1', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 6 }, 10),
     E2: buildUnit('E2', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 8 }, 10),
     E3: buildUnit('E3', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 10 }, 10),
@@ -695,6 +2350,33 @@ describe('App', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('keeps the frontend catalog gate aligned with the frozen live V4.3 surface', () => {
+    expect(TEST_ENEMY_CATALOG.enemyPresets.map((preset) => preset.id)).toEqual(ACTIVE_ENEMY_PRESET_IDS);
+    expect(TEST_PLAYER_CATALOG.playerPresets.map((preset) => preset.id)).toEqual(ACTIVE_PLAYER_PRESET_IDS);
+    expect(TEST_PLAYER_CATALOG.classes.map((playerClass) => playerClass.id)).toEqual([
+      'barbarian',
+      'fighter',
+      'monk',
+      'rogue',
+      'wizard',
+    ]);
+
+    for (const preset of TEST_ENEMY_CATALOG.enemyPresets) {
+      expect(preset.terrainFeatures).toEqual([FIXED_ROCK_TERRAIN]);
+    }
+
+    const marshPredators = TEST_ENEMY_CATALOG.enemyPresets.find((preset) => preset.id === 'marsh_predators');
+    expect(marshPredators?.units).toEqual(CURRENT_MARSH_PREDATORS_UNITS);
+
+    const mixedParty = TEST_PLAYER_CATALOG.playerPresets.find((preset) => preset.id === 'martial_mixed_party');
+    expect(mixedParty?.units).toEqual([
+      { unitId: 'F1', loadoutId: 'fighter_level2_sample_build' },
+      { unitId: 'F2', loadoutId: 'barbarian_level2_sample_build' },
+      { unitId: 'F3', loadoutId: 'rogue_ranged_level2_sample_build' },
+      { unitId: 'F4', loadoutId: 'rogue_melee_level2_sample_build' },
+    ]);
   });
 
   it('opens with the default layout already loaded and ready to run', async () => {

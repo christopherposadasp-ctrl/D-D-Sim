@@ -26,6 +26,11 @@ from backend.engine.rules.spatial import (
 )
 
 
+def place_toad_within_swallow_reach(encounter) -> None:
+    encounter.units["E1"].position = GridPosition(x=3, y=7)
+    encounter.units["F1"].position = GridPosition(x=1, y=7)
+
+
 def test_giant_toad_preset_uses_true_large_footprint() -> None:
     encounter = create_encounter(EncounterConfig(seed="giant-toad-preset", enemy_preset_id="giant_toad_solo"))
     toad = encounter.units["E1"]
@@ -79,6 +84,7 @@ def test_giant_toad_bite_logs_split_damage_and_applies_grappled_restrained() -> 
 
 def test_swallow_removes_target_from_board_and_ongoing_acid_triggers() -> None:
     encounter = create_encounter(EncounterConfig(seed="giant-toad-swallow", enemy_preset_id="giant_toad_solo"))
+    place_toad_within_swallow_reach(encounter)
     encounter.units["F1"].temporary_effects.extend(
         [
             GrappledEffect(kind="grappled_by", source_id="E1", escape_dc=13),
@@ -105,6 +111,7 @@ def test_swallow_removes_target_from_board_and_ongoing_acid_triggers() -> None:
 
 def test_swallow_clears_external_grapples_and_restraints() -> None:
     encounter = create_encounter(EncounterConfig(seed="giant-toad-external-grapple", enemy_preset_id="marsh_predators"))
+    place_toad_within_swallow_reach(encounter)
     encounter.units["F1"].temporary_effects.extend(
         [
             GrappledEffect(kind="grappled_by", source_id="E1", escape_dc=13),

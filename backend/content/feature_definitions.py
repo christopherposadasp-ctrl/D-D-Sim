@@ -84,6 +84,12 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Once per turn, qualifying finesse or ranged hits add rogue precision damage.",
     ),
+    "expertise_stealth": FeatureDefinition(
+        feature_id="expertise_stealth",
+        display_name="Expertise (Stealth)",
+        kind="class_feature",
+        description="The rogue doubles proficiency for Stealth checks.",
+    ),
     "cunning_action": FeatureDefinition(
         feature_id="cunning_action",
         display_name="Cunning Action",

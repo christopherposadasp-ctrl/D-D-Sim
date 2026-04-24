@@ -14,7 +14,6 @@ from backend.content.player_loadouts import DEFAULT_PLAYER_PRESET_ID
 from backend.engine import run_batch
 from backend.engine.models.state import EncounterConfig
 
-
 BATCH_SIZE = 100
 PLAYER_BEHAVIORS = ("smart", "dumb")
 MONSTER_BEHAVIORS = ("kind", "balanced", "evil")

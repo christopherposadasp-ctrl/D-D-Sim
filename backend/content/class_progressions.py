@@ -42,7 +42,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
     ): ClassProgressionDefinition(
         class_id="rogue",
         level=1,
-        feature_ids=("sneak_attack",),
+        feature_ids=("sneak_attack", "expertise_stealth"),
         resource_pools={},
         attack_count=1,
         feature_scalars={"sneak_attack_d6": 1},
@@ -53,7 +53,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
     ): ClassProgressionDefinition(
         class_id="rogue",
         level=2,
-        feature_ids=("sneak_attack", "cunning_action"),
+        feature_ids=("sneak_attack", "expertise_stealth", "cunning_action"),
         resource_pools={},
         attack_count=1,
         feature_scalars={"sneak_attack_d6": 1},
@@ -138,6 +138,12 @@ def get_progression_scalar(class_id: str, level: int, scalar_id: str, default: i
     if not progression.feature_scalars:
         return default
     return progression.feature_scalars.get(scalar_id, default)
+
+
+def get_proficiency_bonus(level: int) -> int:
+    if level <= 0:
+        raise ValueError(f"Level must be positive to resolve proficiency bonus, got {level}.")
+    return 2 + ((level - 1) // 4)
 
 
 def get_monk_focus_points_max(level: int) -> int:

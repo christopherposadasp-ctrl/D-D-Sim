@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("check-fast", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "nightly-audit")]
+    [ValidateSet("check-fast", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit")]
     [string]$Task,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -87,29 +87,45 @@ function Invoke-Step {
 Push-Location $repoRoot
 try {
     $pythonCommand = Resolve-PythonCommand
+    $taskArgsOrEmpty = @()
+    if ($null -ne $TaskArgs) {
+        $taskArgsOrEmpty = @($TaskArgs)
+    }
 
     switch ($Task) {
         "check-fast" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "ruff", "check", "backend", "tests", "scripts"))
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "pytest", "-q", "tests\\golden", "tests\\rules", "tests\\integration"))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "pytest", "-q", "-m", "not slow", "tests\\golden", "tests\\rules", "tests\\integration"))
         }
         "audit-quick" {
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_scenario_audit.py") + $TaskArgs))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_scenario_audit.py") + $taskArgsOrEmpty))
         }
         "audit-full" {
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_scenario_audit.py", "--full") + $TaskArgs))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_scenario_audit.py", "--full") + $taskArgsOrEmpty))
         }
         "audit-health" {
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_code_health_audit.py", "--write-report") + $TaskArgs))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_code_health_audit.py", "--write-report") + $taskArgsOrEmpty))
         }
         "fighter-audit-quick" {
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_fighter_audit.py") + $TaskArgs))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_fighter_audit.py") + $taskArgsOrEmpty))
         }
         "fighter-audit-full" {
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_fighter_audit.py", "--full") + $TaskArgs))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_fighter_audit.py", "--full") + $taskArgsOrEmpty))
+        }
+        "rogue-audit-quick" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_rogue_audit.py") + $taskArgsOrEmpty))
+        }
+        "rogue-audit-full" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_rogue_audit.py", "--full") + $taskArgsOrEmpty))
+        }
+        "class-audit-slices" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_class_audit_slices.py") + $taskArgsOrEmpty))
+        }
+        "behavior-diagnostics" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\investigate_smart_vs_dumb.py") + $taskArgsOrEmpty))
         }
         "nightly-audit" {
-            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_nightly_audit.py") + $TaskArgs))
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_nightly_audit.py") + $taskArgsOrEmpty))
         }
     }
 }

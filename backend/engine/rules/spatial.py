@@ -4,7 +4,15 @@ from collections import deque
 from dataclasses import dataclass
 
 from backend.content.enemies import unit_has_trait
-from backend.engine.models.state import EncounterState, Faction, Footprint, GridPosition, TerrainFeature, UnitState, WeaponProfile
+from backend.engine.models.state import (
+    EncounterState,
+    Faction,
+    Footprint,
+    GridPosition,
+    TerrainFeature,
+    UnitState,
+    WeaponProfile,
+)
 from backend.engine.utils.helpers import is_unit_conscious, unit_can_take_reactions, unit_sort_key
 
 GRID_SIZE = 15
