@@ -79,7 +79,7 @@ def test_audit_scenario_returns_report_shape_for_active_preset() -> None:
     payload = row.to_report_dict()
 
     assert row.scenario_id == "goblin_screen"
-    assert row.unit_count == 10
+    assert row.unit_count == 12
     assert {
         "scenarioId",
         "displayName",

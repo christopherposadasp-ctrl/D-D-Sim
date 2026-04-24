@@ -11,7 +11,7 @@ def test_preset_default_layout_builds_expected_units() -> None:
     encounter = create_encounter(EncounterConfig(seed="preset-default", enemy_preset_id="goblin_screen"))
     preset = get_enemy_preset("goblin_screen")
 
-    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "F1", "F2", "F3", "F4"]
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4"]
     assert encounter.units["F1"].position.model_dump() == {"x": 1, "y": 7}
     assert encounter.units["F2"].position.model_dump() == {"x": 1, "y": 8}
     assert encounter.units["F3"].position.model_dump() == {"x": 1, "y": 9}
@@ -45,10 +45,10 @@ def test_bandit_ambush_uses_mixed_roles() -> None:
     assert "longbow" in encounter.units["E5"].attacks
 
 
-def test_hobgoblin_kill_box_builds_eight_enemy_units() -> None:
+def test_hobgoblin_kill_box_builds_ten_enemy_units() -> None:
     encounter = create_encounter(EncounterConfig(seed="hobgoblin-kill-box", enemy_preset_id="hobgoblin_kill_box"))
 
-    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4"]
+    assert sorted(encounter.units) == ["E1", "E10", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "F1", "F2", "F3", "F4"]
     assert encounter.units["E1"].combat_role == "hobgoblin_melee"
     assert encounter.units["E5"].combat_role == "hobgoblin_archer"
     assert encounter.units["E8"].combat_role == "goblin_boss"
@@ -57,7 +57,24 @@ def test_hobgoblin_kill_box_builds_eight_enemy_units() -> None:
 def test_bugbear_dragnet_builds_controller_screen() -> None:
     encounter = create_encounter(EncounterConfig(seed="bugbear-dragnet", enemy_preset_id="bugbear_dragnet"))
 
-    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "F1", "F2", "F3", "F4"]
+    assert sorted(encounter.units) == [
+        "E1",
+        "E10",
+        "E11",
+        "E12",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+    ]
     assert encounter.units["E1"].combat_role == "bugbear_warrior"
     assert encounter.units["E3"].combat_role == "goblin_boss"
     assert encounter.units["E6"].combat_role == "hobgoblin_archer"
@@ -66,7 +83,7 @@ def test_bugbear_dragnet_builds_controller_screen() -> None:
 def test_deadwatch_phalanx_builds_undead_armor_line() -> None:
     encounter = create_encounter(EncounterConfig(seed="deadwatch-phalanx", enemy_preset_id="deadwatch_phalanx"))
 
-    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4"]
+    assert sorted(encounter.units) == ["E1", "E10", "E11", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "F1", "F2", "F3", "F4"]
     assert encounter.units["E1"].combat_role == "animated_armor"
     assert encounter.units["E3"].combat_role == "zombie"
     assert encounter.units["E5"].combat_role == "skeleton"

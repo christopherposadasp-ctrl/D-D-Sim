@@ -45,6 +45,8 @@ CURRENT_MARSH_PREDATORS_UNITS = [
     {"unitId": "E3", "variantId": "crocodile", "position": {"x": 4, "y": 1}},
     {"unitId": "E4", "variantId": "crocodile", "position": {"x": 2, "y": 4}},
     {"unitId": "E5", "variantId": "giant_toad", "position": {"x": 9, "y": 10}},
+    {"unitId": "E6", "variantId": "crocodile", "position": {"x": 7, "y": 1}},
+    {"unitId": "E7", "variantId": "crocodile", "position": {"x": 5, "y": 4}},
 ]
 
 CURRENT_MARTIAL_MIXED_PARTY_UNITS = [
@@ -179,7 +181,7 @@ def test_run_endpoint_supports_preset_defaults_without_manual_placements() -> No
 
     assert response.status_code == 200
     payload = response.json()
-    assert sorted(payload["finalState"]["units"]) == ["E1", "E2", "E3", "E4", "E5", "E6", "F1", "F2", "F3", "F4"]
+    assert sorted(payload["finalState"]["units"]) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4"]
     assert payload["replayFrames"][0]["state"]["units"]["E1"]["position"] == {"x": 14, "y": 6}
     assert payload["replayFrames"][0]["state"]["units"]["F1"]["position"] == {"x": 1, "y": 7}
     assert payload["replayFrames"][0]["state"]["units"]["F4"]["position"] == {"x": 1, "y": 10}
