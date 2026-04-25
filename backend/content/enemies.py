@@ -118,6 +118,7 @@ jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
 zombie_ability_mods = AbilityModifiers(str=1, dex=-2, con=3, int=-4, wis=-2, cha=-3)
 ogre_zombie_ability_mods = AbilityModifiers(str=4, dex=-2, con=4, int=-4, wis=-2, cha=-3)
+warhorse_skeleton_ability_mods = AbilityModifiers(str=4, dex=1, con=2, int=-4, wis=-1, cha=-3)
 giant_rat_ability_mods = AbilityModifiers(str=-2, dex=3, con=0, int=-4, wis=0, cha=-3)
 giant_fire_beetle_ability_mods = AbilityModifiers(str=-1, dex=0, con=1, int=-5, wis=-2, cha=-4)
 giant_weasel_ability_mods = AbilityModifiers(str=0, dex=3, con=0, int=-3, wis=1, cha=-3)
@@ -1317,6 +1318,42 @@ MONSTER_DEFINITIONS.update(
             attack_actions=(melee_attack_action("slam", "Slam"),),
             default_melee_attack_action_id="melee_attack",
             damage_immunities=("poison",),
+        ),
+        "warhorse_skeleton": MonsterDefinition(
+            base_creature_id="warhorse_skeleton",
+            variant_id="warhorse_skeleton",
+            display_name="Warhorse Skeleton",
+            combat_role="warhorse_skeleton",
+            ai_profile_id="melee_brute",
+            max_hp=22,
+            ac=13,
+            speed=60,
+            initiative_mod=1,
+            passive_perception=9,
+            ability_mods=warhorse_skeleton_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "hooves": WeaponProfile(
+                    id="hooves",
+                    display_name="Hooves",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=1, sides=6)],
+                    damage_modifier=4,
+                    damage_type="bludgeoning",
+                    kind="melee",
+                    on_hit_effects=[OnHitEffect(kind="prone_on_hit", max_target_size="large")],
+                )
+            },
+            tags=("undead", "skeleton", "horse", "melee"),
+            creature_tags=("undead",),
+            action_ids=("melee_attack",),
+            attack_actions=(melee_attack_action("hooves", "Hooves"),),
+            default_melee_attack_action_id="melee_attack",
+            damage_immunities=("poison",),
+            damage_vulnerabilities=("bludgeoning",),
+            condition_immunities=("exhaustion", "poisoned"),
         ),
         "giant_rat": MonsterDefinition(
             base_creature_id="giant_rat",
@@ -2887,6 +2924,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "skeleton",
     "zombie",
     "ogre_zombie",
+    "warhorse_skeleton",
     "giant_rat",
     "giant_fire_beetle",
     "giant_weasel",

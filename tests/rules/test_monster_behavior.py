@@ -6,7 +6,7 @@ from backend.content.enemies import BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT, unit_h
 from backend.engine import create_encounter
 from backend.engine.ai.decision import choose_turn_decision
 from backend.engine.combat.engine import execute_decision, resolve_attack_action
-from backend.engine.models.state import DiceSpec, EncounterConfig, GridPosition, WeaponProfile, WeaponRange
+from backend.engine.models.state import DiceSpec, EncounterConfig, Footprint, GridPosition, WeaponProfile, WeaponRange
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
@@ -55,6 +55,7 @@ FIXED_ATTACK_CASES = (
     ("skeleton", "shortbow", [3], ["piercing"], [6]),
     ("zombie", "slam", [4], ["bludgeoning"], [5]),
     ("ogre_zombie", "slam", [4, 5], ["bludgeoning"], [13]),
+    ("warhorse_skeleton", "hooves", [3], ["bludgeoning"], [7]),
     ("giant_rat", "bite", [2], ["piercing"], [5]),
     ("giant_fire_beetle", "bite", [], ["fire"], [1]),
     ("giant_weasel", "bite", [2], ["piercing"], [5]),
@@ -427,6 +428,75 @@ def test_kobold_scale_sorcerer_chromatic_bolt_avoids_resistance_and_immunity() -
     assert [component.damage_type for component in attack.damage_details.damage_components] == ["lightning"]
     assert attack.damage_details.resisted_damage == 0
     assert attack.damage_details.final_damage_to_hp == 9
+
+
+def test_warhorse_skeleton_closes_and_uses_hooves() -> None:
+    encounter = build_monster_benchmark_encounter("warhorse_skeleton")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "hooves"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["hooves"]
+    assert get_min_chebyshev_distance_between_footprints(
+        encounter.units["E1"].position,
+        encounter.units["E1"].footprint,
+        encounter.units["F1"].position,
+        encounter.units["F1"].footprint,
+    ) == 1
+
+
+def test_warhorse_skeleton_hooves_prone_is_size_gated() -> None:
+    encounter = build_monster_benchmark_encounter("warhorse_skeleton")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    prone_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="hooves",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3]),
+        ),
+    )
+
+    assert prone_attack.condition_deltas == ["F1 is knocked prone."]
+
+    blocked_encounter = build_monster_benchmark_encounter("warhorse_skeleton")
+    defeat_other_units(blocked_encounter, "E1", "F1")
+    blocked_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    blocked_encounter.units["F1"].position = GridPosition(x=8, y=5)
+    blocked_encounter.units["F1"].size_category = "huge"
+    blocked_encounter.units["F1"].footprint = Footprint(width=3, height=3)
+    blocked_attack, _ = resolve_attack(
+        blocked_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="hooves",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3]),
+        ),
+    )
+
+    assert blocked_attack.condition_deltas == []
+
+
+def test_warhorse_skeleton_has_undead_defenses() -> None:
+    encounter = build_monster_benchmark_encounter("warhorse_skeleton")
+    defeat_other_units(encounter, "E1", "F1")
+    skeleton = encounter.units["E1"]
+
+    assert skeleton.creature_tags == ("undead",)
+    assert skeleton.damage_immunities == ("poison",)
+    assert skeleton.damage_vulnerabilities == ("bludgeoning",)
+    assert skeleton.condition_immunities == ("exhaustion", "poisoned")
 
 
 def add_test_javelin_throw(encounter, unit_id: str) -> None:
