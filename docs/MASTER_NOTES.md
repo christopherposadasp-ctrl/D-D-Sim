@@ -84,7 +84,7 @@ It should be updated whenever one of these changes:
   - `resource_pools`
   - `behavior_profile`
 - The live martial class baseline is now:
-  - Fighter supported to level 2
+  - Fighter supported to level 5 as a Battle Master great-weapon striker with Great Weapon Master, Extra Attack, and Tactical Shift
   - Barbarian supported to level 2
   - Rogue supported to level 2
   - Monk supported to level 2
@@ -98,7 +98,7 @@ It should be updated whenever one of these changes:
   - bonus-action Hide
   - terrain-based Hide support around the fixed rock feature
 - The default player preset is now the four-PC mixed martial party:
-  - one level 2 fighter
+  - one level 5 Battle Master fighter
   - one level 2 barbarian
   - one level 2 ranged rogue
   - one level 2 melee rogue
@@ -184,7 +184,7 @@ It should be updated whenever one of these changes:
 
 ### Current Working Version
 
-- `V4.2-C`: fighter, barbarian, rogue, and monk are live up to level 2
+- Current class path: Fighter is live to level 5 as a Battle Master; Barbarian, Rogue, and Monk remain live up to level 2
 - Wizard level 1 is live as a narrow combat-only spellcasting slice, not a full `V4.4` spell framework rollout
 
 ### Approved V4 Roadmap

@@ -334,8 +334,9 @@ Add martial classes up to level 2 through a player-content framework:
 
 Current implementation snapshot:
 
-- Fighter, Barbarian, and Rogue are already live through level 2
-- Monk is now live at level 2 in `V4.2-C`
+- Fighter is live through level 5 as a Battle Master great-weapon striker with Great Weapon Master, Extra Attack, and Tactical Shift
+- Barbarian, Rogue, and Monk are live through level 2
+- Wizard is live at level 1 as a narrow combat-only spellcasting slice
 
 ## Backend Authority Status
 
