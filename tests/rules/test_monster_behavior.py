@@ -46,6 +46,8 @@ FIXED_ATTACK_CASES = (
     ("jackal", "bite", [4], ["piercing"], [3]),
     ("goblin_minion", "dagger", [3], ["piercing"], [5]),
     ("goblin_minion", "dagger_throw", [3], ["piercing"], [5]),
+    ("kobold_warrior", "dagger", [3], ["piercing"], [5]),
+    ("kobold_warrior", "dagger_throw", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "dagger", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "dagger_throw", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "chromatic_bolt", [3, 4], ["acid"], [9]),
@@ -268,6 +270,57 @@ def test_cultist_ritual_sickle_logs_slashing_and_necrotic_damage() -> None:
     assert [component.damage_type for component in attack.damage_details.damage_components] == ["slashing", "necrotic"]
     assert [component.total_damage for component in attack.damage_details.damage_components] == [4, 1]
     assert attack.damage_details.total_damage == 5
+
+
+def test_kobold_warrior_opens_with_thrown_dagger_at_range() -> None:
+    encounter = build_monster_benchmark_encounter("kobold_warrior")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "dagger_throw"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["dagger_throw"]
+
+
+def test_kobold_warrior_uses_dagger_when_adjacent() -> None:
+    encounter = build_monster_benchmark_encounter("kobold_warrior")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "dagger"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["dagger"]
+
+
+def test_kobold_warrior_pack_tactics_grants_thrown_dagger_advantage() -> None:
+    encounter = build_monster_benchmark_encounter("kobold_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="dagger_throw",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 16], damage_rolls=[3]),
+        ),
+    )
+
+    assert unit_has_trait(encounter.units["E1"], "pack_tactics")
+    assert unit_has_trait(encounter.units["E1"], "sunlight_sensitivity")
+    assert attack.resolved_totals["attackMode"] == "advantage"
+    assert "pack_tactics" in attack.raw_rolls["advantageSources"]
+    assert [component.damage_type for component in attack.damage_details.damage_components] == ["piercing"]
 
 
 def test_kobold_scale_sorcerer_opens_with_chromatic_bolt_at_range() -> None:

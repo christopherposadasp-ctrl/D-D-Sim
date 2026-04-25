@@ -93,6 +93,7 @@ class EnemyPresetDefinition:
 
 
 goblin_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=0, wis=-1, cha=-1)
+kobold_warrior_ability_mods = AbilityModifiers(str=-2, dex=2, con=-1, int=-1, wis=-2, cha=-1)
 kobold_scale_sorcerer_ability_mods = AbilityModifiers(str=-2, dex=2, con=2, int=0, wis=-1, cha=2)
 bandit_ability_mods = AbilityModifiers(str=1, dex=1, con=0, int=0, wis=0, cha=0)
 guard_ability_mods = AbilityModifiers(str=1, dex=1, con=1, int=0, wis=0, cha=0)
@@ -1080,6 +1081,53 @@ MONSTER_DEFINITIONS.update(
             tags=("goblin", "minion", "archer"),
             action_ids=("melee_attack", "ranged_attack"),
             trait_ids=("nimble_escape",),
+            attack_actions=(
+                melee_attack_action("dagger", "Dagger"),
+                ranged_attack_action("dagger_throw", "Dagger"),
+            ),
+            default_melee_attack_action_id="melee_attack",
+            default_ranged_attack_action_id="ranged_attack",
+        ),
+        "kobold_warrior": MonsterDefinition(
+            base_creature_id="kobold",
+            variant_id="kobold_warrior",
+            display_name="Kobold Warrior",
+            combat_role="kobold_warrior",
+            ai_profile_id="ranged_skirmisher",
+            max_hp=7,
+            ac=14,
+            speed=30,
+            initiative_mod=2,
+            passive_perception=8,
+            ability_mods=kobold_warrior_ability_mods,
+            size_category="small",
+            footprint=medium_footprint,
+            attacks={
+                "dagger": WeaponProfile(
+                    id="dagger",
+                    display_name="Dagger",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=2,
+                    damage_type="piercing",
+                    kind="melee",
+                ),
+                "dagger_throw": WeaponProfile(
+                    id="dagger_throw",
+                    display_name="Dagger",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=2,
+                    damage_type="piercing",
+                    kind="ranged",
+                    range=WeaponRange(normal=20, long=60),
+                ),
+            },
+            tags=("dragon", "kobold", "ranged"),
+            action_ids=("melee_attack", "ranged_attack"),
+            trait_ids=("pack_tactics", "sunlight_sensitivity"),
             attack_actions=(
                 melee_attack_action("dagger", "Dagger"),
                 ranged_attack_action("dagger_throw", "Dagger"),
@@ -2834,6 +2882,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "hyena",
     "jackal",
     "goblin_minion",
+    "kobold_warrior",
     "kobold_scale_sorcerer",
     "skeleton",
     "zombie",
