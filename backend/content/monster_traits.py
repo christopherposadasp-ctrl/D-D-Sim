@@ -40,6 +40,11 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
             "if at least one conscious ally is within 5 feet of the target."
         ),
     ),
+    "sunlight_sensitivity": MonsterTraitDefinition(
+        trait_id="sunlight_sensitivity",
+        display_name="Sunlight Sensitivity",
+        description="This creature is sensitive to bright sunlight; lighting is not modeled by the live simulator.",
+    ),
     "bloodied_frenzy": MonsterTraitDefinition(
         trait_id="bloodied_frenzy",
         display_name="Bloodied Frenzy",

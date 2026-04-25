@@ -93,6 +93,7 @@ class EnemyPresetDefinition:
 
 
 goblin_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=0, wis=-1, cha=-1)
+kobold_scale_sorcerer_ability_mods = AbilityModifiers(str=-2, dex=2, con=2, int=0, wis=-1, cha=2)
 bandit_ability_mods = AbilityModifiers(str=1, dex=1, con=0, int=0, wis=0, cha=0)
 guard_ability_mods = AbilityModifiers(str=1, dex=1, con=1, int=0, wis=0, cha=0)
 scout_ability_mods = AbilityModifiers(str=0, dex=2, con=1, int=0, wis=1, cha=0)
@@ -1085,6 +1086,72 @@ MONSTER_DEFINITIONS.update(
             ),
             default_melee_attack_action_id="melee_attack",
             default_ranged_attack_action_id="ranged_attack",
+        ),
+        "kobold_scale_sorcerer": MonsterDefinition(
+            base_creature_id="kobold_scale_sorcerer",
+            variant_id="kobold_scale_sorcerer",
+            display_name="Kobold Scale Sorcerer",
+            combat_role="kobold_scale_sorcerer",
+            ai_profile_id="ranged_skirmisher",
+            max_hp=27,
+            ac=15,
+            speed=30,
+            initiative_mod=2,
+            passive_perception=9,
+            ability_mods=kobold_scale_sorcerer_ability_mods,
+            size_category="small",
+            footprint=medium_footprint,
+            attacks={
+                "dagger": WeaponProfile(
+                    id="dagger",
+                    display_name="Dagger",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=2,
+                    damage_type="piercing",
+                    kind="melee",
+                ),
+                "dagger_throw": WeaponProfile(
+                    id="dagger_throw",
+                    display_name="Dagger",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=2,
+                    damage_type="piercing",
+                    kind="ranged",
+                    range=WeaponRange(normal=20, long=60),
+                ),
+                "chromatic_bolt": WeaponProfile(
+                    id="chromatic_bolt",
+                    display_name="Chromatic Bolt",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=2, sides=6)],
+                    damage_modifier=2,
+                    damage_type="acid",
+                    selectable_damage_types=["acid", "cold", "fire", "lightning", "poison", "thunder"],
+                    kind="ranged",
+                    range=WeaponRange(normal=60, long=60),
+                ),
+            },
+            tags=("kobold", "caster", "ranged"),
+            role_tags=("caster",),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            trait_ids=("pack_tactics", "sunlight_sensitivity"),
+            attack_actions=(
+                melee_attack_action("dagger", "Dagger"),
+                ranged_attack_action("chromatic_bolt", "Chromatic Bolt"),
+                repeated_choice_attack_action(
+                    "multiattack",
+                    "Multiattack",
+                    ("dagger", "dagger_throw", "chromatic_bolt"),
+                    2,
+                ),
+            ),
+            default_melee_attack_action_id="multiattack",
+            default_ranged_attack_action_id="multiattack",
         ),
         "skeleton": MonsterDefinition(
             base_creature_id="skeleton",
@@ -2767,6 +2834,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "hyena",
     "jackal",
     "goblin_minion",
+    "kobold_scale_sorcerer",
     "skeleton",
     "zombie",
     "ogre_zombie",

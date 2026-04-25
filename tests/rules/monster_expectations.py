@@ -24,6 +24,7 @@ class AttackExpectation:
     damage_components: tuple[DamageComponentExpectation, ...] = ()
     advantage_damage_components: tuple[DamageComponentExpectation, ...] = ()
     advantage_against_self_grappled_target: bool = False
+    selectable_damage_types: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class MonsterExpectation:
     special_mechanics: tuple[str, ...]
     benchmark_preset_id: str
     benchmark_count: int
+    role_tags: tuple[str, ...] = ()
     bonus_action_ids: tuple[str, ...] = ()
     reaction_ids: tuple[str, ...] = ("opportunity_attack",)
     damage_resistances: tuple[str, ...] = ()
@@ -491,6 +493,53 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="goblin_minion_benchmark",
         benchmark_count=14,
         bonus_action_ids=("disengage",),
+    ),
+    "kobold_scale_sorcerer": MonsterExpectation(
+        ai_profile_id="ranged_skirmisher",
+        max_hp=27,
+        ac=15,
+        speed=30,
+        initiative_mod=2,
+        passive_perception=9,
+        size_category="small",
+        footprint=(1, 1),
+        ability_mods={"str": -2, "dex": 2, "con": 2, "int": 0, "wis": -1, "cha": 2},
+        trait_ids=("pack_tactics", "sunlight_sensitivity"),
+        attacks={
+            "dagger": AttackExpectation(
+                kind="melee",
+                attack_bonus=4,
+                ability_modifier=2,
+                damage_modifier=2,
+                damage_type="piercing",
+                damage_dice=((1, 4),),
+            ),
+            "dagger_throw": AttackExpectation(
+                kind="ranged",
+                attack_bonus=4,
+                ability_modifier=2,
+                damage_modifier=2,
+                damage_type="piercing",
+                range=(20, 60),
+                damage_dice=((1, 4),),
+            ),
+            "chromatic_bolt": AttackExpectation(
+                kind="ranged",
+                attack_bonus=4,
+                ability_modifier=2,
+                damage_modifier=2,
+                damage_type="acid",
+                range=(60, 60),
+                damage_dice=((2, 6),),
+                selectable_damage_types=("acid", "cold", "fire", "lightning", "poison", "thunder"),
+            ),
+        },
+        opening_weapon_id="chromatic_bolt",
+        melee_fallback_weapon_id="dagger",
+        special_mechanics=("pack_tactics", "selectable_damage", "sunlight_sensitivity"),
+        benchmark_preset_id="kobold_scale_sorcerer_benchmark",
+        benchmark_count=4,
+        role_tags=("caster",),
     ),
     "skeleton": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",

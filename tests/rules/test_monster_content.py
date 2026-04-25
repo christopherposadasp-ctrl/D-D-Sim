@@ -39,6 +39,7 @@ def serialize_weapon_profile(weapon: WeaponProfile) -> dict[str, object]:
         "ability_modifier": weapon.ability_modifier,
         "damage_modifier": weapon.damage_modifier,
         "damage_type": weapon.damage_type,
+        "selectable_damage_types": tuple(weapon.selectable_damage_types or ()),
         "reach": weapon.reach,
         "range": None if weapon.range is None else (weapon.range.normal, weapon.range.long),
         "damage_dice": tuple((die.count, die.sides) for die in weapon.damage_dice),
@@ -73,6 +74,7 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert (definition.footprint.width, definition.footprint.height) == expectation.footprint
     assert definition.ability_mods.model_dump() == expectation.ability_mods
     assert tuple(definition.trait_ids) == expectation.trait_ids
+    assert tuple(definition.role_tags) == expectation.role_tags
     assert tuple(definition.damage_resistances) == expectation.damage_resistances
     assert tuple(definition.damage_immunities) == expectation.damage_immunities
     assert tuple(definition.damage_vulnerabilities) == expectation.damage_vulnerabilities
@@ -83,6 +85,7 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert tuple(get_unit_reaction_ids(runtime_unit)) == expectation.reaction_ids
     assert tuple(runtime_unit.creature_tags) == expectation.creature_tags
     assert tuple(runtime_unit.condition_immunities) == expectation.condition_immunities
+    assert tuple(runtime_unit.role_tags) == expectation.role_tags
     for pool_id, expected_uses in expectation.resource_pools:
         assert runtime_unit.resource_pools.get(pool_id) == expected_uses
     assert unit_has_creature_tag(runtime_unit, "undead") is ("undead" in expectation.creature_tags)
@@ -96,6 +99,7 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
             "ability_modifier": attack_expectation.ability_modifier,
             "damage_modifier": attack_expectation.damage_modifier,
             "damage_type": attack_expectation.damage_type,
+            "selectable_damage_types": attack_expectation.selectable_damage_types,
             "reach": attack_expectation.reach,
             "range": attack_expectation.range,
             "damage_dice": attack_expectation.damage_dice,
@@ -113,6 +117,20 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
 
     if "pack_tactics" in expectation.special_mechanics:
         assert "pack_tactics" in definition.trait_ids
+
+    if "sunlight_sensitivity" in expectation.special_mechanics:
+        assert "sunlight_sensitivity" in definition.trait_ids
+
+    if "selectable_damage" in expectation.special_mechanics:
+        chromatic_bolt = definition.attacks["chromatic_bolt"]
+        assert tuple(chromatic_bolt.selectable_damage_types or ()) == (
+            "acid",
+            "cold",
+            "fire",
+            "lightning",
+            "poison",
+            "thunder",
+        )
 
     if "advantage_poison" in expectation.special_mechanics:
         longbow = definition.attacks["longbow"]
