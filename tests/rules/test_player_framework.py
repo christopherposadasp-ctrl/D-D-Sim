@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from backend.content.attack_sequences import build_player_attack_action
 from backend.content.class_progressions import get_proficiency_bonus
-from backend.content.feature_definitions import unit_has_granted_bonus_action
+from backend.content.feature_definitions import unit_has_granted_bonus_action, unit_has_granted_cunning_strike
 from backend.engine import create_encounter
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import EncounterConfig, GridPosition
@@ -360,6 +360,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "rogue_ranged_level2_sample_build",
         "rogue_ranged_level3_assassin_sample_build",
         "rogue_ranged_level4_assassin_sample_build",
+        "rogue_ranged_level5_assassin_sample_build",
         "wizard_sample_build",
     ]
     assert [entry.id for entry in catalog.player_presets] == [
@@ -374,6 +375,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "rogue_level2_melee_trio",
         "rogue_level3_ranged_assassin_trio",
         "rogue_level4_ranged_assassin_trio",
+        "rogue_level5_ranged_assassin_trio",
         "barbarian_sample_trio",
         "barbarian_level2_sample_trio",
         "monk_sample_trio",
@@ -385,7 +387,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "barbarian": 2,
         "fighter": 5,
         "monk": 2,
-        "rogue": 4,
+        "rogue": 5,
         "wizard": 1,
     }
 
@@ -397,12 +399,12 @@ def test_default_player_preset_loads_fighter_barbarian_and_two_rogues() -> None:
     assert encounter.units["F1"].level == 5
     assert encounter.units["F2"].loadout_id == "barbarian_level2_sample_build"
     assert encounter.units["F2"].level == 2
-    assert encounter.units["F3"].loadout_id == "rogue_ranged_level4_assassin_sample_build"
-    assert encounter.units["F3"].level == 4
+    assert encounter.units["F3"].loadout_id == "rogue_ranged_level5_assassin_sample_build"
+    assert encounter.units["F3"].level == 5
     assert encounter.units["F4"].loadout_id == "rogue_melee_level2_sample_build"
     assert encounter.units["F4"].level == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 122
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 130
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:
@@ -538,6 +540,43 @@ def test_level4_ranged_assassin_rogue_build_uses_sharpshooter_metadata() -> None
     assert "assassin_tools" in rogue.feature_ids
     assert "sharpshooter" in rogue.feature_ids
     assert rogue.combat_skill_modifiers == {"stealth": 8}
+
+
+def test_level5_ranged_assassin_rogue_build_uses_cunning_strike_and_uncanny_dodge_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level5-assassin-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="rogue_level5_ranged_assassin_trio",
+        )
+    )
+
+    rogue = encounter.units["F1"]
+    assert rogue.class_id == "rogue"
+    assert rogue.level == 5
+    assert rogue.loadout_id == "rogue_ranged_level5_assassin_sample_build"
+    assert rogue.template_name == "Level 5 Ranged Assassin Rogue Sample Build"
+    assert rogue.max_hp == 42
+    assert rogue.ac == 16
+    assert rogue.ability_mods.dex == 4
+    assert rogue.initiative_mod == 4
+    assert rogue.attacks["shortbow"].attack_bonus == 7
+    assert rogue.attacks["shortbow"].damage_modifier == 4
+    assert rogue.attacks["shortsword"].attack_bonus == 7
+    assert rogue.attacks["shortsword"].damage_modifier == 4
+    assert "sneak_attack" in rogue.feature_ids
+    assert "expertise_stealth" in rogue.feature_ids
+    assert "cunning_action" in rogue.feature_ids
+    assert "steady_aim" in rogue.feature_ids
+    assert "assassinate" in rogue.feature_ids
+    assert "assassin_tools" in rogue.feature_ids
+    assert "sharpshooter" in rogue.feature_ids
+    assert "cunning_strike" in rogue.feature_ids
+    assert "uncanny_dodge" in rogue.feature_ids
+    assert unit_has_granted_cunning_strike(rogue, "poison") is True
+    assert unit_has_granted_cunning_strike(rogue, "trip") is True
+    assert unit_has_granted_cunning_strike(rogue, "withdraw") is True
+    assert rogue.combat_skill_modifiers == {"stealth": 10}
 
 
 def test_proficiency_bonus_scales_with_level_breakpoints() -> None:

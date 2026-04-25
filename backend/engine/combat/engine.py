@@ -58,6 +58,7 @@ from backend.engine.rules.combat_rules import (
     resolve_burning_hands,
     resolve_cast_spell,
     resolve_death_save,
+    resolve_poisoned_end_of_turn_save,
 )
 from backend.engine.rules.spatial import (
     build_position_index,
@@ -155,6 +156,24 @@ def build_attack_reaction_pre_events(state: EncounterState, attack_event: Combat
                     "shieldAcBonus": attack_event.resolved_totals.get("shieldAcBonus", 5),
                     "spellSlotsLevel1Remaining": attack_event.resolved_totals.get("reactionSpellSlotsLevel1Remaining"),
                     "trigger": attack_event.resolved_totals.get("defenseReactionTrigger"),
+                },
+            )
+        ]
+
+    if reaction_kind == "uncanny_dodge":
+        return [
+            add_unit_phase_event(
+                state,
+                reaction_actor_id,
+                reaction_actor_id,
+                f"{reaction_actor_id} uses Uncanny Dodge.",
+                condition_deltas=[
+                    f"{reaction_actor_id} prevents {attack_event.resolved_totals.get('uncannyDodgeDamagePrevented', 0)} damage."
+                ],
+                resolved_totals={
+                    "reaction": "uncanny_dodge",
+                    "damagePrevented": attack_event.resolved_totals.get("uncannyDodgeDamagePrevented", 0),
+                    "damageAfterUncannyDodge": attack_event.resolved_totals.get("damageAfterUncannyDodge", 0),
                 },
             )
         ]
@@ -470,12 +489,32 @@ def is_landing_movement(movement: MovementPlan | None) -> bool:
     return bool(movement and movement.mode == "landing")
 
 
+def is_cunning_withdraw_movement(movement: MovementPlan | None) -> bool:
+    return bool(movement and movement.mode == "cunning_withdraw")
+
+
+def get_cunning_withdraw_budget(actor: UnitState, state: EncounterState) -> int:
+    return max(0, get_move_squares(state, actor) // 2)
+
+
 def can_apply_tactical_shift(actor: UnitState, decision: TurnDecision) -> bool:
     return bool(
         unit_has_feature(actor, "tactical_shift")
         and decision.bonus_action
         and decision.bonus_action.get("kind") == "second_wind"
         and actor.resources.second_wind_uses > 0
+        and actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+    )
+
+
+def can_apply_cunning_withdraw(actor: UnitState, decision: TurnDecision) -> bool:
+    return bool(
+        unit_has_feature(actor, "cunning_strike")
+        and decision.action
+        and decision.action.get("kind") == "attack"
+        and decision.action.get("cunning_strike_id") == "withdraw"
         and actor.current_hp > 0
         and not actor.conditions.dead
         and not actor.conditions.unconscious
@@ -1367,6 +1406,18 @@ def get_attack_step_maneuver_intent(action: dict[str, str], step_index: int) -> 
     return action.get("maneuver_id"), action.get("precision_max_miss_margin")
 
 
+def get_attack_step_cunning_strike_intent(action: dict[str, str], step_index: int) -> str | None:
+    cunning_strike_intents = action.get("cunning_strike_intents")
+    if isinstance(cunning_strike_intents, list) and step_index < len(cunning_strike_intents):
+        step_intent = cunning_strike_intents[step_index]
+        if isinstance(step_intent, dict):
+            return step_intent.get("cunning_strike_id")
+        if isinstance(step_intent, str):
+            return step_intent
+
+    return action.get("cunning_strike_id")
+
+
 def resolve_attack_action(
     state: EncounterState,
     actor_id: str,
@@ -1412,6 +1463,7 @@ def resolve_attack_action(
             if reckless_event:
                 attack_events.append(reckless_event)
         maneuver_id, precision_max_miss_margin = get_attack_step_maneuver_intent(action, step_index)
+        cunning_strike_id = get_attack_step_cunning_strike_intent(action, step_index)
         attack_event, savage_consumed = resolve_attack(
             state,
             ResolveAttackArgs(
@@ -1423,6 +1475,7 @@ def resolve_attack_action(
                 maneuver_id=maneuver_id,
                 precision_max_miss_margin=precision_max_miss_margin,
                 great_weapon_master_eligible=True,
+                cunning_strike_id=cunning_strike_id,
             ),
         )
         attack_events.extend(build_attack_reaction_pre_events(state, attack_event))
@@ -1526,9 +1579,28 @@ def create_movement_event(
     end = path[-1]
     distance = chebyshev_distance(start, end) if mode == "landing" else len(path) - 1
     tactical_shift_applied = mode == "tactical_shift"
+    cunning_withdraw_applied = mode == "cunning_withdraw"
     landing_applied = mode == "landing"
-    movement_verb = "lands" if landing_applied else "tactically shifts" if tactical_shift_applied else "dashes" if mode == "dash" else "moves"
-    protection_note = " using Tactical Shift" if tactical_shift_applied else " using Disengage" if disengage_applied else ""
+    movement_verb = (
+        "lands"
+        if landing_applied
+        else "withdraws"
+        if cunning_withdraw_applied
+        else "tactically shifts"
+        if tactical_shift_applied
+        else "dashes"
+        if mode == "dash"
+        else "moves"
+    )
+    protection_note = (
+        " using Cunning Strike"
+        if cunning_withdraw_applied
+        else " using Tactical Shift"
+        if tactical_shift_applied
+        else " using Disengage"
+        if disengage_applied
+        else ""
+    )
     if landing_applied:
         protection_note = " from flight"
     distance_text = "" if landing_applied else f"{distance} square{'s' if distance != 1 else ''} "
@@ -1543,6 +1615,7 @@ def create_movement_event(
             "movementPhase": phase,
             "disengageApplied": disengage_applied,
             "tacticalShiftApplied": tactical_shift_applied,
+            "cunningWithdrawApplied": cunning_withdraw_applied,
             "landingApplied": landing_applied,
             "opportunityAttackers": triggered_attackers,
         },
@@ -1575,7 +1648,7 @@ def execute_movement(
     path_travelled = [movement.path[0]]
     reaction_events: list[CombatEvent] = []
     triggered_attackers: list[str] = []
-    opportunity_attacks_prevented = disengage_applied or movement.mode in {"tactical_shift", "landing"}
+    opportunity_attacks_prevented = disengage_applied or movement.mode in {"tactical_shift", "landing", "cunning_withdraw"}
 
     for index in range(1, len(movement.path)):
         previous = movement.path[index - 1]
@@ -1936,16 +2009,30 @@ def exceeds_movement_budget(state: EncounterState, actor: UnitState, decision: T
     movement_legs = [decision.pre_action_movement, decision.between_action_movement, decision.post_action_movement]
     tactical_shift_distance = sum(movement_distance(movement) for movement in movement_legs if is_tactical_shift_movement(movement))
     tactical_shift_legs = sum(1 for movement in movement_legs if is_tactical_shift_movement(movement) and movement_distance(movement) > 0)
+    cunning_withdraw_distance = sum(
+        movement_distance(movement) for movement in movement_legs if is_cunning_withdraw_movement(movement)
+    )
+    cunning_withdraw_legs = sum(
+        1 for movement in movement_legs if is_cunning_withdraw_movement(movement) and movement_distance(movement) > 0
+    )
     normal_distance = sum(
         movement_distance(movement)
         for movement in movement_legs
-        if not is_tactical_shift_movement(movement) and not is_landing_movement(movement)
+        if not is_tactical_shift_movement(movement)
+        and not is_landing_movement(movement)
+        and not is_cunning_withdraw_movement(movement)
     )
 
     if tactical_shift_distance > 0:
         if tactical_shift_legs > 1 or not can_apply_tactical_shift(actor, decision):
             return True
         if tactical_shift_distance > get_tactical_shift_budget(actor, state):
+            return True
+
+    if cunning_withdraw_distance > 0:
+        if cunning_withdraw_legs > 1 or not can_apply_cunning_withdraw(actor, decision):
+            return True
+        if cunning_withdraw_distance > get_cunning_withdraw_budget(actor, state):
             return True
 
     return normal_distance > get_total_movement_budget(
@@ -1975,6 +2062,16 @@ def resolve_turn_action(
         events.append(attempt_stabilize(state, actor_id, action["target_id"]))
     elif action["kind"] == "skip":
         events.append(create_skip_event(state, actor_id, action["reason"]))
+
+
+def action_sequence_triggered_cunning_withdraw(events: list[CombatEvent], actor_id: str) -> bool:
+    return any(
+        event.actor_id == actor_id
+        and event.event_type == "attack"
+        and event.resolved_totals.get("cunningStrikeId") == "withdraw"
+        and event.resolved_totals.get("cunningStrikeApplied") is True
+        for event in events
+    )
 
 
 def step_encounter_internal(
@@ -2042,6 +2139,9 @@ def step_encounter_internal(
         execute_decision(next_state, actor_id, choose_turn_decision(next_state, actor_id), events, rescue_mode=False)
 
     events.extend(resolve_turn_end_rage(next_state, actor_id))
+    poisoned_save_event = resolve_poisoned_end_of_turn_save(next_state, actor_id)
+    if poisoned_save_event:
+        events.append(poisoned_save_event)
     events.extend(expire_turn_end_effects(next_state, actor_id))
     events.extend(update_encounter_phase(next_state, actor_id))
     if record_log:
@@ -2127,10 +2227,16 @@ def execute_decision(
         events.extend(resolve_bonus_action_events(state, actor_id, decision.bonus_action))
 
     if can_act_after_movement(state.units[actor_id]):
+        post_action_movement = decision.post_action_movement
+        if is_cunning_withdraw_movement(post_action_movement) and not action_sequence_triggered_cunning_withdraw(
+            events[action_sequence_start_index:],
+            actor_id,
+        ):
+            post_action_movement = None
         post_events, _ = execute_movement(
             state,
             actor_id,
-            decision.post_action_movement,
+            post_action_movement,
             bonus_action_applies_disengage(decision.bonus_action),
             "after_action",
         )

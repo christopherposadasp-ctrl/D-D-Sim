@@ -202,6 +202,13 @@ class NoReactionsEffect(CamelModel):
     expires_at_turn_start_of: str
 
 
+class PoisonedEffect(CamelModel):
+    kind: Literal["poisoned"]
+    source_id: str
+    save_dc: int
+    remaining_rounds: int
+
+
 class HiddenEffect(CamelModel):
     kind: Literal["hidden"]
     source_id: str | None = None
@@ -282,6 +289,7 @@ TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
     | NoReactionsEffect
+    | PoisonedEffect
     | HiddenEffect
     | DodgingEffect
     | ShieldEffect

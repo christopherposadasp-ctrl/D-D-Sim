@@ -35,6 +35,7 @@ from backend.engine.models.state import (
     GridPosition,
     HiddenEffect,
     NoReactionsEffect,
+    PoisonedEffect,
     RageEffect,
     RecklessAttackEffect,
     SlowEffect,
@@ -56,6 +57,7 @@ from backend.engine.rules.combat_rules import (
     recalculate_effective_speed,
     resolve_attack,
     resolve_death_save,
+    resolve_poisoned_end_of_turn_save,
     resolve_saving_throw,
 )
 from backend.engine.utils.rng import normalize_seed, roll_die
@@ -97,6 +99,15 @@ def build_level4_rogue_config(seed: str, *, player_behavior: str = "smart") -> E
         seed=seed,
         enemy_preset_id="goblin_screen",
         player_preset_id="rogue_level4_ranged_assassin_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level5_rogue_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="rogue_level5_ranged_assassin_trio",
         player_behavior=player_behavior,
     )
 
@@ -3296,6 +3307,331 @@ def test_level4_assassinate_damage_uses_rogue_level_four() -> None:
     assert attack_event.resolved_totals["assassinateDamageBonus"] == 4
     assert assassinate_component.total_damage == 4
     assert any(component.damage_type == "precision" and len(component.raw_rolls) == 2 for component in attack_event.damage_details.damage_components)
+
+
+def test_level5_rogue_shortbow_sneak_attack_rolls_three_d6() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-sneak-attack"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F2"].position = GridPosition(x=3, y=2)
+    encounter.units["E1"].position = GridPosition(x=3, y=1)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    sneak_component = next(
+        component for component in attack_event.damage_details.damage_components if component.damage_type == "precision"
+    )
+
+    assert len(sneak_component.raw_rolls) == 3
+    assert "cunningStrikeId" not in attack_event.resolved_totals
+
+
+def test_cunning_strike_spends_one_sneak_attack_die_when_explicitly_selected() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-cunning-poison"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F2"].position = GridPosition(x=3, y=2)
+    encounter.units["E1"].position = GridPosition(x=3, y=1)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            cunning_strike_id="poison",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4], save_rolls=[1]),
+        ),
+    )
+
+    sneak_component = next(
+        component for component in attack_event.damage_details.damage_components if component.damage_type == "precision"
+    )
+
+    assert len(sneak_component.raw_rolls) == 2
+    assert attack_event.resolved_totals["cunningStrikeId"] == "poison"
+    assert attack_event.resolved_totals["cunningStrikeCostD6"] == 1
+    assert attack_event.resolved_totals["sneakAttackDiceSpent"] == 1
+    assert attack_event.resolved_totals["sneakAttackDiceRolled"] == 2
+    assert attack_event.resolved_totals["cunningStrikeSaveDc"] == 15
+    assert attack_event.resolved_totals["cunningStrikeSaveSuccess"] is False
+    assert any(effect.kind == "poisoned" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_cunning_strike_does_not_spend_on_miss_or_non_sneak_attack_hit() -> None:
+    miss = create_encounter(build_level5_rogue_config("rogue-level5-cunning-miss"))
+    miss.round = 2
+    miss.units["F1"].position = GridPosition(x=1, y=1)
+    miss.units["F2"].position = GridPosition(x=3, y=2)
+    miss.units["E1"].position = GridPosition(x=3, y=1)
+    defeat_other_enemies(miss, "E1")
+
+    miss_event, _ = resolve_attack(
+        miss,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            cunning_strike_id="poison",
+            overrides=AttackRollOverrides(attack_rolls=[1], damage_rolls=[4], save_rolls=[1]),
+        ),
+    )
+
+    no_sneak = create_encounter(build_level5_rogue_config("rogue-level5-cunning-no-sneak"))
+    no_sneak.round = 2
+    no_sneak.units["F1"].position = GridPosition(x=1, y=1)
+    no_sneak.units["E1"].position = GridPosition(x=3, y=1)
+    defeat_other_enemies(no_sneak, "E1")
+
+    no_sneak_event, _ = resolve_attack(
+        no_sneak,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            cunning_strike_id="poison",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4], save_rolls=[1]),
+        ),
+    )
+
+    assert "cunningStrikeId" not in miss_event.resolved_totals
+    assert "cunningStrikeId" not in no_sneak_event.resolved_totals
+
+
+def test_trip_cunning_strike_knocks_eligible_failed_save_target_prone() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-cunning-trip"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F2"].position = GridPosition(x=3, y=2)
+    encounter.units["E1"].position = GridPosition(x=3, y=1)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            cunning_strike_id="trip",
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4], save_rolls=[1]),
+        ),
+    )
+
+    assert encounter.units["E1"].conditions.prone is True
+    assert attack_event.resolved_totals["cunningStrikeId"] == "trip"
+    assert attack_event.resolved_totals["cunningStrikeSaveAbility"] == "dex"
+    assert attack_event.resolved_totals["cunningStrikeConditionApplied"] is True
+
+
+def test_withdraw_cunning_strike_enables_half_speed_no_opportunity_movement_when_it_hits() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-cunning-withdraw"))
+    encounter.round = 2
+    encounter.active_combatant_index = encounter.initiative_order.index("F1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=6, y=6)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+    events = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "attack", "target_id": "E1", "weapon_id": "shortbow", "cunning_strike_id": "withdraw"},
+            post_action_movement=MovementPlan(
+                path=[
+                    GridPosition(x=5, y=5),
+                    GridPosition(x=4, y=5),
+                    GridPosition(x=3, y=5),
+                    GridPosition(x=2, y=5),
+                ],
+                mode="cunning_withdraw",
+            ),
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    move_event = next(event for event in events if event.event_type == "move")
+    attack_event = next(event for event in events if event.event_type == "attack" and event.actor_id == "F1")
+    assert attack_event.resolved_totals["cunningStrikeId"] == "withdraw"
+    assert move_event.resolved_totals["cunningWithdrawApplied"] is True
+    assert move_event.resolved_totals["opportunityAttackers"] == []
+    assert encounter.units["F1"].position == GridPosition(x=2, y=5)
+
+
+def test_cunning_strike_critical_doubles_only_remaining_sneak_attack_dice() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-cunning-crit"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F2"].position = GridPosition(x=3, y=2)
+    encounter.units["E1"].position = GridPosition(x=3, y=1)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            cunning_strike_id="withdraw",
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[4]),
+        ),
+    )
+
+    sneak_component = next(
+        component for component in attack_event.damage_details.damage_components if component.damage_type == "precision"
+    )
+
+    assert len(sneak_component.raw_rolls) == 2
+    assert sneak_component.total_damage == sneak_component.subtotal * 2
+
+
+def test_poisoned_effect_imposes_attack_disadvantage_and_can_end_on_turn_end_save() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-poison-save"))
+    encounter.round = 2
+    encounter.units["E1"].temporary_effects.append(
+        PoisonedEffect(kind="poisoned", source_id="F1", save_dc=0, remaining_rounds=10)
+    )
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15, 15], damage_rolls=[3]),
+        ),
+    )
+
+    save_event = resolve_poisoned_end_of_turn_save(encounter, "E1")
+
+    assert attack_event.resolved_totals["attackMode"] == "disadvantage"
+    assert "poisoned" in attack_event.raw_rolls["disadvantageSources"]
+    assert save_event is not None
+    assert save_event.resolved_totals["success"] is True
+    assert save_event.resolved_totals["poisonedEnded"] is True
+    assert not any(effect.kind == "poisoned" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_uncanny_dodge_halves_qualifying_damage_and_consumes_reaction() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-uncanny-dodge"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[6]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["defenseReaction"] == "uncanny_dodge"
+    assert attack_event.resolved_totals["uncannyDodgeDamagePrevented"] == 4
+    assert attack_event.resolved_totals["damageAfterUncannyDodge"] == 4
+    assert encounter.units["F1"].reaction_available is False
+    assert encounter.units["F1"].current_hp == 38
+
+
+def test_uncanny_dodge_threshold_skips_small_hits_above_half_hp() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-uncanny-skip-small"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2]),
+        ),
+    )
+
+    assert "defenseReaction" not in attack_event.resolved_totals
+    assert encounter.units["F1"].reaction_available is True
+    assert encounter.units["F1"].current_hp == 38
+
+
+def test_uncanny_dodge_threshold_uses_small_hits_at_or_below_half_hp() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-uncanny-low-hp"))
+    encounter.round = 2
+    encounter.units["F1"].current_hp = 21
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["defenseReaction"] == "uncanny_dodge"
+    assert attack_event.resolved_totals["uncannyDodgeDamagePrevented"] == 2
+    assert encounter.units["F1"].current_hp == 20
+
+
+def test_uncanny_dodge_triggers_when_hit_would_drop_rogue_to_zero() -> None:
+    encounter = create_encounter(build_level5_rogue_config("rogue-level5-uncanny-drop"))
+    encounter.round = 2
+    encounter.units["F1"].current_hp = 4
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["defenseReaction"] == "uncanny_dodge"
+    assert encounter.units["F1"].current_hp == 2
 
 
 def test_bonus_dash_extends_player_rogue_movement_budget_in_execute_decision() -> None:

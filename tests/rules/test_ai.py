@@ -910,6 +910,27 @@ def test_level4_ranged_assassin_keeps_existing_hide_behavior_around_the_rock() -
     assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
 
 
+def test_level5_ranged_assassin_does_not_select_cunning_strike_in_normal_ai() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level5-no-cunning-ai",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level5_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].effective_speed = 0
+    encounter.units["E4"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert "cunning_strike_id" not in decision.action
+
+
 def test_smart_level2_ranged_rogue_moves_to_hide_ready_square_while_dumb_rogue_does_not() -> None:
     smart = create_encounter(
         EncounterConfig(

@@ -8,6 +8,11 @@ from backend.content.class_progressions import (
     get_proficiency_bonus,
     get_progression_scalar,
 )
+from backend.content.cunning_strike_definitions import (
+    get_cunning_strike_definition,
+    get_cunning_strike_save_dc,
+    unit_has_cunning_strike,
+)
 from backend.content.enemies import unit_has_reaction, unit_has_trait
 from backend.content.feature_definitions import unit_has_feature
 from backend.content.maneuver_definitions import (
@@ -35,6 +40,7 @@ from backend.engine.models.state import (
     MasteryType,
     MovementDetails,
     NoReactionsEffect,
+    PoisonedEffect,
     RageEffect,
     RecklessAttackEffect,
     RestrainedEffect,
@@ -95,6 +101,8 @@ class DamageApplicationResult:
     undead_fortitude_success: bool | None = None
     undead_fortitude_dc: int | None = None
     undead_fortitude_bypass_reason: str | None = None
+    damage_prevented: int = 0
+    damage_mitigation_source: str | None = None
 
 
 class ResolveAttackArgs:
@@ -112,6 +120,7 @@ class ResolveAttackArgs:
         maneuver_id: str | None = None,
         precision_max_miss_margin: int | None = None,
         great_weapon_master_eligible: bool = False,
+        cunning_strike_id: str | None = None,
     ) -> None:
         self.attacker_id = attacker_id
         self.target_id = target_id
@@ -124,6 +133,7 @@ class ResolveAttackArgs:
         self.maneuver_id = maneuver_id
         self.precision_max_miss_margin = precision_max_miss_margin
         self.great_weapon_master_eligible = great_weapon_master_eligible
+        self.cunning_strike_id = cunning_strike_id
 
 
 class SavingThrowOverrides:
@@ -427,6 +437,47 @@ def can_apply_sneak_attack(
     if attack_mode == "disadvantage":
         return False
     return has_adjacent_ally_for_sneak_attack(state, attacker, target)
+
+
+def unit_is_poisoned(unit: UnitState) -> bool:
+    return any(effect.kind == "poisoned" for effect in unit.temporary_effects)
+
+
+def get_cunning_strike_damage_type(weapon: WeaponProfile) -> str:
+    return weapon.damage_type or (weapon.damage_components[0].damage_type if weapon.damage_components else "damage")
+
+
+def can_apply_cunning_strike(
+    attacker: UnitState,
+    target: UnitState,
+    weapon: WeaponProfile,
+    strike_id: str | None,
+    sneak_attack_dice: int,
+) -> bool:
+    if not strike_id:
+        return False
+    if not unit_has_feature(attacker, "cunning_strike") or not unit_has_cunning_strike(attacker, strike_id):
+        return False
+    if sneak_attack_dice <= 0:
+        return False
+
+    definition = get_cunning_strike_definition(strike_id)
+    if sneak_attack_dice < definition.cost_d6:
+        return False
+
+    if strike_id == "poison":
+        return "poisoned" not in target.condition_immunities and not unit_is_poisoned(target)
+    if strike_id == "trip":
+        return (
+            not target.conditions.dead
+            and target.current_hp > 0
+            and not target.conditions.unconscious
+            and not target.conditions.prone
+            and is_within_max_target_size(target.size_category, definition.max_target_size)
+        )
+    if strike_id == "withdraw":
+        return True
+    return False
 
 
 def get_rage_damage_bonus(attacker: UnitState, weapon: WeaponProfile) -> int:
@@ -812,6 +863,43 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
     )
 
 
+def resolve_poisoned_end_of_turn_save(state: EncounterState, actor_id: str) -> CombatEvent | None:
+    actor = state.units[actor_id]
+    poisoned_effects = [effect for effect in actor.temporary_effects if effect.kind == "poisoned"]
+    if not poisoned_effects or actor.conditions.dead or actor.current_hp <= 0:
+        return None
+
+    effect = poisoned_effects[0]
+    save_event = resolve_saving_throw(
+        state,
+        ResolveSavingThrowArgs(
+            actor_id=actor_id,
+            ability="con",
+            dc=effect.save_dc,
+            reason="Poisoned",
+        ),
+    )
+    success = bool(save_event.resolved_totals["success"])
+
+    if success:
+        actor.temporary_effects = [active_effect for active_effect in actor.temporary_effects if active_effect is not effect]
+        save_event.condition_deltas.append(f"{actor_id} is no longer poisoned.")
+        save_event.resolved_totals["poisonedEnded"] = True
+    else:
+        effect.remaining_rounds -= 1
+        if effect.remaining_rounds <= 0:
+            actor.temporary_effects = [active_effect for active_effect in actor.temporary_effects if active_effect is not effect]
+            save_event.condition_deltas.append(f"{actor_id}'s poison expires.")
+            save_event.resolved_totals["poisonedEnded"] = True
+            save_event.resolved_totals["poisonExpired"] = True
+        else:
+            save_event.condition_deltas.append(f"{actor_id} remains poisoned.")
+            save_event.resolved_totals["poisonedEnded"] = False
+            save_event.resolved_totals["poisonRemainingRounds"] = effect.remaining_rounds
+
+    return save_event
+
+
 def resolve_death_save(state: EncounterState, actor_id: str, override_roll: int | None = None) -> CombatEvent:
     actor = state.units[actor_id]
     raw_roll = pull_die(state, 20, override_roll)
@@ -1183,11 +1271,62 @@ def resolve_undead_fortitude(
     return True, save_total >= save_dc, save_dc, None
 
 
+def can_use_uncanny_dodge_reaction(target: UnitState, attacker: UnitState | None) -> bool:
+    if not unit_has_feature(target, "uncanny_dodge"):
+        return False
+    if not unit_can_take_reactions(target):
+        return False
+    if attacker is None or not attacker.position or not target.position:
+        return False
+    if any(effect.kind == "invisible" for effect in attacker.temporary_effects):
+        return False
+    return True
+
+
+def should_use_uncanny_dodge(target: UnitState, incoming_damage: int) -> bool:
+    if incoming_damage <= 0:
+        return False
+
+    damage_after_temp_hp = max(0, incoming_damage - target.temporary_hit_points)
+    if damage_after_temp_hp >= target.current_hp:
+        return True
+    if target.current_hp * 2 <= target.max_hp:
+        return True
+
+    minimum_damage_threshold = max(1, (target.max_hp + 9) // 10)
+    return incoming_damage >= minimum_damage_threshold
+
+
+def maybe_apply_uncanny_dodge(
+    state: EncounterState,
+    *,
+    target: UnitState,
+    attacker_id: str | None,
+    incoming_damage: int,
+    attack_roll_damage: bool,
+) -> tuple[int, int, str | None]:
+    if not attack_roll_damage or attacker_id is None:
+        return incoming_damage, 0, None
+
+    attacker = state.units.get(attacker_id)
+    if not can_use_uncanny_dodge_reaction(target, attacker):
+        return incoming_damage, 0, None
+    if not should_use_uncanny_dodge(target, incoming_damage):
+        return incoming_damage, 0, None
+
+    target.reaction_available = False
+    reduced_damage = incoming_damage // 2
+    return reduced_damage, incoming_damage - reduced_damage, "uncanny_dodge"
+
+
 def apply_damage(
     state: EncounterState,
     target_id: str,
     damage_components: list[DamageComponentResult],
     is_critical: bool,
+    *,
+    attacker_id: str | None = None,
+    attack_roll_damage: bool = False,
 ) -> DamageApplicationResult:
     target = state.units[target_id]
     previous_hp = target.current_hp
@@ -1197,6 +1336,8 @@ def apply_damage(
     temporary_hp_absorbed = 0
     final_damage_to_hp = 0
     final_total_damage = 0
+    damage_prevented = 0
+    damage_mitigation_source: str | None = None
     undead_fortitude_triggered = False
     undead_fortitude_success: bool | None = None
     undead_fortitude_dc: int | None = None
@@ -1241,6 +1382,33 @@ def apply_damage(
             undead_fortitude_bypass_reason=None,
         )
 
+    final_total_damage, damage_prevented, damage_mitigation_source = maybe_apply_uncanny_dodge(
+        state,
+        target=target,
+        attacker_id=attacker_id,
+        incoming_damage=final_total_damage,
+        attack_roll_damage=attack_roll_damage,
+    )
+    if damage_mitigation_source == "uncanny_dodge":
+        condition_deltas.append(f"{target_id} uses Uncanny Dodge to prevent {damage_prevented} damage.")
+
+    if final_total_damage <= 0:
+        return DamageApplicationResult(
+            hp_delta=0,
+            condition_deltas=condition_deltas,
+            resisted_damage=resisted_damage,
+            amplified_damage=amplified_damage,
+            temporary_hp_absorbed=0,
+            final_damage_to_hp=0,
+            final_total_damage=0,
+            undead_fortitude_triggered=False,
+            undead_fortitude_success=None,
+            undead_fortitude_dc=None,
+            undead_fortitude_bypass_reason=None,
+            damage_prevented=damage_prevented,
+            damage_mitigation_source=damage_mitigation_source,
+        )
+
     condition_deltas.extend(end_hidden(target, reason=f"{target_id} is no longer hidden after taking damage."))
 
     if unit_is_raging(target):
@@ -1269,6 +1437,8 @@ def apply_damage(
                 undead_fortitude_success=None,
                 undead_fortitude_dc=None,
                 undead_fortitude_bypass_reason=None,
+                damage_prevented=damage_prevented,
+                damage_mitigation_source=damage_mitigation_source,
             )
 
         if final_damage_to_hp >= target.max_hp:
@@ -1289,6 +1459,8 @@ def apply_damage(
                 undead_fortitude_success=None,
                 undead_fortitude_dc=None,
                 undead_fortitude_bypass_reason=None,
+                damage_prevented=damage_prevented,
+                damage_mitigation_source=damage_mitigation_source,
             )
 
         target.death_save_failures += 2 if is_critical else 1
@@ -1315,6 +1487,8 @@ def apply_damage(
             undead_fortitude_success=None,
             undead_fortitude_dc=None,
             undead_fortitude_bypass_reason=None,
+            damage_prevented=damage_prevented,
+            damage_mitigation_source=damage_mitigation_source,
         )
 
     temporary_hp_absorbed = min(target.temporary_hit_points, final_total_damage)
@@ -1335,6 +1509,8 @@ def apply_damage(
             undead_fortitude_success=None,
             undead_fortitude_dc=None,
             undead_fortitude_bypass_reason=None,
+            damage_prevented=damage_prevented,
+            damage_mitigation_source=damage_mitigation_source,
         )
 
     target.current_hp = max(0, target.current_hp - final_damage_to_hp)
@@ -1404,6 +1580,8 @@ def apply_damage(
         undead_fortitude_success=undead_fortitude_success,
         undead_fortitude_dc=undead_fortitude_dc,
         undead_fortitude_bypass_reason=undead_fortitude_bypass_reason,
+        damage_prevented=damage_prevented,
+        damage_mitigation_source=damage_mitigation_source,
     )
 
 
@@ -1823,6 +2001,9 @@ def get_attack_mode(
     if any(effect.kind in {"restrained_by", "blinded_by"} for effect in attacker.temporary_effects):
         disadvantage_sources.append("impaired_attacker")
 
+    if unit_is_poisoned(attacker):
+        disadvantage_sources.append("poisoned")
+
     if has_vex_effect(attacker, target_id):
         advantage_sources.append("vex")
 
@@ -2002,7 +2183,10 @@ def resolve_ranged_spell_attack(
     amplified_damage = 0
     temporary_hp_absorbed = 0
     final_damage_to_hp = 0
+    final_total_damage = 0
     hp_delta = 0
+    damage_prevented = 0
+    damage_mitigation_source: str | None = None
     condition_deltas: list[str] = []
 
     if attack_reaction == "redirect_attack":
@@ -2016,12 +2200,22 @@ def resolve_ranged_spell_attack(
         primary_candidate = roll_damage_candidate(state, weapon, overrides.damage_rolls)
         critical_multiplier = 2 if critical else 1
         final_damage_components = build_final_damage_components(primary_candidate, None, critical_multiplier)
-        damage_result = apply_damage(state, resolved_target_id, final_damage_components, critical)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            final_damage_components,
+            critical,
+            attacker_id=attacker_id,
+            attack_roll_damage=True,
+        )
         total_damage = sum(component.total_damage for component in final_damage_components)
         resisted_damage = damage_result.resisted_damage
         amplified_damage = damage_result.amplified_damage
         temporary_hp_absorbed = damage_result.temporary_hp_absorbed
         final_damage_to_hp = damage_result.final_damage_to_hp
+        final_total_damage = damage_result.final_total_damage
+        damage_prevented = damage_result.damage_prevented
+        damage_mitigation_source = damage_result.damage_mitigation_source
         hp_delta = damage_result.hp_delta
         condition_deltas.extend(damage_result.condition_deltas)
         if (
@@ -2053,6 +2247,31 @@ def resolve_ranged_spell_attack(
 
     critical_multiplier = 2 if critical else 1
     hit_label = "critical hit" if critical else "hit" if hit else "miss"
+    resolved_totals = {
+        "spellId": spell_id,
+        "attackMode": mode,
+        "selectedRoll": selected_roll,
+        "attackTotal": attack_total,
+        "targetAc": target_ac,
+        "coverAcBonus": attack_context.cover_ac_bonus,
+        "distanceSquares": attack_context.distance_squares,
+        "distanceFeet": attack_context.distance_feet,
+        "hit": hit,
+        "critical": critical,
+        "sapConsumed": sap_consumed,
+        "opportunityAttack": False,
+        "originalTargetId": target_id,
+        "attackReaction": attack_reaction,
+        "reactionActorId": reaction_actor_id,
+        "shieldAcBonus": get_shield_ac_bonus(target),
+        **(defense_reaction_data or {}),
+    }
+    if damage_mitigation_source == "uncanny_dodge":
+        resolved_totals["defenseReaction"] = "uncanny_dodge"
+        resolved_totals["defenseReactionActorId"] = resolved_target_id
+        resolved_totals["uncannyDodgeDamagePrevented"] = damage_prevented
+        resolved_totals["damageAfterUncannyDodge"] = final_total_damage
+
     return CombatEvent(
         **event_base(state, attacker_id),
         target_ids=[resolved_target_id],
@@ -2062,25 +2281,7 @@ def resolve_ranged_spell_attack(
             "advantageSources": advantage_sources,
             "disadvantageSources": disadvantage_sources,
         },
-        resolved_totals={
-            "spellId": spell_id,
-            "attackMode": mode,
-            "selectedRoll": selected_roll,
-            "attackTotal": attack_total,
-            "targetAc": target_ac,
-            "coverAcBonus": attack_context.cover_ac_bonus,
-            "distanceSquares": attack_context.distance_squares,
-            "distanceFeet": attack_context.distance_feet,
-            "hit": hit,
-            "critical": critical,
-            "sapConsumed": sap_consumed,
-            "opportunityAttack": False,
-            "originalTargetId": target_id,
-            "attackReaction": attack_reaction,
-            "reactionActorId": reaction_actor_id,
-            "shieldAcBonus": get_shield_ac_bonus(target),
-            **(defense_reaction_data or {}),
-        },
+        resolved_totals=resolved_totals,
         movement_details=None,
         damage_details=DamageDetails(
             weapon_id=spell_id,
@@ -2546,7 +2747,10 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     amplified_damage = 0
     temporary_hp_absorbed = 0
     final_damage_to_hp = 0
+    final_total_damage = 0
     hp_delta = 0
+    damage_prevented = 0
+    damage_mitigation_source: str | None = None
     undead_fortitude_triggered = False
     undead_fortitude_success: bool | None = None
     undead_fortitude_dc: int | None = None
@@ -2562,6 +2766,16 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     savage_attacker_consumed = False
     final_damage_components: list[DamageComponentResult] = []
     assassinate_damage_bonus = 0
+    cunning_strike_id: str | None = None
+    cunning_strike_cost_d6 = 0
+    sneak_attack_dice_rolled: int | None = None
+    sneak_attack_dice_spent = 0
+    cunning_strike_save_ability: str | None = None
+    cunning_strike_save_dc: int | None = None
+    cunning_strike_save_rolls: list[int] = []
+    cunning_strike_save_total: int | None = None
+    cunning_strike_save_success: bool | None = None
+    cunning_strike_condition_applied: bool | None = None
 
     if attack_reaction == "redirect_attack":
         condition_deltas.append(f"{args.target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
@@ -2645,7 +2859,28 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                 f"{args.attacker_id} applies Great Weapon Master for +{great_weapon_master_damage_bonus} damage."
             )
         if can_apply_sneak_attack(state, attacker, target, weapon, mode):
-            sneak_attack_component = roll_sneak_attack_component(state, get_sneak_attack_d6_count(attacker))
+            sneak_attack_dice = get_sneak_attack_d6_count(attacker)
+            if can_apply_cunning_strike(attacker, target, weapon, args.cunning_strike_id, sneak_attack_dice):
+                definition = get_cunning_strike_definition(args.cunning_strike_id or "")
+                cunning_strike_id = definition.strike_id
+                cunning_strike_cost_d6 = definition.cost_d6
+                sneak_attack_dice_spent = definition.cost_d6
+                sneak_attack_dice -= definition.cost_d6
+                condition_deltas.append(
+                    f"{args.attacker_id} uses Cunning Strike: {definition.display_name}, spending {definition.cost_d6} Sneak Attack die."
+                )
+
+                if definition.save_ability:
+                    cunning_strike_save_ability = definition.save_ability
+                    cunning_strike_save_dc = get_cunning_strike_save_dc(attacker)
+                    save_roll = pull_die(state, 20, overrides.save_rolls.pop(0) if overrides.save_rolls else None)
+                    cunning_strike_save_rolls.append(save_roll)
+                    save_modifier = get_ability_modifier(target, definition.save_ability)
+                    cunning_strike_save_total = save_roll + save_modifier
+                    cunning_strike_save_success = cunning_strike_save_total >= cunning_strike_save_dc
+
+            sneak_attack_dice_rolled = sneak_attack_dice
+            sneak_attack_component = roll_sneak_attack_component(state, sneak_attack_dice)
             if sneak_attack_component:
                 final_damage_components.append(
                     DamageComponentResult(
@@ -2712,17 +2947,69 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
 
         total_damage = sum(component.total_damage for component in final_damage_components)
 
-        damage_result = apply_damage(state, resolved_target_id, final_damage_components, critical)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            final_damage_components,
+            critical,
+            attacker_id=args.attacker_id,
+            attack_roll_damage=True,
+        )
         hp_delta = damage_result.hp_delta
         resisted_damage = damage_result.resisted_damage
         amplified_damage = damage_result.amplified_damage
         temporary_hp_absorbed = damage_result.temporary_hp_absorbed
         final_damage_to_hp = damage_result.final_damage_to_hp
+        final_total_damage = damage_result.final_total_damage
+        damage_prevented = damage_result.damage_prevented
+        damage_mitigation_source = damage_result.damage_mitigation_source
         undead_fortitude_triggered = damage_result.undead_fortitude_triggered
         undead_fortitude_success = damage_result.undead_fortitude_success
         undead_fortitude_dc = damage_result.undead_fortitude_dc
         undead_fortitude_bypass_reason = damage_result.undead_fortitude_bypass_reason
         condition_deltas.extend(damage_result.condition_deltas)
+
+        if cunning_strike_id == "poison":
+            cunning_strike_condition_applied = False
+            if (
+                cunning_strike_save_success is False
+                and not target.conditions.dead
+                and target.current_hp > 0
+                and "poisoned" not in target.condition_immunities
+                and not unit_is_poisoned(target)
+            ):
+                target.temporary_effects.append(
+                    PoisonedEffect(
+                        kind="poisoned",
+                        source_id=args.attacker_id,
+                        save_dc=cunning_strike_save_dc or 0,
+                        remaining_rounds=10,
+                    )
+                )
+                cunning_strike_condition_applied = True
+                condition_deltas.append(f"{resolved_target_id} fails Poison Cunning Strike save and is poisoned.")
+            elif cunning_strike_save_success is True:
+                condition_deltas.append(f"{resolved_target_id} resists Poison Cunning Strike.")
+
+        if cunning_strike_id == "trip":
+            cunning_strike_condition_applied = False
+            if (
+                cunning_strike_save_success is False
+                and not target.conditions.dead
+                and target.current_hp > 0
+                and not target.conditions.unconscious
+                and not target.conditions.prone
+                and is_within_max_target_size(target.size_category, get_cunning_strike_definition("trip").max_target_size)
+            ):
+                target.conditions.prone = True
+                cunning_strike_condition_applied = True
+                condition_deltas.append(f"{resolved_target_id} fails Trip Cunning Strike save and is knocked prone.")
+            elif cunning_strike_save_success is True:
+                condition_deltas.append(f"{resolved_target_id} resists Trip Cunning Strike.")
+
+        if cunning_strike_id == "withdraw":
+            cunning_strike_condition_applied = True
+            condition_deltas.append(f"{args.attacker_id} can withdraw up to half speed without provoking opportunity attacks.")
 
         if maneuver_id == "trip_attack":
             maneuver_prone_applied = False
@@ -2774,6 +3061,9 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         amplified_damage = damage_result.amplified_damage
         temporary_hp_absorbed = damage_result.temporary_hp_absorbed
         final_damage_to_hp = damage_result.final_damage_to_hp
+        final_total_damage = damage_result.final_total_damage
+        damage_prevented = damage_result.damage_prevented
+        damage_mitigation_source = damage_result.damage_mitigation_source
         undead_fortitude_triggered = damage_result.undead_fortitude_triggered
         undead_fortitude_success = damage_result.undead_fortitude_success
         undead_fortitude_dc = damage_result.undead_fortitude_dc
@@ -2846,6 +3136,23 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             resolved_totals["undeadFortitudeDc"] = undead_fortitude_dc
         if undead_fortitude_bypass_reason is not None:
             resolved_totals["undeadFortitudeBypassReason"] = undead_fortitude_bypass_reason
+    if damage_mitigation_source == "uncanny_dodge":
+        resolved_totals["defenseReaction"] = "uncanny_dodge"
+        resolved_totals["defenseReactionActorId"] = resolved_target_id
+        resolved_totals["uncannyDodgeDamagePrevented"] = damage_prevented
+        resolved_totals["damageAfterUncannyDodge"] = final_total_damage
+    if cunning_strike_id:
+        resolved_totals["cunningStrikeId"] = cunning_strike_id
+        resolved_totals["cunningStrikeCostD6"] = cunning_strike_cost_d6
+        resolved_totals["sneakAttackDiceSpent"] = sneak_attack_dice_spent
+        resolved_totals["sneakAttackDiceRolled"] = sneak_attack_dice_rolled or 0
+        resolved_totals["cunningStrikeApplied"] = cunning_strike_condition_applied is not False
+        if cunning_strike_save_dc is not None:
+            resolved_totals["cunningStrikeSaveAbility"] = cunning_strike_save_ability
+            resolved_totals["cunningStrikeSaveDc"] = cunning_strike_save_dc
+            resolved_totals["cunningStrikeSaveTotal"] = cunning_strike_save_total
+            resolved_totals["cunningStrikeSaveSuccess"] = cunning_strike_save_success
+            resolved_totals["cunningStrikeConditionApplied"] = cunning_strike_condition_applied or False
     if maneuver_id:
         resolved_totals["maneuverId"] = maneuver_id
         resolved_totals["superiorityDiceRemaining"] = superiority_dice_remaining
@@ -2868,6 +3175,8 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         raw_rolls["superiorityDiceRolls"] = superiority_dice_rolls
     if maneuver_save_rolls:
         raw_rolls["maneuverSaveRolls"] = maneuver_save_rolls
+    if cunning_strike_save_rolls:
+        raw_rolls["cunningStrikeSaveRolls"] = cunning_strike_save_rolls
 
     event = CombatEvent(
         **event_base(state, args.attacker_id),

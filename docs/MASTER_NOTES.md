@@ -86,7 +86,7 @@ It should be updated whenever one of these changes:
 - The live martial class baseline is now:
   - Fighter supported to level 5 as a Battle Master great-weapon striker with Great Weapon Master, Extra Attack, and Tactical Shift
   - Barbarian supported to level 2
-  - Rogue supported to level 4 for the ranged Assassin path and level 2 for the melee path
+  - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
   - Monk supported to level 2
 - A narrow combat-only Wizard level 1 slice is also live with:
   - cantrips: `fire_bolt`, `shocking_grasp`
@@ -100,7 +100,7 @@ It should be updated whenever one of these changes:
 - The default player preset is now the four-PC mixed martial party:
   - one level 5 Battle Master fighter
   - one level 2 barbarian
-  - one level 4 ranged Assassin rogue
+  - one level 5 ranged Assassin rogue
   - one level 2 melee rogue
 - These new player-build fields are intentionally kept out of the live run/batch API payload for now so the current UI contract remains stable during the framework transition
 - A backend-owned player catalog endpoint now exists at `GET /api/catalog/classes`
@@ -187,7 +187,7 @@ It should be updated whenever one of these changes:
 
 ### Current Working Version
 
-- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 4 as an Assassin; Barbarian, melee Rogue, and Monk remain live up to level 2
+- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Barbarian, melee Rogue, and Monk remain live up to level 2
 - Wizard level 1 is live as a narrow combat-only spellcasting slice, not a full `V4.4` spell framework rollout
 - Immediate project path is now focused on one presentation-ready level 5 party rather than broad class coverage:
   - Fighter: Battle Master

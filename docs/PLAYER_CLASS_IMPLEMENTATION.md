@@ -22,9 +22,10 @@ It exists to keep class work:
 ## Current Class Support Snapshot
 
 - Fighter is live through level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift.
-- Barbarian, Rogue, and Monk are live through level 2.
+- Ranged Rogue is live through level 5 as an Assassin; melee Rogue is live through level 2.
+- Barbarian and Monk are live through level 2.
 - Wizard is live at level 1 as a narrow combat spellcasting slice.
-- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter.
+- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter and level 5 ranged Assassin Rogue.
 
 ## Primary Backend Files
 

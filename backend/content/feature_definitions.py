@@ -21,6 +21,7 @@ class FeatureDefinition:
     granted_bonus_action_ids: tuple[str, ...] = ()
     granted_reaction_ids: tuple[str, ...] = ()
     granted_maneuver_ids: tuple[str, ...] = ()
+    granted_cunning_strike_ids: tuple[str, ...] = ()
 
 
 FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
@@ -149,6 +150,20 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="feat",
         description="Dexterity increase plus ranged weapon reliability against cover, long range, and close pressure.",
     ),
+    "cunning_strike": FeatureDefinition(
+        feature_id="cunning_strike",
+        display_name="Cunning Strike",
+        kind="class_feature",
+        description="Spend Sneak Attack dice for tactical riders; AI selection is intentionally deferred.",
+        granted_cunning_strike_ids=("poison", "trip", "withdraw"),
+    ),
+    "uncanny_dodge": FeatureDefinition(
+        feature_id="uncanny_dodge",
+        display_name="Uncanny Dodge",
+        kind="class_feature",
+        description="Reaction to halve qualifying attack-roll damage.",
+        granted_reaction_ids=("uncanny_dodge",),
+    ),
     "rage": FeatureDefinition(
         feature_id="rage",
         display_name="Rage",
@@ -264,3 +279,14 @@ def get_granted_maneuver_ids_for_unit(unit: UnitState) -> tuple[str, ...]:
 
 def unit_has_granted_maneuver(unit: UnitState, maneuver_id: str) -> bool:
     return maneuver_id in get_granted_maneuver_ids_for_unit(unit)
+
+
+def get_granted_cunning_strike_ids_for_unit(unit: UnitState) -> tuple[str, ...]:
+    granted_cunning_strike_ids: set[str] = set()
+    for feature_id in unit.feature_ids:
+        granted_cunning_strike_ids.update(get_feature_definition(feature_id).granted_cunning_strike_ids)
+    return tuple(sorted(granted_cunning_strike_ids))
+
+
+def unit_has_granted_cunning_strike(unit: UnitState, strike_id: str) -> bool:
+    return strike_id in get_granted_cunning_strike_ids_for_unit(unit)

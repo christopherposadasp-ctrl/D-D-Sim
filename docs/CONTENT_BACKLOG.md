@@ -108,13 +108,13 @@ Use V4.2 to establish the player-content framework:
 
 - Fighter is live to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian is live to level 2
-- Rogue is live to level 4 for the ranged Assassin path and level 2 for the melee path
+- Rogue is live to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk is live to level 2 in `V4.2-C`
 - Wizard is live to level 1 as a narrow combat-only slice with `fire_bolt`, `shocking_grasp`, `magic_missile`, `shield`, `burning_hands`, and tracked spell access counts
 - The current default mixed party is:
   - level 5 Battle Master fighter
   - level 2 barbarian
-  - level 4 ranged Assassin rogue
+  - level 5 ranged Assassin rogue
   - level 2 melee rogue
 
 ### V4.2 Phase Targets
@@ -136,7 +136,7 @@ The immediate project path is narrower than the broad V4 class roadmap. The goal
 | Slot | Build | Status | Notes |
 |---|---|---|---|
 | Fighter | Battle Master | live to level 5 | great-weapon striker baseline |
-| Ranged Rogue | Assassin | live to level 4 | keep ranged-first rogue identity |
+| Ranged Rogue | Assassin | live to level 5 | keep ranged-first rogue identity |
 | Wizard | Evoker | after Rogue | combat spellcasting priority |
 | Paladin | Oath of the Ancients | after Wizard | durable support/frontline role |
 | Cleric | Life Domain | stretch | add only if the core four-character scope is complete |

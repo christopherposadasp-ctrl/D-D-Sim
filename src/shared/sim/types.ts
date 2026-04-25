@@ -131,6 +131,13 @@ export interface NoReactionsEffect {
   expiresAtTurnStartOf: string;
 }
 
+export interface PoisonedEffect {
+  kind: 'poisoned';
+  sourceId: string;
+  saveDc: number;
+  remainingRounds: number;
+}
+
 export interface HiddenEffect {
   kind: 'hidden';
   sourceId?: string;
@@ -203,6 +210,7 @@ export type TemporaryEffect =
   | SapEffect
   | SlowEffect
   | NoReactionsEffect
+  | PoisonedEffect
   | HiddenEffect
   | DodgingEffect
   | ShieldEffect

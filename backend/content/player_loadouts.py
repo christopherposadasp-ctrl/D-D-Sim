@@ -256,6 +256,17 @@ rogue_level4_weapons: dict[str, WeaponProfile] = {
     ),
 }
 
+rogue_level5_weapons: dict[str, WeaponProfile] = {
+    "shortbow": rogue_level4_weapons["shortbow"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+    "shortsword": rogue_level4_weapons["shortsword"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+}
+
 PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
     "fighter_sample_build": PlayerLoadoutDefinition(
         loadout_id="fighter_sample_build",
@@ -499,6 +510,29 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         attacks={
             "shortbow": rogue_level4_weapons["shortbow"],
             "shortsword": rogue_level4_weapons["shortsword"],
+        },
+        default_melee_weapon_id="shortsword",
+        default_ranged_weapon_id="shortbow",
+        medicine_modifier=1,
+    ),
+    "rogue_ranged_level5_assassin_sample_build": PlayerLoadoutDefinition(
+        loadout_id="rogue_ranged_level5_assassin_sample_build",
+        display_name="Level 5 Ranged Assassin Rogue Sample Build",
+        class_id="rogue",
+        level=5,
+        template_name="Level 5 Ranged Assassin Rogue Sample Build",
+        behavior_profile="martial_skirmisher",
+        max_hp=42,
+        ac=16,
+        speed=30,
+        initiative_mod=4,
+        passive_perception=11,
+        ability_mods=rogue_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "shortbow": rogue_level5_weapons["shortbow"],
+            "shortsword": rogue_level5_weapons["shortsword"],
         },
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
@@ -820,6 +854,15 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "rogue_level5_ranged_assassin_trio": PlayerPresetDefinition(
+        preset_id="rogue_level5_ranged_assassin_trio",
+        display_name="Level 5 Ranged Assassin Rogue Trio",
+        description="Three level 5 ranged Assassin rogues with shortbows, Cunning Strike, and Uncanny Dodge.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="rogue_ranged_level5_assassin_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "barbarian_sample_trio": PlayerPresetDefinition(
         preset_id="barbarian_sample_trio",
         display_name="Level 1 Barbarian Trio",
@@ -859,11 +902,11 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 2 barbarian, one level 4 ranged Assassin rogue, and one level 2 melee rogue.",
+        description="One level 5 Battle Master fighter, one level 2 barbarian, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
             PlayerPresetUnit(unit_id="F2", loadout_id="barbarian_level2_sample_build"),
-            PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level4_assassin_sample_build"),
+            PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
             PlayerPresetUnit(unit_id="F4", loadout_id="rogue_melee_level2_sample_build"),
         ),
     ),
@@ -896,6 +939,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "rogue_level2_melee_trio",
     "rogue_level3_ranged_assassin_trio",
     "rogue_level4_ranged_assassin_trio",
+    "rogue_level5_ranged_assassin_trio",
     "barbarian_sample_trio",
     "barbarian_level2_sample_trio",
     "monk_sample_trio",

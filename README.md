@@ -25,7 +25,7 @@ Current live martial class support:
 
 - Fighter supported to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian supported to level 2
-- Rogue supported to level 4 for the ranged Assassin path and level 2 for the melee path
+- Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk supported to level 2
 - Wizard supported to level 1 as a narrow combat spellcasting slice
 
@@ -34,7 +34,7 @@ Current default player preset:
 - `martial_mixed_party`
 - level 5 Battle Master fighter
 - level 2 barbarian
-- level 4 ranged Assassin rogue
+- level 5 ranged Assassin rogue
 - level 2 melee rogue
 
 Active enemy presets:
