@@ -70,6 +70,8 @@ FIXED_ATTACK_CASES = (
     ("ogre", "javelin_throw", [3, 4], ["piercing"], [11]),
     ("ape", "fist", [2], ["bludgeoning"], [5]),
     ("ape", "rock", [3, 4], ["bludgeoning"], [10]),
+    ("centaur_trooper", "pike", [5], ["piercing"], [9]),
+    ("centaur_trooper", "longbow", [4], ["piercing"], [6]),
     ("black_bear", "rend", [3], ["slashing"], [5]),
     ("brown_bear", "bite", [4], ["piercing"], [7]),
     ("brown_bear", "claw", [2], ["slashing"], [5]),
@@ -667,6 +669,31 @@ def test_ape_multiattack_resolves_two_fist_attacks_and_keeps_rock_as_profile_onl
     assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "fist"}
     assert [event.damage_details.weapon_id for event in attacks] == ["fist", "fist"]
     assert encounter.units["E1"].attacks["rock"].kind == "ranged"
+
+
+def test_centaur_trooper_prefers_pike_multiattack_and_uses_longbow_when_melee_unreachable() -> None:
+    melee_encounter = build_monster_benchmark_encounter("centaur_trooper")
+    defeat_other_units(melee_encounter, "E1", "F1")
+    melee_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    melee_encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    melee_decision, melee_events = run_actor_turn(melee_encounter, "E1")
+    melee_attacks = enemy_attack_events(melee_events)
+
+    assert melee_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "pike"}
+    assert [event.damage_details.weapon_id for event in melee_attacks] == ["pike", "pike"]
+
+    ranged_encounter = build_monster_benchmark_encounter("centaur_trooper")
+    defeat_other_units(ranged_encounter, "E1", "F1")
+    ranged_encounter.units["E1"].position = GridPosition(x=1, y=1)
+    ranged_encounter.units["F1"].position = GridPosition(x=15, y=15)
+
+    ranged_decision, ranged_events = run_actor_turn(ranged_encounter, "E1")
+    ranged_attacks = enemy_attack_events(ranged_events)
+
+    assert ranged_decision.pre_action_movement is None
+    assert ranged_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "longbow"}
+    assert [event.damage_details.weapon_id for event in ranged_attacks] == ["longbow", "longbow"]
 
 
 def test_brown_bear_multiattack_uses_bite_then_claw_and_claw_prones_large_or_smaller_targets() -> None:

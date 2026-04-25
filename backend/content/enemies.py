@@ -130,6 +130,7 @@ awakened_tree_ability_mods = AbilityModifiers(str=4, dex=-2, con=2, int=0, wis=0
 lemure_ability_mods = AbilityModifiers(str=0, dex=-3, con=0, int=-5, wis=0, cha=-4)
 ogre_ability_mods = AbilityModifiers(str=4, dex=-1, con=3, int=-3, wis=-2, cha=-2)
 ape_ability_mods = AbilityModifiers(str=3, dex=2, con=2, int=-2, wis=1, cha=-2)
+centaur_trooper_ability_mods = AbilityModifiers(str=4, dex=2, con=2, int=-1, wis=1, cha=0)
 black_bear_ability_mods = AbilityModifiers(str=2, dex=1, con=2, int=-4, wis=1, cha=-2)
 brown_bear_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=-4, wis=1, cha=-2)
 tiger_ability_mods = AbilityModifiers(str=3, dex=3, con=2, int=-4, wis=1, cha=-1)
@@ -1750,6 +1751,54 @@ MONSTER_DEFINITIONS.update(
             ),
             default_melee_attack_action_id="multiattack",
         ),
+        "centaur_trooper": MonsterDefinition(
+            base_creature_id="centaur",
+            variant_id="centaur_trooper",
+            display_name="Centaur Trooper",
+            combat_role="centaur_trooper",
+            ai_profile_id="line_holder",
+            max_hp=45,
+            ac=16,
+            speed=50,
+            initiative_mod=2,
+            passive_perception=13,
+            ability_mods=centaur_trooper_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "pike": WeaponProfile(
+                    id="pike",
+                    display_name="Pike",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=1, sides=10)],
+                    damage_modifier=4,
+                    damage_type="piercing",
+                    kind="melee",
+                    reach=10,
+                ),
+                "longbow": WeaponProfile(
+                    id="longbow",
+                    display_name="Longbow",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=1, sides=8)],
+                    damage_modifier=2,
+                    damage_type="piercing",
+                    kind="ranged",
+                    range=WeaponRange(normal=150, long=600),
+                ),
+            },
+            tags=("fey", "centaur", "soldier", "melee"),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            attack_actions=(
+                melee_attack_action("pike", "Pike"),
+                ranged_attack_action("longbow", "Longbow"),
+                repeated_choice_attack_action("multiattack", "Multiattack", ("pike", "longbow"), 2),
+            ),
+            default_melee_attack_action_id="multiattack",
+            default_ranged_attack_action_id="multiattack",
+        ),
         "black_bear": MonsterDefinition(
             base_creature_id="black_bear",
             variant_id="black_bear",
@@ -2973,6 +3022,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "ogre_zombie",
     "warhorse_skeleton",
     "ape",
+    "centaur_trooper",
     "giant_rat",
     "giant_fire_beetle",
     "giant_weasel",
