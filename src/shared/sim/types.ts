@@ -68,6 +68,7 @@ export interface ResourceState {
   focusPoints: number;
   uncannyMetabolismUses: number;
   spellSlotsLevel1: number;
+  layOnHandsPoints: number;
 }
 
 export interface DiceSpec {
@@ -93,10 +94,11 @@ export interface WeaponProfile {
   attackBonus: number;
   abilityModifier: number;
   attackAbility?: 'str' | 'dex';
-  damageDice: DiceSpec[];
-  damageModifier: number;
-  damageType?: string | null;
-  damageComponents?: WeaponDamageComponent[];
+    damageDice: DiceSpec[];
+    damageModifier: number;
+    damageType?: string | null;
+    selectableDamageTypes?: string[];
+    damageComponents?: WeaponDamageComponent[];
   mastery?: MasteryType;
   kind: 'melee' | 'ranged';
   finesse?: boolean;
@@ -135,6 +137,18 @@ export interface PoisonedEffect {
   kind: 'poisoned';
   sourceId: string;
   saveDc: number;
+  remainingRounds: number;
+}
+
+export interface BlessedEffect {
+  kind: 'blessed';
+  sourceId: string;
+}
+
+export interface ConcentrationEffect {
+  kind: 'concentration';
+  sourceId: string;
+  spellId: string;
   remainingRounds: number;
 }
 
@@ -211,6 +225,8 @@ export type TemporaryEffect =
   | SlowEffect
   | NoReactionsEffect
   | PoisonedEffect
+  | BlessedEffect
+  | ConcentrationEffect
   | HiddenEffect
   | DodgingEffect
   | ShieldEffect

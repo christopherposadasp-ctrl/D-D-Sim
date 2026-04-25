@@ -70,6 +70,7 @@ rogue_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=1, wis=1, cha=-1)
 rogue_level4_ability_mods = AbilityModifiers(str=0, dex=4, con=2, int=1, wis=1, cha=-1)
 barbarian_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=0)
 monk_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=0, wis=2, cha=-1)
+paladin_ability_mods = AbilityModifiers(str=3, dex=0, con=3, int=-1, wis=0, cha=2)
 wizard_ability_mods = AbilityModifiers(str=-1, dex=2, con=2, int=3, wis=1, cha=0)
 medium_footprint = Footprint(width=1, height=1)
 TRIO_PLAYER_IDS = ("F1", "F2", "F3")
@@ -126,6 +127,18 @@ player_weapons: dict[str, WeaponProfile] = {
         kind="ranged",
         range=WeaponRange(normal=30, long=120),
         resource_pool_id="javelins",
+    ),
+    "longsword": WeaponProfile(
+        id="longsword",
+        display_name="Longsword",
+        attack_bonus=5,
+        ability_modifier=3,
+        attack_ability="str",
+        damage_dice=[DiceSpec(count=1, sides=8)],
+        damage_modifier=3,
+        damage_type="slashing",
+        mastery="sap",
+        kind="melee",
     ),
     "greataxe": WeaponProfile(
         id="greataxe",
@@ -680,6 +693,33 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_melee_weapon_id="shortsword",
         medicine_modifier=2,
     ),
+    "paladin_level1_sample_build": PlayerLoadoutDefinition(
+        loadout_id="paladin_level1_sample_build",
+        display_name="Level 1 Paladin Sample Build",
+        class_id="paladin",
+        level=1,
+        template_name="Level 1 Paladin Sample Build",
+        behavior_profile="divine_guardian",
+        max_hp=13,
+        ac=20,
+        speed=30,
+        initiative_mod=0,
+        passive_perception=10,
+        ability_mods=paladin_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "longsword": player_weapons["longsword"],
+            "javelin": player_weapons["javelin"],
+        },
+        extra_feature_ids=("weapon_mastery_sap", "weapon_mastery_slow"),
+        extra_resource_pools={"javelins": 5},
+        role_tags=("healer",),
+        medicine_modifier=2,
+        default_melee_weapon_id="longsword",
+        default_ranged_weapon_id="javelin",
+        prepared_combat_spell_ids=("bless", "cure_wounds"),
+    ),
     "wizard_sample_build": PlayerLoadoutDefinition(
         loadout_id="wizard_sample_build",
         display_name="Level 1 Wizard Sample Build",
@@ -893,6 +933,15 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             PlayerPresetUnit(unit_id=fighter_id, loadout_id="monk_level2_sample_build") for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "paladin_level1_sample_trio": PlayerPresetDefinition(
+        preset_id="paladin_level1_sample_trio",
+        display_name="Level 1 Paladin Trio",
+        description="Three level 1 plate-and-shield paladins with Bless, Cure Wounds, and Lay on Hands.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="paladin_level1_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "wizard_sample_trio": PlayerPresetDefinition(
         preset_id="wizard_sample_trio",
         display_name="Level 1 Wizard Trio",
@@ -902,10 +951,10 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 2 barbarian, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+        description="One level 5 Battle Master fighter, one level 1 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
-            PlayerPresetUnit(unit_id="F2", loadout_id="barbarian_level2_sample_build"),
+            PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level1_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
             PlayerPresetUnit(unit_id="F4", loadout_id="rogue_melee_level2_sample_build"),
         ),
@@ -944,6 +993,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "barbarian_level2_sample_trio",
     "monk_sample_trio",
     "monk_level2_sample_trio",
+    "paladin_level1_sample_trio",
     "wizard_sample_trio",
     "martial_mixed_party",
 )
@@ -1044,6 +1094,7 @@ def build_legacy_resource_state(resource_pools: dict[str, int]) -> ResourceState
         focus_points=resource_pools.get("focus_points", 0),
         uncanny_metabolism_uses=resource_pools.get("uncanny_metabolism", 0),
         spell_slots_level_1=resource_pools.get("spell_slots_level_1", 0),
+        lay_on_hands_points=resource_pools.get("lay_on_hands", 0),
     )
 
 

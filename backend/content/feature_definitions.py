@@ -215,11 +215,24 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Initiative-time monk recovery that restores Focus and heals when the monk starts an encounter worn down.",
     ),
+    "lay_on_hands": FeatureDefinition(
+        feature_id="lay_on_hands",
+        display_name="Lay on Hands",
+        kind="class_feature",
+        description="Paladin bonus-action healing pool for emergency combat recovery.",
+        granted_bonus_action_ids=("lay_on_hands",),
+    ),
+    "weapon_mastery": FeatureDefinition(
+        feature_id="weapon_mastery",
+        display_name="Weapon Mastery",
+        kind="class_feature",
+        description="Class weapon mastery selections tracked through equipped weapon profiles.",
+    ),
     "spellcasting": FeatureDefinition(
         feature_id="spellcasting",
         display_name="Spellcasting",
         kind="class_feature",
-        description="Level 1 wizard spellcasting with prepared spell counts, cantrips, and first-level spell slots.",
+        description="Prepared spellcasting with spell counts and first-level spell slots.",
     ),
     "ritual_adept": FeatureDefinition(
         feature_id="ritual_adept",

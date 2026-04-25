@@ -31,6 +31,8 @@ from backend.engine.models.state import (
     DamageCandidate,
     DamageComponentResult,
     EncounterConfig,
+    BlessedEffect,
+    ConcentrationEffect,
     GrappledEffect,
     GridPosition,
     HiddenEffect,
@@ -49,6 +51,7 @@ from backend.engine.rules.combat_rules import (
     apply_damage,
     apply_great_weapon_fighting,
     attempt_hide,
+    attempt_lay_on_hands,
     attempt_uncanny_metabolism,
     can_trigger_attack_reaction,
     choose_damage_candidate,
@@ -57,6 +60,7 @@ from backend.engine.rules.combat_rules import (
     recalculate_effective_speed,
     resolve_attack,
     resolve_death_save,
+    resolve_bless,
     resolve_poisoned_end_of_turn_save,
     resolve_saving_throw,
 )
@@ -126,6 +130,15 @@ def build_level2_monk_config(seed: str, *, player_behavior: str = "smart") -> En
         seed=seed,
         enemy_preset_id="goblin_screen",
         player_preset_id="monk_level2_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_paladin_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="paladin_level1_sample_trio",
         player_behavior=player_behavior,
     )
 
@@ -1254,6 +1267,140 @@ def test_wizard_sample_trio_smoke_run_completes() -> None:
 
     assert result.final_state.terminal_state == "complete"
     assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
+
+
+def test_lay_on_hands_restores_downed_target_for_one_hp() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-lay-on-hands-downed"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F2"].current_hp = 0
+    encounter.units["F2"].conditions.unconscious = True
+    encounter.units["F2"].conditions.prone = True
+
+    heal_event = attempt_lay_on_hands(encounter, "F1", "F2")
+
+    assert heal_event.event_type == "heal"
+    assert heal_event.resolved_totals["healingTotal"] == 1
+    assert encounter.units["F2"].current_hp == 1
+    assert encounter.units["F2"].conditions.unconscious is False
+    assert encounter.units["F1"].resources.lay_on_hands_points == 4
+
+
+def test_lay_on_hands_living_target_defaults_to_twenty_percent_heal() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-lay-on-hands-living"))
+    encounter.units["F1"].current_hp = 6
+
+    heal_event = attempt_lay_on_hands(encounter, "F1", "F1")
+
+    assert heal_event.resolved_totals["healingTotal"] == 3
+    assert encounter.units["F1"].current_hp == 9
+    assert encounter.units["F1"].resources.lay_on_hands_points == 2
+
+
+def test_bless_applies_to_weapon_attacks_and_saving_throws() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-bless-attack-save"))
+    bless_event = resolve_bless(encounter, "F1", ["F1", "F2", "F3"])
+
+    assert bless_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert bless_event.resolved_totals["blessedTargetIds"] == ["F1", "F2", "F3"]
+    assert any(
+        isinstance(effect, ConcentrationEffect) and effect.spell_id == "bless"
+        for effect in encounter.units["F1"].temporary_effects
+    )
+    assert any(isinstance(effect, BlessedEffect) for effect in encounter.units["F2"].temporary_effects)
+
+    encounter.units["F2"].position = GridPosition(x=4, y=5)
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F2",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[8], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.raw_rolls["blessRolls"]
+    assert attack_event.resolved_totals["blessBonus"] == attack_event.raw_rolls["blessRolls"][0]
+    assert (
+        attack_event.resolved_totals["attackTotal"]
+        == 8 + encounter.units["F2"].attacks["longsword"].attack_bonus + attack_event.raw_rolls["blessRolls"][0]
+    )
+
+    save_event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="F2",
+            ability="dex",
+            dc=30,
+            reason="Bless test",
+            overrides=SavingThrowOverrides(save_rolls=[10]),
+        ),
+    )
+
+    assert save_event.raw_rolls["blessRolls"]
+    assert (
+        save_event.resolved_totals["total"]
+        == 10 + encounter.units["F2"].ability_mods.dex + save_event.raw_rolls["blessRolls"][0]
+    )
+
+
+def test_bless_concentration_persists_on_success_and_drops_on_failure() -> None:
+    success = create_encounter(build_paladin_config("paladin-bless-concentration-success"))
+    resolve_bless(success, "F1", ["F1", "F2", "F3"])
+
+    success_result = apply_damage(
+        success,
+        "F1",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[20, 4],
+    )
+
+    assert success_result.concentration_save_success is True
+    assert any(effect.kind == "concentration" for effect in success.units["F1"].temporary_effects)
+    assert any(effect.kind == "blessed" for effect in success.units["F2"].temporary_effects)
+
+    failure = create_encounter(build_paladin_config("paladin-bless-concentration-failure"))
+    resolve_bless(failure, "F1", ["F1", "F2", "F3"])
+
+    failure_result = apply_damage(
+        failure,
+        "F1",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[1, 1],
+    )
+
+    assert failure_result.concentration_save_success is False
+    assert failure_result.concentration_ended is True
+    assert all(effect.kind != "concentration" for effect in failure.units["F1"].temporary_effects)
+    assert all(effect.kind != "blessed" for effect in failure.units["F2"].temporary_effects)
+
+
+def test_cure_wounds_heals_two_d8_plus_charisma_and_spends_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-cure-wounds"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F2"].current_hp = 1
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "cure_wounds", "target_id": "F2"},
+        overrides=AttackRollOverrides(damage_rolls=[8, 7]),
+    )
+
+    assert len(spell_events) == 1
+    heal_event = spell_events[0]
+    assert heal_event.event_type == "heal"
+    assert heal_event.raw_rolls["healingRolls"] == [8, 7]
+    assert heal_event.resolved_totals["healingModifier"] == 2
+    assert heal_event.resolved_totals["healingTotal"] == 12
+    assert encounter.units["F2"].current_hp == 13
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
 
 
 def test_monk_unarmored_defense_uses_dex_plus_wis() -> None:

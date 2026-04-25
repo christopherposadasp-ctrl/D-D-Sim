@@ -96,6 +96,7 @@ RESOURCE_FIELD_BY_POOL = {
     "focus_points": "focus_points",
     "uncanny_metabolism": "uncanny_metabolism_uses",
     "spell_slots_level_1": "spell_slots_level_1",
+    "lay_on_hands": "lay_on_hands_points",
 }
 
 
@@ -109,6 +110,7 @@ class ResourceState(CamelModel):
     focus_points: int
     uncanny_metabolism_uses: int
     spell_slots_level_1: int
+    lay_on_hands_points: int
 
     def get_pool(self, pool_id: str) -> int:
         field_name = RESOURCE_FIELD_BY_POOL.get(pool_id)
@@ -161,6 +163,7 @@ class WeaponProfile(CamelModel):
     damage_dice: list[DiceSpec] = Field(default_factory=list)
     damage_modifier: int = 0
     damage_type: str | None = None
+    selectable_damage_types: list[str] | None = None
     damage_components: list[WeaponDamageComponent] | None = None
     mastery: MasteryType | None = None
     kind: Literal["melee", "ranged"]
@@ -206,6 +209,18 @@ class PoisonedEffect(CamelModel):
     kind: Literal["poisoned"]
     source_id: str
     save_dc: int
+    remaining_rounds: int
+
+
+class BlessedEffect(CamelModel):
+    kind: Literal["blessed"]
+    source_id: str
+
+
+class ConcentrationEffect(CamelModel):
+    kind: Literal["concentration"]
+    source_id: str
+    spell_id: str
     remaining_rounds: int
 
 
@@ -290,6 +305,8 @@ TemporaryEffect: TypeAlias = (
     | SlowEffect
     | NoReactionsEffect
     | PoisonedEffect
+    | BlessedEffect
+    | ConcentrationEffect
     | HiddenEffect
     | DodgingEffect
     | ShieldEffect

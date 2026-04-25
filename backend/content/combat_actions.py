@@ -82,6 +82,12 @@ COMBAT_ACTIONS: dict[str, CombatActionDefinition] = {
         timing="bonus_action",
         description="Gain advantage on the next attack this turn without moving.",
     ),
+    "lay_on_hands": CombatActionDefinition(
+        action_id="lay_on_hands",
+        display_name="Lay on Hands",
+        timing="bonus_action",
+        description="Spend Paladin healing pool points to restore a touched creature.",
+    ),
     "bonus_unarmed_strike": CombatActionDefinition(
         action_id="bonus_unarmed_strike",
         display_name="Bonus Unarmed Strike",

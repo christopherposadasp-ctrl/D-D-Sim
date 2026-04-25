@@ -208,6 +208,17 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
         feature_scalars={"martial_arts_die_sides": 6},
     ),
     (
+        "paladin",
+        1,
+    ): ClassProgressionDefinition(
+        class_id="paladin",
+        level=1,
+        feature_ids=("lay_on_hands", "spellcasting", "weapon_mastery"),
+        resource_pools={"lay_on_hands": 5, "spell_slots_level_1": 2},
+        attack_count=1,
+        feature_scalars={"prepared_spells": 2},
+    ),
+    (
         "wizard",
         1,
     ): ClassProgressionDefinition(

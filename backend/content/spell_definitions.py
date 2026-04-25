@@ -22,6 +22,8 @@ class SpellDefinition:
         "auto_hit_single_target",
         "reaction_self",
         "self_cone_save",
+        "multi_ally_buff",
+        "touch_heal",
     ]
     range_feet: int
     damage_dice: tuple[DiceSpec, ...]
@@ -33,6 +35,11 @@ class SpellDefinition:
     on_hit_effect_kind: Literal["no_reactions"] | None = None
     ac_bonus: int = 0
     negates_magic_missile: bool = False
+    concentration: bool = False
+    duration_rounds: int = 0
+    max_targets: int = 1
+    healing_dice: tuple[DiceSpec, ...] = ()
+    healing_modifier_ability: str | None = None
 
 
 SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
@@ -107,6 +114,37 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         damage_type="fire",
         save_ability="dex",
         half_on_success=True,
+    ),
+    "bless": SpellDefinition(
+        spell_id="bless",
+        display_name="Bless",
+        level=1,
+        school="enchantment",
+        description="Concentration prayer that adds 1d4 to attack rolls and saving throws for up to three allies.",
+        timing="action",
+        targeting_mode="multi_ally_buff",
+        range_feet=30,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        concentration=True,
+        duration_rounds=10,
+        max_targets=3,
+    ),
+    "cure_wounds": SpellDefinition(
+        spell_id="cure_wounds",
+        display_name="Cure Wounds",
+        level=1,
+        school="abjuration",
+        description="Touch-range healing spell restoring 2d8 plus the caster's spellcasting modifier.",
+        timing="action",
+        targeting_mode="touch_heal",
+        range_feet=5,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        healing_dice=(DiceSpec(count=2, sides=8),),
+        healing_modifier_ability="spellcasting",
     ),
 }
 

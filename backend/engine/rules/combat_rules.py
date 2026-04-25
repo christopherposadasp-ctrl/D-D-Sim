@@ -27,7 +27,9 @@ from backend.engine.models.state import (
     AttackId,
     AttackMode,
     AttackRiderType,
+    BlessedEffect,
     CombatEvent,
+    ConcentrationEffect,
     DamageCandidate,
     DamageComponentResult,
     DamageDetails,
@@ -79,6 +81,7 @@ class AttackRollOverrides:
         savage_damage_rolls: list[int] | None = None,
         advantage_damage_rolls: list[int] | None = None,
         superiority_rolls: list[int] | None = None,
+        concentration_rolls: list[int] | None = None,
     ) -> None:
         self.attack_rolls = attack_rolls or []
         self.damage_rolls = damage_rolls or []
@@ -86,6 +89,7 @@ class AttackRollOverrides:
         self.savage_damage_rolls = savage_damage_rolls or []
         self.advantage_damage_rolls = advantage_damage_rolls or []
         self.superiority_rolls = superiority_rolls or []
+        self.concentration_rolls = concentration_rolls or []
 
 
 @dataclass
@@ -103,6 +107,15 @@ class DamageApplicationResult:
     undead_fortitude_bypass_reason: str | None = None
     damage_prevented: int = 0
     damage_mitigation_source: str | None = None
+    concentration_save_rolls: list[int] | None = None
+    concentration_save_total: int | None = None
+    concentration_save_dc: int | None = None
+    concentration_save_success: bool | None = None
+    concentration_spell_id: str | None = None
+    concentration_ended: bool = False
+    concentration_bless_rolls: list[int] | None = None
+    concentration_bless_bonus: int = 0
+    concentration_bless_source_id: str | None = None
 
 
 class ResolveAttackArgs:
@@ -294,9 +307,21 @@ def unit_has_combat_spell(unit: UnitState, spell_id: str) -> bool:
     return spell_id in unit.combat_cantrip_ids or spell_id in unit.prepared_combat_spell_ids
 
 
+def get_spellcasting_ability(unit: UnitState) -> str:
+    if unit.class_id == "paladin":
+        return "cha"
+    return "int"
+
+
+def resolve_spell_ability(unit: UnitState, ability: str | None) -> str:
+    if ability == "spellcasting" or ability is None:
+        return get_spellcasting_ability(unit)
+    return ability
+
+
 def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProfile:
     spell = get_spell_definition(spell_id)
-    spell_attack_bonus = 2 + get_ability_modifier(attacker, spell.attack_ability or "int")
+    spell_attack_bonus = 2 + get_ability_modifier(attacker, resolve_spell_ability(attacker, spell.attack_ability))
     is_melee_spell = spell.targeting_mode == "melee_spell_attack"
     return WeaponProfile(
         id=spell_id,
@@ -314,7 +339,7 @@ def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProf
 
 def get_spell_save_dc(caster: UnitState, spell_id: str) -> int:
     spell = get_spell_definition(spell_id)
-    return 8 + 2 + get_ability_modifier(caster, spell.attack_ability or "int")
+    return 8 + 2 + get_ability_modifier(caster, resolve_spell_ability(caster, spell.attack_ability))
 
 
 def unit_has_no_reactions_effect(unit: UnitState) -> bool:
@@ -327,6 +352,70 @@ def unit_has_shield_effect(unit: UnitState) -> bool:
 
 def get_shield_ac_bonus(unit: UnitState) -> int:
     return sum(effect.ac_bonus for effect in unit.temporary_effects if effect.kind == "shield")
+
+
+def get_active_concentration_effect(unit: UnitState, spell_id: str | None = None) -> ConcentrationEffect | None:
+    for effect in unit.temporary_effects:
+        if effect.kind != "concentration":
+            continue
+        if spell_id is not None and effect.spell_id != spell_id:
+            continue
+        return effect
+    return None
+
+
+def unit_is_concentrating_on(unit: UnitState, spell_id: str) -> bool:
+    return get_active_concentration_effect(unit, spell_id) is not None
+
+
+def get_active_bless_effect(state: EncounterState, unit: UnitState) -> BlessedEffect | None:
+    for effect in unit.temporary_effects:
+        if effect.kind != "blessed":
+            continue
+        source = state.units.get(effect.source_id)
+        if source and unit_is_concentrating_on(source, "bless"):
+            return effect
+    return None
+
+
+def roll_bless_bonus(
+    state: EncounterState,
+    unit: UnitState,
+    override_roll: int | None = None,
+) -> tuple[int, list[int], str | None]:
+    bless_effect = get_active_bless_effect(state, unit)
+    if not bless_effect:
+        return 0, [], None
+    roll = pull_die(state, 4, override_roll)
+    return roll, [roll], bless_effect.source_id
+
+
+def end_concentration(state: EncounterState, caster_id: str, *, reason: str | None = None) -> list[str]:
+    caster = state.units.get(caster_id)
+    if not caster:
+        return []
+    concentration_effects = [effect for effect in caster.temporary_effects if effect.kind == "concentration"]
+    if not concentration_effects:
+        return []
+
+    spell_ids = {effect.spell_id for effect in concentration_effects}
+    caster.temporary_effects = [effect for effect in caster.temporary_effects if effect.kind != "concentration"]
+    removed_blessed_targets: list[str] = []
+    if "bless" in spell_ids:
+        for unit in state.units.values():
+            original_count = len(unit.temporary_effects)
+            unit.temporary_effects = [
+                effect
+                for effect in unit.temporary_effects
+                if not (effect.kind == "blessed" and effect.source_id == caster_id)
+            ]
+            if len(unit.temporary_effects) != original_count:
+                removed_blessed_targets.append(unit.id)
+
+    summary = reason or f"{caster_id}'s concentration ends."
+    if removed_blessed_targets:
+        summary = f"{summary} Bless ends on {', '.join(sorted(removed_blessed_targets, key=unit_sort_key))}."
+    return [summary]
 
 
 def has_danger_sense(unit: UnitState) -> bool:
@@ -356,6 +445,36 @@ def get_base_weapon_damage_components(weapon: WeaponProfile):
             damage_modifier=weapon.damage_modifier,
         )
     ]
+
+
+def choose_selectable_damage_type(selectable_damage_types: list[str], target: UnitState) -> str:
+    vulnerable_choices: list[str] = []
+    unmitigated_choices: list[str] = []
+    nonimmune_choices: list[str] = []
+
+    for damage_type in selectable_damage_types:
+        immune, resistant, vulnerable = get_damage_defense_flags(target, damage_type)
+        if vulnerable and not resistant and not immune:
+            vulnerable_choices.append(damage_type)
+        if not immune and not resistant:
+            unmitigated_choices.append(damage_type)
+        if not immune:
+            nonimmune_choices.append(damage_type)
+
+    if vulnerable_choices:
+        return vulnerable_choices[0]
+    if unmitigated_choices:
+        return unmitigated_choices[0]
+    if nonimmune_choices:
+        return nonimmune_choices[0]
+    return selectable_damage_types[0]
+
+
+def resolve_selectable_damage_weapon(weapon: WeaponProfile, target: UnitState) -> WeaponProfile:
+    if not weapon.selectable_damage_types:
+        return weapon
+    selected_damage_type = choose_selectable_damage_type(weapon.selectable_damage_types, target)
+    return weapon.model_copy(update={"damage_type": selected_damage_type})
 
 
 def weapon_qualifies_for_sneak_attack(weapon: WeaponProfile) -> bool:
@@ -779,6 +898,34 @@ def expire_turn_effects(state: EncounterState, actor_id: str) -> list[CombatEven
             )
         )
 
+    actor = state.units.get(actor_id)
+    concentration = get_active_concentration_effect(actor) if actor else None
+    if concentration:
+        concentration.remaining_rounds -= 1
+        if concentration.remaining_rounds <= 0:
+            condition_deltas = end_concentration(
+                state,
+                actor_id,
+                reason=f"{actor_id}'s concentration on {concentration.spell_id} ends after reaching its duration limit.",
+            )
+            events.append(
+                CombatEvent(
+                    **event_base(state, actor_id),
+                    target_ids=[actor_id],
+                    event_type="effect_expired",
+                    raw_rolls={},
+                    resolved_totals={
+                        "expiredCount": 1,
+                        "unitId": actor_id,
+                        "spellId": concentration.spell_id,
+                    },
+                    movement_details=None,
+                    damage_details=None,
+                    condition_deltas=condition_deltas,
+                    text_summary=f"{actor_id}'s concentration on {concentration.spell_id} expires.",
+                )
+            )
+
     return events
 
 
@@ -832,27 +979,35 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
         selected_roll = save_rolls[0]
 
     modifier = get_ability_modifier(actor, args.ability)
-    total = selected_roll + modifier
+    bless_bonus, bless_rolls, bless_source_id = roll_bless_bonus(state, actor)
+    total = selected_roll + modifier + bless_bonus
     success = total >= args.dc
+    raw_rolls = {
+        "savingThrowRolls": save_rolls,
+        "advantageSources": advantage_sources,
+        "disadvantageSources": disadvantage_sources,
+    }
+    if bless_rolls:
+        raw_rolls["blessRolls"] = bless_rolls
+    resolved_totals = {
+        "ability": args.ability,
+        "saveMode": mode,
+        "selectedRoll": selected_roll,
+        "modifier": modifier,
+        "total": total,
+        "dc": args.dc,
+        "success": success,
+    }
+    if bless_bonus:
+        resolved_totals["blessBonus"] = bless_bonus
+        resolved_totals["blessSourceId"] = bless_source_id
 
     return CombatEvent(
         **event_base(state, args.actor_id),
         target_ids=[args.actor_id],
         event_type="saving_throw",
-        raw_rolls={
-            "savingThrowRolls": save_rolls,
-            "advantageSources": advantage_sources,
-            "disadvantageSources": disadvantage_sources,
-        },
-        resolved_totals={
-            "ability": args.ability,
-            "saveMode": mode,
-            "selectedRoll": selected_roll,
-            "modifier": modifier,
-            "total": total,
-            "dc": args.dc,
-            "success": success,
-        },
+        raw_rolls=raw_rolls,
+        resolved_totals=resolved_totals,
         movement_details=None,
         damage_details=None,
         condition_deltas=[],
@@ -962,6 +1117,64 @@ def resolve_death_save(state: EncounterState, actor_id: str, override_roll: int 
     )
 
 
+def units_are_touch_reachable(state: EncounterState, actor_id: str, target_id: str) -> bool:
+    if actor_id == target_id:
+        return True
+    actor = state.units[actor_id]
+    target = state.units[target_id]
+    if not actor.position or not target.position:
+        return False
+    return (
+        get_min_chebyshev_distance_between_footprints(
+            actor.position,
+            get_unit_footprint(actor),
+            target.position,
+            get_unit_footprint(target),
+        )
+        <= 1
+    )
+
+
+def units_are_within_spell_range(state: EncounterState, actor_id: str, target_id: str, range_feet: int) -> bool:
+    if actor_id == target_id:
+        return True
+    actor = state.units[actor_id]
+    target = state.units[target_id]
+    if not actor.position or not target.position:
+        return False
+    return (
+        get_min_chebyshev_distance_between_footprints(
+            actor.position,
+            get_unit_footprint(actor),
+            target.position,
+            get_unit_footprint(target),
+        )
+        <= range_feet // 5
+    )
+
+
+def apply_healing_to_unit(target: UnitState, healing_total: int) -> tuple[int, list[str]]:
+    if target.conditions.dead or healing_total <= 0:
+        return 0, []
+
+    healed = min(target.max_hp - target.current_hp, healing_total)
+    if healed <= 0:
+        return 0, []
+
+    was_downed = target.current_hp == 0
+    target.current_hp += healed
+    condition_deltas: list[str] = []
+    if was_downed:
+        target.conditions.unconscious = False
+        target.conditions.prone = False
+        target.stable = False
+        target.death_save_failures = 0
+        target.death_save_successes = 0
+        condition_deltas.append(f"{target.id} returns to consciousness.")
+
+    return healed, condition_deltas
+
+
 def attempt_second_wind(state: EncounterState, actor_id: str, override_roll: int | None = None) -> CombatEvent | None:
     actor = state.units[actor_id]
     if not unit_has_feature(actor, "second_wind") or actor.resources.second_wind_uses <= 0 or actor.current_hp <= 0:
@@ -986,6 +1199,51 @@ def attempt_second_wind(state: EncounterState, actor_id: str, override_roll: int
         damage_details=None,
         condition_deltas=[],
         text_summary=f"{actor_id} uses Second Wind and regains {healed} HP.",
+    )
+
+
+def attempt_lay_on_hands(state: EncounterState, actor_id: str, target_id: str | None = None) -> CombatEvent:
+    actor = state.units[actor_id]
+    resolved_target_id = target_id or actor_id
+    target = state.units.get(resolved_target_id)
+    if not target:
+        return create_skip_event(state, actor_id, "Lay on Hands target is unavailable.")
+    if not unit_has_feature(actor, "lay_on_hands"):
+        return create_skip_event(state, actor_id, "Lay on Hands is not available.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return create_skip_event(state, actor_id, "Cannot use Lay on Hands while down.")
+    if target.conditions.dead:
+        return create_skip_event(state, actor_id, "Lay on Hands cannot restore a dead target.")
+    if actor.resources.lay_on_hands_points <= 0:
+        return create_skip_event(state, actor_id, "No Lay on Hands points remain.")
+    if not units_are_touch_reachable(state, actor_id, resolved_target_id):
+        return create_skip_event(state, actor_id, "Lay on Hands target is not within touch range.")
+
+    if target.current_hp == 0:
+        intended_healing = 1
+    else:
+        intended_healing = max(1, (target.max_hp + 4) // 5)
+    healing_total = min(intended_healing, target.max_hp - target.current_hp, actor.resources.lay_on_hands_points)
+    if healing_total <= 0:
+        return create_skip_event(state, actor_id, "Lay on Hands target does not need healing.")
+
+    actor.resources.lay_on_hands_points -= healing_total
+    healed, condition_deltas = apply_healing_to_unit(target, healing_total)
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[resolved_target_id],
+        event_type="heal",
+        raw_rolls={},
+        resolved_totals={
+            "healingTotal": healed,
+            "currentHp": target.current_hp,
+            "layOnHandsPointsRemaining": actor.resources.lay_on_hands_points,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=condition_deltas,
+        text_summary=f"{actor_id} uses Lay on Hands on {resolved_target_id}, restoring {healed} HP.",
     )
 
 
@@ -1319,6 +1577,79 @@ def maybe_apply_uncanny_dodge(
     return reduced_damage, incoming_damage - reduced_damage, "uncanny_dodge"
 
 
+def resolve_concentration_after_damage(
+    state: EncounterState,
+    target_id: str,
+    damage_to_hp: int,
+    override_rolls: list[int] | None = None,
+) -> tuple[dict[str, object], list[str]]:
+    target = state.units[target_id]
+    concentration = get_active_concentration_effect(target)
+    if not concentration or damage_to_hp <= 0:
+        return {}, []
+
+    if target.conditions.dead or target.conditions.unconscious or target.current_hp <= 0:
+        condition_deltas = end_concentration(
+            state,
+            target_id,
+            reason=f"{target_id}'s concentration on {concentration.spell_id} ends because they are down.",
+        )
+        return {"concentrationSpellId": concentration.spell_id, "concentrationEnded": True}, condition_deltas
+
+    roll_queue = override_rolls or []
+    concentration_roll = pull_die(state, 20, roll_queue.pop(0) if roll_queue else None)
+    bless_override = roll_queue.pop(0) if roll_queue else None
+    bless_bonus, bless_rolls, bless_source_id = roll_bless_bonus(state, target, bless_override)
+    dc = max(10, damage_to_hp // 2)
+    total = concentration_roll + get_ability_modifier(target, "con") + bless_bonus
+    success = total >= dc
+    data: dict[str, object] = {
+        "concentrationSpellId": concentration.spell_id,
+        "concentrationSaveRolls": [concentration_roll],
+        "concentrationSaveDc": dc,
+        "concentrationSaveTotal": total,
+        "concentrationSaveSuccess": success,
+        "concentrationEnded": not success,
+    }
+    if bless_rolls:
+        data["concentrationBlessRolls"] = bless_rolls
+        data["concentrationBlessBonus"] = bless_bonus
+        data["concentrationBlessSourceId"] = bless_source_id
+
+    if success:
+        return data, [f"{target_id} maintains concentration on {concentration.spell_id}."]
+
+    condition_deltas = [f"{target_id} fails concentration on {concentration.spell_id}."]
+    condition_deltas.extend(
+        end_concentration(
+            state,
+            target_id,
+            reason=f"{target_id}'s concentration on {concentration.spell_id} ends.",
+        )
+    )
+    return data, condition_deltas
+
+
+def attach_damage_result_event_fields(
+    raw_rolls: dict[str, object],
+    resolved_totals: dict[str, object],
+    damage_result: DamageApplicationResult,
+) -> None:
+    if damage_result.concentration_save_rolls:
+        raw_rolls["concentrationSaveRolls"] = damage_result.concentration_save_rolls
+    if damage_result.concentration_bless_rolls:
+        raw_rolls["concentrationBlessRolls"] = damage_result.concentration_bless_rolls
+    if damage_result.concentration_spell_id:
+        resolved_totals["concentrationSpellId"] = damage_result.concentration_spell_id
+        resolved_totals["concentrationSaveDc"] = damage_result.concentration_save_dc
+        resolved_totals["concentrationSaveTotal"] = damage_result.concentration_save_total
+        resolved_totals["concentrationSaveSuccess"] = damage_result.concentration_save_success
+        resolved_totals["concentrationEnded"] = damage_result.concentration_ended
+        if damage_result.concentration_bless_bonus:
+            resolved_totals["concentrationBlessBonus"] = damage_result.concentration_bless_bonus
+            resolved_totals["concentrationBlessSourceId"] = damage_result.concentration_bless_source_id
+
+
 def apply_damage(
     state: EncounterState,
     target_id: str,
@@ -1327,6 +1658,7 @@ def apply_damage(
     *,
     attacker_id: str | None = None,
     attack_roll_damage: bool = False,
+    concentration_save_rolls: list[int] | None = None,
 ) -> DamageApplicationResult:
     target = state.units[target_id]
     previous_hp = target.current_hp
@@ -1568,6 +1900,14 @@ def apply_damage(
             condition_deltas.append(f"{target_id} drops to 0 HP and falls unconscious.")
             condition_deltas.extend(end_rage(target, reason=f"{target_id}'s rage ends."))
 
+    concentration_data, concentration_deltas = resolve_concentration_after_damage(
+        state,
+        target_id,
+        final_damage_to_hp,
+        concentration_save_rolls,
+    )
+    condition_deltas.extend(concentration_deltas)
+
     return DamageApplicationResult(
         hp_delta=target.current_hp - previous_hp,
         condition_deltas=condition_deltas,
@@ -1582,6 +1922,15 @@ def apply_damage(
         undead_fortitude_bypass_reason=undead_fortitude_bypass_reason,
         damage_prevented=damage_prevented,
         damage_mitigation_source=damage_mitigation_source,
+        concentration_save_rolls=concentration_data.get("concentrationSaveRolls"),
+        concentration_save_total=concentration_data.get("concentrationSaveTotal"),
+        concentration_save_dc=concentration_data.get("concentrationSaveDc"),
+        concentration_save_success=concentration_data.get("concentrationSaveSuccess"),
+        concentration_spell_id=concentration_data.get("concentrationSpellId"),
+        concentration_ended=bool(concentration_data.get("concentrationEnded", False)),
+        concentration_bless_rolls=concentration_data.get("concentrationBlessRolls"),
+        concentration_bless_bonus=int(concentration_data.get("concentrationBlessBonus", 0)),
+        concentration_bless_source_id=concentration_data.get("concentrationBlessSourceId"),
     )
 
 
@@ -2096,6 +2445,7 @@ def resolve_ranged_spell_attack(
     overrides = AttackRollOverrides(
         attack_rolls=list(overrides.attack_rolls if overrides else []),
         damage_rolls=list(overrides.damage_rolls if overrides else []),
+        concentration_rolls=list(overrides.concentration_rolls if overrides else []),
     )
 
     vex_available = has_vex_effect(attacker, target_id)
@@ -2120,7 +2470,8 @@ def resolve_ranged_spell_attack(
     vex_consumed = consume_vex_effect(attacker, target_id) if vex_available else False
     harried_consumed = consume_harried_effect(target) if harried_available else False
     sap_consumed = consume_sap_effects(attacker)
-    attack_total = selected_roll + weapon.attack_bonus
+    bless_bonus, bless_rolls, bless_source_id = roll_bless_bonus(state, attacker)
+    attack_total = selected_roll + weapon.attack_bonus + bless_bonus
     natural_one = selected_roll == 1
     natural_twenty = selected_roll == 20
     resolved_target_id = target_id
@@ -2207,6 +2558,7 @@ def resolve_ranged_spell_attack(
             critical,
             attacker_id=attacker_id,
             attack_roll_damage=True,
+            concentration_save_rolls=overrides.concentration_rolls,
         )
         total_damage = sum(component.total_damage for component in final_damage_components)
         resisted_damage = damage_result.resisted_damage
@@ -2271,16 +2623,24 @@ def resolve_ranged_spell_attack(
         resolved_totals["defenseReactionActorId"] = resolved_target_id
         resolved_totals["uncannyDodgeDamagePrevented"] = damage_prevented
         resolved_totals["damageAfterUncannyDodge"] = final_total_damage
+    if bless_bonus:
+        resolved_totals["blessBonus"] = bless_bonus
+        resolved_totals["blessSourceId"] = bless_source_id
+    raw_rolls = {
+        "attackRolls": attack_rolls,
+        "advantageSources": advantage_sources,
+        "disadvantageSources": disadvantage_sources,
+    }
+    if bless_rolls:
+        raw_rolls["blessRolls"] = bless_rolls
+    if hit:
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
 
     return CombatEvent(
         **event_base(state, attacker_id),
         target_ids=[resolved_target_id],
         event_type="attack",
-        raw_rolls={
-            "attackRolls": attack_rolls,
-            "advantageSources": advantage_sources,
-            "disadvantageSources": disadvantage_sources,
-        },
+        raw_rolls=raw_rolls,
         resolved_totals=resolved_totals,
         movement_details=None,
         damage_details=DamageDetails(
@@ -2356,29 +2716,41 @@ def resolve_magic_missile(
     if blocked_by_shield:
         condition_deltas.append(f"{target_id}'s Shield blocks Magic Missile.")
     else:
-        damage_overrides = AttackRollOverrides(damage_rolls=list(overrides.damage_rolls if overrides else []))
+        damage_overrides = AttackRollOverrides(
+            damage_rolls=list(overrides.damage_rolls if overrides else []),
+            concentration_rolls=list(overrides.concentration_rolls if overrides else []),
+        )
         primary_candidate = roll_damage_candidate(state, weapon, damage_overrides.damage_rolls)
         final_damage_components = build_final_damage_components(primary_candidate, None, 1)
-        damage_result = apply_damage(state, target_id, final_damage_components, False)
+        damage_result = apply_damage(
+            state,
+            target_id,
+            final_damage_components,
+            False,
+            concentration_save_rolls=damage_overrides.concentration_rolls,
+        )
         total_damage = sum(component.total_damage for component in final_damage_components)
         condition_deltas = list(damage_result.condition_deltas)
+    raw_rolls = {"damageRolls": primary_candidate.raw_rolls if primary_candidate else []}
+    resolved_totals = {
+        "spellId": "magic_missile",
+        "spellLevel": 1,
+        "hit": True,
+        "critical": False,
+        "distanceSquares": attack_context.distance_squares,
+        "distanceFeet": attack_context.distance_feet,
+        "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+        "blockedByShield": blocked_by_shield,
+        **(defense_reaction_data or {}),
+    }
+    attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
 
     return CombatEvent(
         **event_base(state, attacker_id),
         target_ids=[target_id],
         event_type="attack",
-        raw_rolls={"damageRolls": primary_candidate.raw_rolls if primary_candidate else []},
-        resolved_totals={
-            "spellId": "magic_missile",
-            "spellLevel": 1,
-            "hit": True,
-            "critical": False,
-            "distanceSquares": attack_context.distance_squares,
-            "distanceFeet": attack_context.distance_feet,
-            "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
-            "blockedByShield": blocked_by_shield,
-            **(defense_reaction_data or {}),
-        },
+        raw_rolls=raw_rolls,
+        resolved_totals=resolved_totals,
         movement_details=None,
         damage_details=DamageDetails(
             weapon_id="magic_missile",
@@ -2453,6 +2825,7 @@ def resolve_burning_hands(
 
     damage_rolls_override = list(overrides.damage_rolls if overrides else [])
     save_rolls_override = list(overrides.save_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
     damage_rolls = [pull_die(state, 6, damage_rolls_override.pop(0) if damage_rolls_override else None) for _ in range(3)]
     full_damage = sum(damage_rolls)
     save_dc = get_spell_save_dc(attacker, "burning_hands")
@@ -2500,23 +2873,32 @@ def resolve_burning_hands(
         save_success = bool(save_event.resolved_totals["success"])
         applied_damage = full_damage // 2 if save_success and spell.half_on_success else full_damage
         damage_components = build_burning_hands_damage_component(damage_rolls, applied_damage, spell.damage_type)
-        damage_result = apply_damage(state, resolved_target_id, damage_components, False)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            damage_components,
+            False,
+            concentration_save_rolls=concentration_rolls_override,
+        )
         events.append(save_event)
+        raw_rolls = {"damageRolls": list(damage_rolls)}
+        resolved_totals = {
+            "spellId": "burning_hands",
+            "spellLevel": 1,
+            "saveAbility": spell.save_ability,
+            "saveDc": save_dc,
+            "saveSucceeded": save_success,
+            "fullDamage": full_damage,
+            "halfOnSuccess": spell.half_on_success,
+        }
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
         events.append(
             CombatEvent(
                 **event_base(state, attacker_id),
                 target_ids=[resolved_target_id],
                 event_type="attack",
-                raw_rolls={"damageRolls": list(damage_rolls)},
-                resolved_totals={
-                    "spellId": "burning_hands",
-                    "spellLevel": 1,
-                    "saveAbility": spell.save_ability,
-                    "saveDc": save_dc,
-                    "saveSucceeded": save_success,
-                    "fullDamage": full_damage,
-                    "halfOnSuccess": spell.half_on_success,
-                },
+                raw_rolls=raw_rolls,
+                resolved_totals=resolved_totals,
                 movement_details=None,
                 damage_details=DamageDetails(
                     weapon_id="burning_hands",
@@ -2552,6 +2934,145 @@ def resolve_burning_hands(
     return events
 
 
+def get_legal_bless_target_ids(state: EncounterState, actor_id: str, target_ids: list[str]) -> list[str]:
+    actor = state.units[actor_id]
+    spell = get_spell_definition("bless")
+    legal_target_ids: list[str] = []
+    seen_target_ids: set[str] = set()
+
+    for target_id in target_ids:
+        if target_id in seen_target_ids:
+            continue
+        seen_target_ids.add(target_id)
+        target = state.units.get(target_id)
+        if not target:
+            continue
+        if target.faction != actor.faction or target.conditions.dead:
+            continue
+        if not units_are_within_spell_range(state, actor_id, target_id, spell.range_feet):
+            continue
+        legal_target_ids.append(target_id)
+        if len(legal_target_ids) >= spell.max_targets:
+            break
+
+    return legal_target_ids
+
+
+def resolve_bless(state: EncounterState, actor_id: str, target_ids: list[str]) -> CombatEvent:
+    actor = state.units[actor_id]
+    spell = get_spell_definition("bless")
+
+    if not unit_has_combat_spell(actor, "bless"):
+        return build_spell_skip_event(state, actor_id, "bless", "is not prepared.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return build_spell_skip_event(state, actor_id, "bless", "cannot be cast while down.")
+
+    legal_target_ids = get_legal_bless_target_ids(state, actor_id, target_ids)
+    if not legal_target_ids:
+        return build_spell_skip_event(state, actor_id, "bless", "has no legal targets.")
+    if not actor.resources.spend_pool("spell_slots_level_1", 1):
+        return build_spell_skip_event(state, actor_id, "bless", "No level 1 spell slots remain.")
+
+    condition_deltas = end_concentration(
+        state,
+        actor_id,
+        reason=f"{actor_id}'s prior concentration ends before casting {spell.display_name}.",
+    )
+    actor.temporary_effects.append(
+        ConcentrationEffect(
+            kind="concentration",
+            source_id=actor_id,
+            spell_id="bless",
+            remaining_rounds=spell.duration_rounds,
+        )
+    )
+
+    for target_id in legal_target_ids:
+        target = state.units[target_id]
+        target.temporary_effects = [
+            effect
+            for effect in target.temporary_effects
+            if not (effect.kind == "blessed" and effect.source_id == actor_id)
+        ]
+        target.temporary_effects.append(BlessedEffect(kind="blessed", source_id=actor_id))
+
+    condition_deltas.append(f"{actor_id} blesses {', '.join(legal_target_ids)}.")
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=legal_target_ids,
+        event_type="phase_change",
+        raw_rolls={},
+        resolved_totals={
+            "spellId": "bless",
+            "spellLevel": spell.level,
+            "concentration": True,
+            "durationRounds": spell.duration_rounds,
+            "blessedTargetIds": legal_target_ids,
+            "spellSlotsLevel1Remaining": actor.resources.spell_slots_level_1,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=condition_deltas,
+        text_summary=f"{actor_id} casts {spell.display_name} on {', '.join(legal_target_ids)}.",
+    )
+
+
+def resolve_cure_wounds(
+    state: EncounterState,
+    actor_id: str,
+    target_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> CombatEvent:
+    actor = state.units[actor_id]
+    target = state.units.get(target_id)
+    spell = get_spell_definition("cure_wounds")
+
+    if not unit_has_combat_spell(actor, "cure_wounds"):
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "is not prepared.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "cannot be cast while down.")
+    if not target:
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "target is unavailable.")
+    if target.faction != actor.faction or target.conditions.dead:
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "target is not a living ally.")
+    if not units_are_touch_reachable(state, actor_id, target_id):
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "target is not within touch range.")
+    if target.current_hp >= target.max_hp:
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "target does not need healing.")
+    if not actor.resources.spend_pool("spell_slots_level_1", 1):
+        return build_spell_skip_event(state, actor_id, "cure_wounds", "No level 1 spell slots remain.")
+
+    healing_roll_overrides = list(overrides.damage_rolls if overrides else [])
+    healing_rolls = [
+        pull_die(state, dice.sides, healing_roll_overrides.pop(0) if healing_roll_overrides else None)
+        for dice in spell.healing_dice
+        for _ in range(dice.count)
+    ]
+    healing_modifier = get_ability_modifier(actor, resolve_spell_ability(actor, spell.healing_modifier_ability))
+    healing_total = sum(healing_rolls) + healing_modifier
+    healed, condition_deltas = apply_healing_to_unit(target, healing_total)
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[target_id],
+        event_type="heal",
+        raw_rolls={"healingRolls": healing_rolls},
+        resolved_totals={
+            "spellId": "cure_wounds",
+            "spellLevel": spell.level,
+            "healingModifier": healing_modifier,
+            "healingTotal": healed,
+            "currentHp": target.current_hp,
+            "spellSlotsLevel1Remaining": actor.resources.spell_slots_level_1,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=condition_deltas,
+        text_summary=f"{actor_id} casts {spell.display_name} on {target_id}, restoring {healed} HP.",
+    )
+
+
 def resolve_cast_spell(
     state: EncounterState,
     actor_id: str,
@@ -2572,6 +3093,10 @@ def resolve_cast_spell(
         return resolve_ranged_spell_attack(state, actor_id, target_id, spell_id, overrides)
     if spell.targeting_mode == "auto_hit_single_target":
         return resolve_magic_missile(state, actor_id, target_id, overrides)
+    if spell.targeting_mode == "multi_ally_buff":
+        return resolve_bless(state, actor_id, [target_id])
+    if spell.targeting_mode == "touch_heal":
+        return resolve_cure_wounds(state, actor_id, target_id, overrides)
 
     return build_spell_skip_event(state, actor_id, spell_id, "cannot be resolved by the live simulator.")
 
@@ -2599,6 +3124,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         savage_damage_rolls=list(args.overrides.savage_damage_rolls if args.overrides else []),
         advantage_damage_rolls=list(args.overrides.advantage_damage_rolls if args.overrides else []),
         superiority_rolls=list(args.overrides.superiority_rolls if args.overrides else []),
+        concentration_rolls=list(args.overrides.concentration_rolls if args.overrides else []),
     )
 
     target = state.units[args.target_id]
@@ -2625,6 +3151,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     mode, advantage_sources, disadvantage_sources = get_attack_mode(
         state, attacker, args.attacker_id, target, args.target_id, weapon
     )
+    bless_bonus, bless_rolls, bless_source_id = roll_bless_bonus(state, attacker)
 
     if mode == "normal":
         attack_rolls = [pull_die(state, 20, overrides.attack_rolls.pop(0) if overrides.attack_rolls else None)]
@@ -2648,7 +3175,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     harried_consumed = consume_harried_effect(target) if harried_available else False
 
     sap_consumed = consume_sap_effects(attacker)
-    attack_total = selected_roll + weapon.attack_bonus
+    attack_total = selected_roll + weapon.attack_bonus + bless_bonus
     natural_one = selected_roll == 1
     natural_twenty = selected_roll == 20
     resolved_target_id = args.target_id
@@ -2788,6 +3315,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         attacker._steady_aim_active_this_turn = False
 
     if hit:
+        weapon = resolve_selectable_damage_weapon(weapon, target)
         # Great Weapon Fighting is applied before Savage Attacker chooses the better damage candidate.
         apply_gwf = weapon.kind == "melee" and weapon.two_handed is True
         primary_candidate = roll_damage_candidate(
@@ -2954,6 +3482,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             critical,
             attacker_id=args.attacker_id,
             attack_roll_damage=True,
+            concentration_save_rolls=overrides.concentration_rolls,
         )
         hp_delta = damage_result.hp_delta
         resisted_damage = damage_result.resisted_damage
@@ -3055,7 +3584,13 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                 total_damage=total_damage,
             )
         ]
-        damage_result = apply_damage(state, resolved_target_id, final_damage_components, False)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            final_damage_components,
+            False,
+            concentration_save_rolls=overrides.concentration_rolls,
+        )
         hp_delta = damage_result.hp_delta
         resisted_damage = damage_result.resisted_damage
         amplified_damage = damage_result.amplified_damage
@@ -3141,6 +3676,9 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         resolved_totals["defenseReactionActorId"] = resolved_target_id
         resolved_totals["uncannyDodgeDamagePrevented"] = damage_prevented
         resolved_totals["damageAfterUncannyDodge"] = final_total_damage
+    if bless_bonus:
+        resolved_totals["blessBonus"] = bless_bonus
+        resolved_totals["blessSourceId"] = bless_source_id
     if cunning_strike_id:
         resolved_totals["cunningStrikeId"] = cunning_strike_id
         resolved_totals["cunningStrikeCostD6"] = cunning_strike_cost_d6
@@ -3171,12 +3709,16 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     }
     if attack_context.sharpshooter_ignored_disadvantage_sources:
         raw_rolls["sharpshooterIgnoredDisadvantageSources"] = attack_context.sharpshooter_ignored_disadvantage_sources
+    if bless_rolls:
+        raw_rolls["blessRolls"] = bless_rolls
     if maneuver_id or precision_maneuver_applied:
         raw_rolls["superiorityDiceRolls"] = superiority_dice_rolls
     if maneuver_save_rolls:
         raw_rolls["maneuverSaveRolls"] = maneuver_save_rolls
     if cunning_strike_save_rolls:
         raw_rolls["cunningStrikeSaveRolls"] = cunning_strike_save_rolls
+    if final_damage_components:
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
 
     event = CombatEvent(
         **event_base(state, args.attacker_id),

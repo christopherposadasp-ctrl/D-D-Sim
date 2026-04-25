@@ -3043,6 +3043,7 @@ def create_enemy(unit_id: str, variant_id: str) -> UnitState:
             focus_points=0,
             uncanny_metabolism_uses=0,
             spell_slots_level_1=0,
+            lay_on_hands_points=0,
         ),
         temporary_effects=[],
         reaction_available=True,

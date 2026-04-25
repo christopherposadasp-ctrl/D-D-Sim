@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from backend.content.enemies import get_monster_definition_for_unit, unit_has_bonus_action, unit_has_trait
+from backend.content.enemies import create_enemy, get_monster_definition_for_unit, unit_has_bonus_action, unit_has_trait
 from backend.engine import create_encounter
 from backend.engine.ai.decision import (
     can_intentionally_provoke_opportunity_attack,
     choose_turn_decision,
     get_ranked_attack_targets,
 )
-from backend.engine.combat.engine import clear_turn_flags, resolve_attack_action
+from backend.engine.combat.engine import clear_turn_flags, execute_decision, resolve_attack_action
 from backend.engine.constants import ARCHER_GOBLIN_IDS, DEFAULT_POSITIONS, MELEE_GOBLIN_IDS
 from backend.engine.models.state import (
     EncounterConfig,
@@ -610,8 +610,75 @@ def test_dumb_wizard_does_not_reposition_specifically_for_burning_hands() -> Non
     assert decision.action["spell_id"] == "fire_bolt"
 
 
+def test_paladin_opens_with_bless_on_self_fighter_and_ranged_rogue() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-open-bless", placements=DEFAULT_POSITIONS))
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action["kind"] == "cast_spell"
+    assert decision.action["spell_id"] == "bless"
+    assert decision.action["target_ids"] == ["F2", "F1", "F3"]
+
+
+def test_paladin_trio_does_not_recast_redundant_bless() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-trio-bless-once",
+            placements=build_trio_placements(),
+            player_preset_id="paladin_level1_sample_trio",
+        )
+    )
+    first_decision = choose_turn_decision(encounter, "F1")
+    events: list = []
+    execute_decision(encounter, "F1", first_decision, events, rescue_mode=False)
+
+    second_decision = choose_turn_decision(encounter, "F2")
+
+    assert first_decision.action["spell_id"] == "bless"
+    assert second_decision.action.get("spell_id") != "bless"
+
+
+def test_paladin_uses_lay_on_hands_for_downed_adjacent_ally() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-downed-ally", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "before_action", "target_id": "F1"}
+    assert decision.action["kind"] == "skip"
+
+
+def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
+    melee = create_encounter(EncounterConfig(seed="paladin-melee", placements=DEFAULT_POSITIONS))
+    melee.units["F2"].resources.spell_slots_level_1 = 0
+    melee.units["F2"].position = GridPosition(x=4, y=5)
+    melee.units["G1"].position = GridPosition(x=5, y=5)
+
+    melee_decision = choose_turn_decision(melee, "F2")
+
+    assert melee_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "longsword"}
+
+    ranged = create_encounter(EncounterConfig(seed="paladin-ranged-fallback", placements=DEFAULT_POSITIONS))
+    ranged.units["F2"].resources.spell_slots_level_1 = 0
+    ranged.units["F2"].effective_speed = 0
+    ranged.units["G1"].position = GridPosition(x=5, y=8)
+
+    ranged_decision = choose_turn_decision(ranged, "F2")
+
+    assert ranged_decision.action["kind"] == "attack"
+    assert ranged_decision.action["weapon_id"] == "javelin"
+
+
 def test_barbarian_delays_rage_on_opening_dash_from_default_layout() -> None:
-    encounter = create_encounter(EncounterConfig(seed="barbarian-open-dash", placements=DEFAULT_POSITIONS))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="barbarian-open-dash",
+            placements=build_trio_placements(),
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
 
     decision = choose_turn_decision(encounter, "F2")
 
@@ -622,7 +689,13 @@ def test_barbarian_delays_rage_on_opening_dash_from_default_layout() -> None:
 
 
 def test_barbarian_prefers_greataxe_when_melee_is_reachable() -> None:
-    encounter = create_encounter(EncounterConfig(seed="barbarian-greataxe-first", placements=DEFAULT_POSITIONS))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="barbarian-greataxe-first",
+            placements=build_trio_placements(),
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
 
@@ -633,7 +706,13 @@ def test_barbarian_prefers_greataxe_when_melee_is_reachable() -> None:
 
 
 def test_barbarian_throws_handaxe_only_after_close_and_dash_fail() -> None:
-    encounter = create_encounter(EncounterConfig(seed="barbarian-handaxe-fallback", placements=DEFAULT_POSITIONS))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="barbarian-handaxe-fallback",
+            placements=build_trio_placements(),
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].position = GridPosition(x=1, y=1)
     encounter.units["G1"].position = GridPosition(x=8, y=1)
     encounter.units["F2"].effective_speed = 0
@@ -648,7 +727,14 @@ def test_barbarian_throws_handaxe_only_after_close_and_dash_fail() -> None:
 
 
 def test_smart_barbarian_commits_reckless_attack_on_an_eligible_greataxe_turn() -> None:
-    encounter = create_encounter(EncounterConfig(seed="smart-barbarian-reckless", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-barbarian-reckless",
+            placements=build_trio_placements(),
+            player_behavior="smart",
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
 
@@ -670,7 +756,14 @@ def test_smart_barbarian_commits_reckless_attack_on_an_eligible_greataxe_turn() 
 
 
 def test_dumb_barbarian_does_not_use_reckless_attack() -> None:
-    encounter = create_encounter(EncounterConfig(seed="dumb-barbarian-reckless", placements=DEFAULT_POSITIONS, player_behavior="dumb"))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="dumb-barbarian-reckless",
+            placements=build_trio_placements(),
+            player_behavior="dumb",
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
 
@@ -689,7 +782,14 @@ def test_dumb_barbarian_does_not_use_reckless_attack() -> None:
 
 
 def test_smart_barbarian_skips_reckless_attack_on_pure_handaxe_fallback_turns() -> None:
-    encounter = create_encounter(EncounterConfig(seed="smart-barbarian-no-reckless-handaxe", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-barbarian-no-reckless-handaxe",
+            placements=build_trio_placements(),
+            player_behavior="smart",
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].position = GridPosition(x=1, y=1)
     encounter.units["G1"].position = GridPosition(x=8, y=1)
     encounter.units["F2"].effective_speed = 0
@@ -709,7 +809,14 @@ def test_smart_barbarian_skips_reckless_attack_on_pure_handaxe_fallback_turns() 
 
 
 def test_smart_barbarian_skips_reckless_attack_when_first_melee_attack_already_has_advantage() -> None:
-    encounter = create_encounter(EncounterConfig(seed="smart-barbarian-no-reckless-advantage", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-barbarian-no-reckless-advantage",
+            placements=build_trio_placements(),
+            player_behavior="smart",
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
     encounter.units["G1"].conditions.prone = True
@@ -1130,12 +1237,26 @@ def test_balanced_monsters_deprioritize_hidden_rogues_when_a_visible_target_is_a
 
 
 def test_smart_barbarian_seeks_flanking_while_dumb_barbarian_does_not() -> None:
-    smart = create_encounter(EncounterConfig(seed="smart-barbarian-flank", placements=DEFAULT_POSITIONS, player_behavior="smart"))
+    smart = create_encounter(
+        EncounterConfig(
+            seed="smart-barbarian-flank",
+            placements=build_trio_placements(),
+            player_behavior="smart",
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     smart.units["F2"].position = GridPosition(x=3, y=5)
     smart.units["F1"].position = GridPosition(x=5, y=4)
     smart.units["G1"].position = GridPosition(x=5, y=5)
 
-    dumb = create_encounter(EncounterConfig(seed="dumb-barbarian-flank", placements=DEFAULT_POSITIONS, player_behavior="dumb"))
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="dumb-barbarian-flank",
+            placements=build_trio_placements(),
+            player_behavior="dumb",
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     dumb.units["F2"].position = GridPosition(x=3, y=5)
     dumb.units["F1"].position = GridPosition(x=5, y=4)
     dumb.units["G1"].position = GridPosition(x=5, y=5)
@@ -1149,7 +1270,13 @@ def test_smart_barbarian_seeks_flanking_while_dumb_barbarian_does_not() -> None:
 
 
 def test_raging_barbarian_uses_bonus_action_upkeep_when_no_attack_is_available() -> None:
-    encounter = create_encounter(EncounterConfig(seed="barbarian-rage-upkeep-ai", placements=DEFAULT_POSITIONS))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="barbarian-rage-upkeep-ai",
+            placements=build_trio_placements(),
+            player_preset_id="barbarian_level2_sample_trio",
+        )
+    )
     encounter.units["F2"].temporary_effects.append(
         RageEffect(kind="rage", source_id="F2", damage_bonus=2, remaining_rounds=99)
     )
@@ -1310,6 +1437,28 @@ def test_smart_ranged_rogue_keeps_backline_threat_priority_when_killability_matc
 
     decision = choose_turn_decision(encounter, "F1")
 
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+
+
+def test_smart_ranged_assassin_prioritizes_kobold_scale_sorcerer_caster_target() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-ranged-assassin-kobold-scale-sorcerer",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 6, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="rogue_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G2"] = create_enemy("G2", "kobold_scale_sorcerer")
+    encounter.units["G2"].position = GridPosition(x=8, y=1)
+    encounter.units["G1"].current_hp = 27
+    encounter.units["G1"].max_hp = 27
+    encounter.units["G1"].ac = 15
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert encounter.units["G2"].role_tags == ["caster"]
     assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
 
 

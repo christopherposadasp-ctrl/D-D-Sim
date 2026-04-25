@@ -40,6 +40,7 @@ from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
     attempt_hide,
+    attempt_lay_on_hands,
     attempt_patient_defense,
     attempt_second_wind,
     attempt_stabilize,
@@ -56,6 +57,7 @@ from backend.engine.rules.combat_rules import (
     pull_die,
     resolve_attack,
     resolve_burning_hands,
+    resolve_bless,
     resolve_cast_spell,
     resolve_death_save,
     resolve_poisoned_end_of_turn_save,
@@ -1541,6 +1543,12 @@ def resolve_cast_spell_action(
                     follow_up_events.extend(release_swallowed_units_from_source(state, target_id))
         return spell_events + follow_up_events
 
+    if spell.targeting_mode == "multi_ally_buff":
+        target_ids = action.get("target_ids")
+        if not isinstance(target_ids, list):
+            target_ids = [action["target_id"]]
+        return [resolve_bless(state, actor_id, [str(target_id) for target_id in target_ids])]
+
     spell_event = resolve_cast_spell(
         state,
         actor_id,
@@ -1770,6 +1778,8 @@ def resolve_bonus_action(
     actor = state.units[actor_id]
     if bonus_action["kind"] == "second_wind":
         return attempt_second_wind(state, actor_id)
+    if bonus_action["kind"] == "lay_on_hands":
+        return attempt_lay_on_hands(state, actor_id, bonus_action.get("target_id"))
     if bonus_action["kind"] == "rage":
         if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
             return create_skip_event(state, actor_id, "Cannot rage while down.")

@@ -31,6 +31,8 @@ from backend.engine.rules.combat_rules import (
     can_apply_assassinate_advantage,
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
+    choose_selectable_damage_type,
+    get_active_bless_effect,
     get_damage_defense_flags,
     get_rage_damage_bonus,
     get_shield_ac_bonus,
@@ -38,6 +40,7 @@ from backend.engine.rules.combat_rules import (
     has_harried_effect,
     has_vex_effect,
     target_is_grappled_by_attacker,
+    unit_is_concentrating_on,
     unit_has_reckless_attack_effect,
     unit_is_bloodied,
     unit_is_dodging,
@@ -63,7 +66,7 @@ from backend.engine.rules.spatial import (
     is_within_bounds,
     path_provokes_opportunity_attack,
 )
-from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions
+from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions, unit_sort_key
 
 
 SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN = 2
@@ -234,6 +237,10 @@ def is_player_monk(unit: UnitState) -> bool:
 
 def is_player_wizard(unit: UnitState) -> bool:
     return unit.class_id == "wizard" and unit.behavior_profile == "arcane_artillery"
+
+
+def is_player_paladin(unit: UnitState) -> bool:
+    return unit.class_id == "paladin" and unit.behavior_profile == "divine_guardian"
 
 
 def unit_is_raging(unit: UnitState) -> bool:
@@ -782,7 +789,7 @@ def get_enemy_melee_weapon_id(actor: UnitState) -> AttackId:
 
 
 def get_enemy_ranged_weapon_id(actor: UnitState) -> AttackId:
-    preferred_order = ("longbow", "shortbow")
+    preferred_order = ("chromatic_bolt", "longbow", "shortbow")
     for weapon_id in preferred_order:
         weapon = actor.attacks.get(weapon_id)
         if weapon and weapon.kind == "ranged":
@@ -1014,6 +1021,9 @@ def get_average_on_hit_damage(
     attack_mode: AttackMode,
 ) -> float:
     components = get_weapon_base_damage_components(weapon)
+    if weapon.selectable_damage_types and not weapon.damage_components:
+        selected_damage_type = choose_selectable_damage_type(weapon.selectable_damage_types, target)
+        components = [(selected_damage_type, average_dice_total(weapon.damage_dice) + weapon.damage_modifier)]
     if attack_mode == "advantage":
         components.extend(get_weapon_advantage_damage_components(weapon))
 
@@ -2595,6 +2605,298 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     return TurnDecision(action={"kind": "skip", "reason": f"No legal spell or melee line remains against {nearest_target.id}."})
 
 
+def can_use_lay_on_hands(actor: UnitState) -> bool:
+    return can_use_player_bonus_action(actor, "lay_on_hands") and actor.resources.lay_on_hands_points > 0
+
+
+def is_blessed_by_active_source(state: EncounterState, unit: UnitState) -> bool:
+    return get_active_bless_effect(state, unit) is not None
+
+
+def can_target_bless_from_current_position(state: EncounterState, actor: UnitState, target: UnitState) -> bool:
+    return bool(
+        target.faction == actor.faction
+        and target.current_hp > 0
+        and not target.conditions.dead
+        and (target.id == actor.id or (actor.position and target.position and get_distance_between_units(actor, target) <= 6))
+    )
+
+
+def choose_paladin_bless_targets(state: EncounterState, actor: UnitState) -> list[str]:
+    preferred_units: list[UnitState] = []
+    allies = [unit for unit in get_units_by_faction(state, actor.faction) if unit.current_hp > 0 and not unit.conditions.dead]
+
+    def add_matching(predicate) -> None:
+        for ally in sorted(allies, key=lambda unit: unit_sort_key(unit.id)):
+            if ally in preferred_units or not predicate(ally):
+                continue
+            preferred_units.append(ally)
+
+    add_matching(lambda ally: ally.id == actor.id)
+    add_matching(lambda ally: ally.class_id == "fighter")
+    add_matching(lambda ally: ally.class_id == "rogue" and ally.behavior_profile == "martial_skirmisher")
+    add_matching(lambda ally: ally.class_id == "rogue" and ally.behavior_profile == "martial_opportunist")
+    add_matching(lambda ally: True)
+
+    legal_targets = [
+        ally
+        for ally in preferred_units
+        if can_target_bless_from_current_position(state, actor, ally) and not is_blessed_by_active_source(state, ally)
+    ][:3]
+    return [unit.id for unit in legal_targets]
+
+
+def find_safe_touch_path_to_ally(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> ReachableSquare | None:
+    if actor.id == target.id or not target.position:
+        return None
+    return find_preferred_adjacent_square(state, actor.id, target.id, move_squares, False, position_index)
+
+
+def estimate_max_opportunity_damage_for_path(
+    state: EncounterState,
+    actor: UnitState,
+    path: list[GridPosition],
+) -> int:
+    if not actor.position or len(path) <= 1:
+        return 0
+
+    total_damage = 0
+    seen_attackers: set[str] = set()
+    actor_footprint = get_unit_footprint(actor)
+    for index in range(1, len(path)):
+        previous = path[index - 1]
+        next_position = path[index]
+        for enemy in get_units_by_faction(state, "goblins"):
+            if enemy.id in seen_attackers or not is_unit_conscious(enemy) or not enemy.position or not unit_can_take_reactions(enemy):
+                continue
+            try:
+                weapon = enemy.attacks[get_enemy_melee_weapon_id(enemy)]
+            except ValueError:
+                continue
+            reach = weapon.reach or 5
+            was_in_reach = (
+                get_min_chebyshev_distance_between_footprints(
+                    enemy.position,
+                    get_unit_footprint(enemy),
+                    previous,
+                    actor_footprint,
+                )
+                <= max(1, reach // 5)
+            )
+            leaves_reach = (
+                get_min_chebyshev_distance_between_footprints(
+                    enemy.position,
+                    get_unit_footprint(enemy),
+                    next_position,
+                    actor_footprint,
+                )
+                > max(1, reach // 5)
+            )
+            if was_in_reach and leaves_reach:
+                seen_attackers.add(enemy.id)
+                total_damage += int(
+                    sum(spec.count * spec.sides for spec in weapon.damage_dice)
+                    + weapon.damage_modifier
+                    + sum(
+                        sum(spec.count * spec.sides for spec in component.damage_dice) + component.damage_modifier
+                        for component in (weapon.damage_components or [])
+                    )
+                )
+
+    return total_damage
+
+
+def find_survivable_touch_path_to_downed_ally(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> ReachableSquare | None:
+    if not target.position:
+        return None
+    safe_path = find_safe_touch_path_to_ally(state, actor, target, move_squares, position_index)
+    if safe_path:
+        return safe_path
+
+    provoking_path = find_preferred_adjacent_square(state, actor.id, target.id, move_squares, True, position_index)
+    if not provoking_path:
+        return None
+    projected_damage = estimate_max_opportunity_damage_for_path(state, actor, provoking_path.path)
+    return provoking_path if projected_damage < actor.current_hp else None
+
+
+def get_low_hp_threatened_ally(state: EncounterState, actor: UnitState) -> UnitState | None:
+    candidates = [
+        ally
+        for ally in get_units_by_faction(state, actor.faction)
+        if ally.id != actor.id
+        and ally.current_hp > 0
+        and not ally.conditions.dead
+        and get_hp_ratio(ally) <= 0.30
+        and get_adjacent_conscious_enemies_at_position(state, ally, ally.position)
+    ]
+    touch_candidates = [ally for ally in candidates if actor.position and ally.position and get_distance_between_units(actor, ally) <= 1]
+    if touch_candidates:
+        return sorted(touch_candidates, key=lambda unit: (unit.current_hp, unit_sort_key(unit.id)))[0]
+    return None
+
+
+def get_paladin_cure_target(state: EncounterState, actor: UnitState) -> UnitState | None:
+    if not can_cast_combat_spell(actor, "cure_wounds"):
+        return None
+    if actor.resources.lay_on_hands_points > 0:
+        return None
+
+    candidates = [actor] if get_hp_ratio(actor) <= 0.35 and actor.current_hp < actor.max_hp else []
+    candidates.extend(
+        ally
+        for ally in get_units_by_faction(state, actor.faction)
+        if ally.id != actor.id
+        and ally.current_hp > 0
+        and ally.current_hp < ally.max_hp
+        and get_hp_ratio(ally) <= 0.30
+        and actor.position
+        and ally.position
+        and get_distance_between_units(actor, ally) <= 1
+    )
+    return sorted(candidates, key=lambda unit: (unit.current_hp, unit_sort_key(unit.id)))[0] if candidates else None
+
+
+def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
+    move_squares = get_move_squares(actor, state)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
+    position_index = build_position_index(state)
+    melee_weapon_id = get_player_primary_melee_weapon_id(actor)
+    ranged_weapon_id = get_player_primary_ranged_weapon_id(actor)
+
+    downed_allies = sorted(
+        [
+            ally
+            for ally in get_units_by_faction(state, actor.faction)
+            if ally.id != actor.id and is_unit_downed(ally)
+        ],
+        key=lambda unit: (get_distance_for_priority(state, actor, unit), unit_sort_key(unit.id)),
+    )
+    if can_use_lay_on_hands(actor):
+        for ally in downed_allies:
+            if actor.position and ally.position and get_distance_between_units(actor, ally) <= 1:
+                return TurnDecision(
+                    bonus_action={"kind": "lay_on_hands", "timing": "before_action", "target_id": ally.id},
+                    action={"kind": "skip", "reason": f"Using Lay on Hands to restore {ally.id}."},
+                )
+            rescue_path = find_survivable_touch_path_to_downed_ally(state, actor, ally, move_squares, position_index)
+            if rescue_path:
+                return TurnDecision(
+                    pre_action_movement=MovementPlan(path=rescue_path.path, mode="move"),
+                    action={"kind": "skip", "reason": f"Moving to restore {ally.id} with Lay on Hands."},
+                    bonus_action={"kind": "lay_on_hands", "timing": "after_action", "target_id": ally.id},
+                )
+
+    bless_targets = choose_paladin_bless_targets(state, actor)
+    if (
+        can_cast_combat_spell(actor, "bless")
+        and not unit_is_concentrating_on(actor, "bless")
+        and len(bless_targets) >= 2
+    ):
+        return TurnDecision(
+            action={
+                "kind": "cast_spell",
+                "spell_id": "bless",
+                "target_id": bless_targets[0],
+                "target_ids": bless_targets,
+            }
+        )
+
+    bonus_action: dict[str, str] | None = None
+    if can_use_lay_on_hands(actor):
+        if get_hp_ratio(actor) <= 0.35 and actor.current_hp < actor.max_hp:
+            bonus_action = {"kind": "lay_on_hands", "timing": "before_action", "target_id": actor.id}
+        else:
+            threatened_ally = get_low_hp_threatened_ally(state, actor)
+            if threatened_ally:
+                bonus_action = {"kind": "lay_on_hands", "timing": "before_action", "target_id": threatened_ally.id}
+
+    cure_target = get_paladin_cure_target(state, actor)
+    if cure_target:
+        return TurnDecision(action={"kind": "cast_spell", "spell_id": "cure_wounds", "target_id": cure_target.id})
+
+    conscious_enemies = sort_player_combat_targets(
+        state,
+        actor,
+        [unit for unit in get_units_by_faction(state, "goblins") if not unit.conditions.dead],
+        "smart",
+    )
+    melee_targets = sort_player_melee_targets(
+        state,
+        actor,
+        conscious_enemies,
+        "smart",
+        melee_weapon_id=melee_weapon_id,
+        position_index=position_index,
+    )
+
+    melee_option = get_smart_melee_attack_option(state, actor, melee_targets, move_squares, melee_weapon_id, position_index)
+    if melee_option:
+        return finalize_player_turn_decision(
+            state,
+            actor,
+            TurnDecision(
+                bonus_action=bonus_action,
+                pre_action_movement=MovementPlan(path=melee_option.path, mode="move") if melee_option.distance > 0 else None,
+                action={"kind": "attack", "target_id": melee_option.target.id, "weapon_id": melee_weapon_id},
+            ),
+            melee_weapon_id,
+            position_index,
+        )
+
+    if can_use_player_weapon(actor, ranged_weapon_id):
+        ranged_decision = build_player_ranged_attack_decision(
+            state,
+            actor,
+            conscious_enemies,
+            ranged_weapon_id,
+            move_squares,
+            True,
+            position_index,
+            bonus_action,
+        )
+        if ranged_decision:
+            return finalize_player_turn_decision(state, actor, ranged_decision, melee_weapon_id, position_index)
+
+    nearest_target = melee_targets[0] if melee_targets else None
+    if not nearest_target:
+        return TurnDecision(bonus_action=bonus_action, action={"kind": "skip", "reason": "No enemies remain."})
+
+    dash_path = find_preferred_advance_path(state, actor.id, nearest_target.id, dash_squares, False, position_index)
+    if dash_path and dash_path.distance > 0:
+        return finalize_player_turn_decision(
+            state,
+            actor,
+            TurnDecision(
+                bonus_action=bonus_action,
+                post_action_movement=MovementPlan(path=dash_path.path, mode="dash"),
+                action={"kind": "dash", "reason": f"Dashing toward {nearest_target.id}."},
+            ),
+            melee_weapon_id,
+            position_index,
+        )
+
+    return finalize_player_turn_decision(
+        state,
+        actor,
+        TurnDecision(bonus_action=bonus_action, action={"kind": "skip", "reason": "No legal movement remains."}),
+        melee_weapon_id,
+        position_index,
+    )
+
+
 def get_planned_attack_position(actor: UnitState, decision: TurnDecision) -> GridPosition | None:
     if decision.pre_action_movement and decision.pre_action_movement.path:
         return decision.pre_action_movement.path[-1]
@@ -3117,6 +3419,9 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
 
     if is_player_wizard(actor):
         return get_player_wizard_decision(state, actor)
+
+    if is_player_paladin(actor):
+        return get_player_paladin_decision(state, actor)
 
     move_squares = get_move_squares(actor, state)
     dash_squares = get_total_move_squares(actor, 1, state=state)
