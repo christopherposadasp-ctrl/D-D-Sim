@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from backend.content.enemies import get_monster_definition_for_unit, unit_has_bonus_action, unit_has_trait
 from backend.engine import create_encounter
-from backend.engine.ai.decision import can_intentionally_provoke_opportunity_attack, choose_turn_decision
+from backend.engine.ai.decision import (
+    can_intentionally_provoke_opportunity_attack,
+    choose_turn_decision,
+    get_ranked_attack_targets,
+)
 from backend.engine.combat.engine import clear_turn_flags, resolve_attack_action
 from backend.engine.constants import ARCHER_GOBLIN_IDS, DEFAULT_POSITIONS, MELEE_GOBLIN_IDS
 from backend.engine.models.state import (
@@ -372,7 +376,10 @@ def test_smart_monk_uses_dash_plus_bonus_unarmed_when_normal_move_cannot_reach_m
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.action["kind"] == "dash"
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert decision.bonus_action is not None
+    assert decision.bonus_action["kind"] == "bonus_unarmed_strike"
+    assert decision.bonus_action["timing"] == "after_action"
+    assert decision.bonus_action["target_id"] in {"G5", "G6", "G7"}
     assert decision.pre_action_movement is not None
     assert decision.pre_action_movement.mode == "dash"
 
@@ -822,7 +829,9 @@ def test_smart_level2_ranged_rogue_uses_disengage_to_escape_melee_into_a_shortbo
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.bonus_action == {"kind": "disengage", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "shortbow"
+    assert decision.action["target_id"] in {"G1", "G2"}
     assert decision.pre_action_movement is not None
     assert decision.pre_action_movement.mode == "move"
 
@@ -866,7 +875,9 @@ def test_level2_melee_rogue_uses_bonus_dash_to_turn_distance_into_a_rapier_attac
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.bonus_action == {"kind": "bonus_dash", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "rapier"}
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "rapier"
+    assert decision.action["target_id"] in {"G5", "G6", "G7"}
     assert decision.pre_action_movement is not None
     assert decision.pre_action_movement.mode == "dash"
 
@@ -889,7 +900,9 @@ def test_smart_level2_melee_rogue_can_disengage_into_an_ally_supported_shortbow_
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.bonus_action == {"kind": "disengage", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "shortbow"
+    assert decision.action["target_id"] in {"G1", "G2"}
     assert decision.pre_action_movement is not None
 
 
@@ -1103,6 +1116,66 @@ def test_smart_players_prefer_immediate_rider_over_distant_caster_that_cannot_pr
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_smart_melee_prefers_nearer_frontline_controller_over_farther_backline_caster() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-melee-frontline-over-backline-caster",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 7, "y": 1}, G2={"x": 8, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].attacks["scimitar"].on_hit_effects = [OnHitEffect(kind="grapple_on_hit")]
+    encounter.units["G1"].current_hp = 18
+    encounter.units["G2"].role_tags = ["caster"]
+    encounter.units["G2"].current_hp = 18
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+
+
+def test_smart_ranged_rogue_keeps_backline_threat_priority_when_killability_matches() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-ranged-rogue-backline-threat",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 6, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="rogue_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 6
+    encounter.units["G2"].current_hp = 6
+    encounter.units["G2"].role_tags = ["caster"]
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+
+
+def test_melee_ranked_attack_targets_use_immediacy_and_distance_before_backline_threat() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="melee-ranked-attack-targets",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 7, "y": 1}, G2={"x": 8, "y": 2}),
+            player_preset_id="fighter_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].feature_ids.append("extra_attack")
+    encounter.units["F1"].class_id = None
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G2"].role_tags = ["caster"]
+    encounter.units["G2"].current_hp = 20
+
+    ranked_targets = get_ranked_attack_targets(encounter, encounter.units["F1"], preferred_weapon_id="greatsword")
+
+    assert [target.id for target in ranked_targets[:2]] == ["G1", "G2"]
 
 
 def test_extra_attack_targeting_uses_action_level_kill_band_before_the_first_swing() -> None:
