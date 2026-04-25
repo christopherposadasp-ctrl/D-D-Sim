@@ -83,7 +83,26 @@ def test_bugbear_dragnet_builds_controller_screen() -> None:
 def test_deadwatch_phalanx_builds_undead_armor_line() -> None:
     encounter = create_encounter(EncounterConfig(seed="deadwatch-phalanx", enemy_preset_id="deadwatch_phalanx"))
 
-    assert sorted(encounter.units) == ["E1", "E10", "E11", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "F1", "F2", "F3", "F4"]
+    assert sorted(encounter.units) == [
+        "E1",
+        "E10",
+        "E11",
+        "E12",
+        "E13",
+        "E14",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+    ]
     assert encounter.units["E1"].combat_role == "animated_armor"
     assert encounter.units["E3"].combat_role == "zombie"
     assert encounter.units["E5"].combat_role == "skeleton"
