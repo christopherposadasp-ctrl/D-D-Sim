@@ -1983,7 +1983,11 @@ def resolve_bonus_action_events(
     if not bonus_action:
         return []
 
-    state.units[actor_id]._bonus_action_used_this_turn = True
+    actor = state.units[actor_id]
+    if actor._bonus_action_used_this_turn:
+        return [create_skip_event(state, actor_id, "Bonus action has already been used this turn.")]
+
+    actor._bonus_action_used_this_turn = True
 
     if bonus_action["kind"] in {"bonus_unarmed_strike", "flurry_of_blows"}:
         return resolve_bonus_attack_action(state, actor_id, bonus_action)

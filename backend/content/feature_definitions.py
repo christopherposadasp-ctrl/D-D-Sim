@@ -228,6 +228,18 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Class weapon mastery selections tracked through equipped weapon profiles.",
     ),
+    "fighting_style_defense": FeatureDefinition(
+        feature_id="fighting_style_defense",
+        display_name="Fighting Style: Defense",
+        kind="fighting_style",
+        description="While wearing armor, gain +1 AC; represented directly in fixed-AC Paladin loadouts.",
+    ),
+    "paladins_smite": FeatureDefinition(
+        feature_id="paladins_smite",
+        display_name="Paladin's Smite",
+        kind="class_feature",
+        description="Always prepares Divine Smite, allowing a bonus-action smite immediately after a melee hit.",
+    ),
     "spellcasting": FeatureDefinition(
         feature_id="spellcasting",
         display_name="Spellcasting",

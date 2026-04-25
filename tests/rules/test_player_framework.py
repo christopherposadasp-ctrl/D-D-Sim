@@ -298,6 +298,33 @@ def test_paladin_sample_build_uses_support_tank_registry_metadata() -> None:
     assert paladin.resource_pools == {"lay_on_hands": 5, "spell_slots_level_1": 2, "javelins": 5}
 
 
+def test_level2_paladin_sample_build_uses_smite_tank_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-level2-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="paladin_level2_sample_trio",
+        )
+    )
+    paladin = encounter.units["F1"]
+
+    assert paladin.class_id == "paladin"
+    assert paladin.level == 2
+    assert paladin.loadout_id == "paladin_level2_sample_build"
+    assert paladin.behavior_profile == "divine_guardian"
+    assert paladin.role_tags == ["healer"]
+    assert paladin.max_hp == 22
+    assert paladin.ac == 21
+    assert tuple(sorted(paladin.attacks.keys())) == ("javelin", "longsword")
+    assert paladin.resources.lay_on_hands_points == 10
+    assert paladin.resources.spell_slots_level_1 == 2
+    assert paladin.prepared_combat_spell_ids == ["bless", "cure_wounds"]
+    assert paladin.prepared_spells == 3
+    assert "fighting_style_defense" in paladin.feature_ids
+    assert "paladins_smite" in paladin.feature_ids
+    assert paladin.resource_pools == {"lay_on_hands": 10, "spell_slots_level_1": 2, "javelins": 5}
+
+
 def test_runtime_player_metadata_stays_out_of_live_api_payload() -> None:
     encounter = create_encounter(EncounterConfig(seed="player-registry-transport", placements=DEFAULT_POSITIONS))
     fighter = encounter.units["F1"]
@@ -404,6 +431,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "monk_sample_build",
         "monk_level2_sample_build",
         "paladin_level1_sample_build",
+        "paladin_level2_sample_build",
         "rogue_melee_sample_build",
         "rogue_ranged_sample_build",
         "rogue_melee_level2_sample_build",
@@ -432,6 +460,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "monk_sample_trio",
         "monk_level2_sample_trio",
         "paladin_level1_sample_trio",
+        "paladin_level2_sample_trio",
         "wizard_sample_trio",
         "martial_mixed_party",
     ]
@@ -439,7 +468,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "barbarian": 2,
         "fighter": 5,
         "monk": 2,
-        "paladin": 1,
+        "paladin": 2,
         "rogue": 5,
         "wizard": 1,
     }
@@ -450,16 +479,16 @@ def test_default_player_preset_loads_fighter_paladin_and_two_rogues() -> None:
 
     assert encounter.units["F1"].loadout_id == "fighter_level5_sample_build"
     assert encounter.units["F1"].level == 5
-    assert encounter.units["F2"].loadout_id == "paladin_level1_sample_build"
-    assert encounter.units["F2"].level == 1
-    assert encounter.units["F2"].ac == 20
-    assert encounter.units["F2"].resources.lay_on_hands_points == 5
+    assert encounter.units["F2"].loadout_id == "paladin_level2_sample_build"
+    assert encounter.units["F2"].level == 2
+    assert encounter.units["F2"].ac == 21
+    assert encounter.units["F2"].resources.lay_on_hands_points == 10
     assert encounter.units["F3"].loadout_id == "rogue_ranged_level5_assassin_sample_build"
     assert encounter.units["F3"].level == 5
     assert encounter.units["F4"].loadout_id == "rogue_melee_level2_sample_build"
     assert encounter.units["F4"].level == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 118
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 127
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:

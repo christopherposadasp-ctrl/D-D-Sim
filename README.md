@@ -28,13 +28,13 @@ Current live martial class support:
 - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk supported to level 2
 - Wizard supported to level 1 as a narrow combat spellcasting slice
-- Paladin supported to level 1 as a plate-and-shield support tank with Lay on Hands, Bless, and Cure Wounds
+- Paladin supported to level 2 as a plate-and-shield support tank with Lay on Hands, Bless, Cure Wounds, and Divine Smite
 
 Current default player preset:
 
 - `martial_mixed_party`
 - level 5 Battle Master fighter
-- level 1 paladin
+- level 2 paladin
 - level 5 ranged Assassin rogue
 - level 2 melee rogue
 

@@ -99,7 +99,7 @@ It should be updated whenever one of these changes:
   - terrain-based Hide support around the fixed rock feature
 - The default player preset is now the four-PC mixed martial party:
   - one level 5 Battle Master fighter
-  - one level 1 paladin
+  - one level 2 paladin
   - one level 5 ranged Assassin rogue
   - one level 2 melee rogue
 - These new player-build fields are intentionally kept out of the live run/batch API payload for now so the current UI contract remains stable during the framework transition
@@ -187,7 +187,7 @@ It should be updated whenever one of these changes:
 
 ### Current Working Version
 
-- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Paladin is live to level 1 as a support tank; Barbarian, melee Rogue, and Monk remain live up to level 2
+- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Paladin is live to level 2 as a support tank; Barbarian, melee Rogue, and Monk remain live up to level 2
 - Wizard level 1 is live as a narrow combat-only spellcasting slice, not a full `V4.4` spell framework rollout
 - Immediate project path is now focused on one presentation-ready level 5 party rather than broad class coverage:
   - Fighter: Battle Master

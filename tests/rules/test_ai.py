@@ -625,7 +625,7 @@ def test_paladin_trio_does_not_recast_redundant_bless() -> None:
         EncounterConfig(
             seed="paladin-trio-bless-once",
             placements=build_trio_placements(),
-            player_preset_id="paladin_level1_sample_trio",
+            player_preset_id="paladin_level2_sample_trio",
         )
     )
     first_decision = choose_turn_decision(encounter, "F1")

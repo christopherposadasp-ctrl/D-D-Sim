@@ -1342,7 +1342,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "id": "paladin",
       "displayName": "Paladin",
       "category": "half_caster",
-      "maxSupportedLevel": 1
+      "maxSupportedLevel": 2
     },
     {
       "id": "rogue",
@@ -1572,6 +1572,26 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         "lay_on_hands",
         "spellcasting",
         "weapon_mastery",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "javelin",
+        "longsword"
+      ]
+    },
+    {
+      "id": "paladin_level2_sample_build",
+      "displayName": "Level 2 Paladin Sample Build",
+      "classId": "paladin",
+      "level": 2,
+      "maxHp": 22,
+      "featureIds": [
+        "lay_on_hands",
+        "spellcasting",
+        "weapon_mastery",
+        "fighting_style_defense",
+        "paladins_smite",
         "weapon_mastery_sap",
         "weapon_mastery_slow"
       ],
@@ -2055,6 +2075,25 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       ]
     },
     {
+      "id": "paladin_level2_sample_trio",
+      "displayName": "Level 2 Paladin Trio",
+      "description": "Three level 2 plate-and-shield paladins with Defense, Divine Smite, Bless, and Lay on Hands.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "paladin_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "paladin_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "paladin_level2_sample_build"
+        }
+      ]
+    },
+    {
       "id": "wizard_sample_trio",
       "displayName": "Level 1 Wizard Trio",
       "description": "Three level 1 wizards with direct damage, melee escape, Shield, and Burning Hands pressure.",
@@ -2076,7 +2115,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
     {
       "id": "martial_mixed_party",
       "displayName": "Mixed Martial Party",
-      "description": "One level 5 Battle Master fighter, one level 1 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+      "description": "One level 5 Battle Master fighter, one level 2 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
       "units": [
         {
           "unitId": "F1",
@@ -2084,7 +2123,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         },
         {
           "unitId": "F2",
-          "loadoutId": "paladin_level1_sample_build"
+          "loadoutId": "paladin_level2_sample_build"
         },
         {
           "unitId": "F3",
@@ -2131,6 +2170,7 @@ const ACTIVE_PLAYER_PRESET_IDS = [
   'monk_sample_trio',
   'monk_level2_sample_trio',
   'paladin_level1_sample_trio',
+  'paladin_level2_sample_trio',
   'wizard_sample_trio',
   'martial_mixed_party',
 ];
@@ -2219,7 +2259,7 @@ function buildEncounterState(
 ): EncounterState {
   const units: Record<string, UnitState> = {
     F1: buildUnit('F1', 'Level 2 Fighter Sample Build', 'fighters', 'fighter', { x: 1, y: 7 }, 21),
-    F2: buildUnit('F2', 'Level 1 Paladin Sample Build', 'fighters', 'paladin', { x: 1, y: 8 }, 13),
+    F2: buildUnit('F2', 'Level 2 Paladin Sample Build', 'fighters', 'paladin', { x: 1, y: 8 }, 22),
     F3: buildUnit('F3', 'Level 5 Ranged Assassin Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 9 }, 42),
     F4: buildUnit('F4', 'Level 2 Melee Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 10 }, 18),
     E1: buildUnit('E1', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 6 }, 10),
@@ -2674,7 +2714,7 @@ describe('App', () => {
     const mixedParty = TEST_PLAYER_CATALOG.playerPresets.find((preset) => preset.id === 'martial_mixed_party');
     expect(mixedParty?.units).toEqual([
       { unitId: 'F1', loadoutId: 'fighter_level5_sample_build' },
-      { unitId: 'F2', loadoutId: 'paladin_level1_sample_build' },
+      { unitId: 'F2', loadoutId: 'paladin_level2_sample_build' },
       { unitId: 'F3', loadoutId: 'rogue_ranged_level5_assassin_sample_build' },
       { unitId: 'F4', loadoutId: 'rogue_melee_level2_sample_build' },
     ]);

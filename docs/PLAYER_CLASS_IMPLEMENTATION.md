@@ -25,8 +25,8 @@ It exists to keep class work:
 - Ranged Rogue is live through level 5 as an Assassin; melee Rogue is live through level 2.
 - Barbarian and Monk are live through level 2.
 - Wizard is live at level 1 as a narrow combat spellcasting slice.
-- Paladin is live at level 1 as a plate-and-shield support tank with Lay on Hands, Bless, and Cure Wounds.
-- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter, level 1 Paladin, level 5 ranged Assassin Rogue, and level 2 melee Rogue.
+- Paladin is live at level 2 as a plate-and-shield support tank with Lay on Hands, Bless, Cure Wounds, and Divine Smite.
+- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter, level 2 Paladin, level 5 ranged Assassin Rogue, and level 2 melee Rogue.
 
 ## Primary Backend Files
 

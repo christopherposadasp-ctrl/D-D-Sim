@@ -15,12 +15,13 @@ class SpellDefinition:
     level: int
     school: str
     description: str
-    timing: Literal["action", "reaction"]
+    timing: Literal["action", "bonus_action", "reaction"]
     targeting_mode: Literal[
         "ranged_spell_attack",
         "melee_spell_attack",
         "auto_hit_single_target",
         "reaction_self",
+        "smite_trigger",
         "self_cone_save",
         "multi_ally_buff",
         "touch_heal",
@@ -145,6 +146,19 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         damage_type="none",
         healing_dice=(DiceSpec(count=2, sides=8),),
         healing_modifier_ability="spellcasting",
+    ),
+    "divine_smite": SpellDefinition(
+        spell_id="divine_smite",
+        display_name="Divine Smite",
+        level=1,
+        school="evocation",
+        description="Bonus-action smite after a melee hit, adding radiant damage to the attack.",
+        timing="bonus_action",
+        targeting_mode="smite_trigger",
+        range_feet=0,
+        damage_dice=(DiceSpec(count=2, sides=8),),
+        damage_modifier=0,
+        damage_type="radiant",
     ),
 }
 

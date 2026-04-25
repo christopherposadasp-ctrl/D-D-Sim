@@ -81,6 +81,7 @@ class AttackRollOverrides:
         savage_damage_rolls: list[int] | None = None,
         advantage_damage_rolls: list[int] | None = None,
         superiority_rolls: list[int] | None = None,
+        smite_damage_rolls: list[int] | None = None,
         concentration_rolls: list[int] | None = None,
     ) -> None:
         self.attack_rolls = attack_rolls or []
@@ -89,6 +90,7 @@ class AttackRollOverrides:
         self.savage_damage_rolls = savage_damage_rolls or []
         self.advantage_damage_rolls = advantage_damage_rolls or []
         self.superiority_rolls = superiority_rolls or []
+        self.smite_damage_rolls = smite_damage_rolls or []
         self.concentration_rolls = concentration_rolls or []
 
 
@@ -1501,6 +1503,86 @@ def resolve_damage_component_against_target(
         return amplified_damage, 0, amplified_damage - component_damage
 
     return component_damage, 0, 0
+
+
+def estimate_damage_after_defenses(target: UnitState, damage_components: list[DamageComponentResult]) -> int:
+    total_damage = 0
+    for component in damage_components:
+        component_damage, _, _ = resolve_damage_component_against_target(target, component)
+        total_damage += component_damage
+    return total_damage
+
+
+def estimate_remaining_effective_hp_after_damage(
+    target: UnitState,
+    damage_components: list[DamageComponentResult],
+) -> int:
+    damage_after_defenses = estimate_damage_after_defenses(target, damage_components)
+    remaining_temporary_hp = max(0, target.temporary_hit_points - damage_after_defenses)
+    hp_damage = max(0, damage_after_defenses - target.temporary_hit_points)
+    remaining_hp = max(0, target.current_hp - hp_damage)
+    return remaining_hp + remaining_temporary_hp
+
+
+def unit_is_fiend_or_undead(unit: UnitState) -> bool:
+    creature_tags = {tag.lower() for tag in unit.creature_tags}
+    return "fiend" in creature_tags or "undead" in creature_tags
+
+
+def get_divine_smite_dice_count(target: UnitState) -> int:
+    return 2 + int(unit_is_fiend_or_undead(target))
+
+
+def can_apply_divine_smite(
+    attacker: UnitState,
+    target: UnitState,
+    weapon: WeaponProfile,
+    *,
+    critical: bool,
+    is_opportunity_attack: bool | None,
+    maneuver_id: str | None,
+    weapon_damage_components: list[DamageComponentResult],
+) -> bool:
+    if not unit_has_feature(attacker, "paladins_smite"):
+        return False
+    if weapon.kind != "melee":
+        return False
+    if is_opportunity_attack or maneuver_id == "riposte":
+        return False
+    if attacker.resources.spell_slots_level_1 <= 0 or attacker._bonus_action_used_this_turn:
+        return False
+
+    remaining_effective_hp = estimate_remaining_effective_hp_after_damage(target, weapon_damage_components)
+    if remaining_effective_hp <= 0:
+        return False
+    if critical:
+        return True
+
+    # Compare against exact average d8 damage without floating point: 1d8 avg is 4.5.
+    return remaining_effective_hp * 2 <= get_divine_smite_dice_count(target) * 9
+
+
+def roll_divine_smite_component(
+    state: EncounterState,
+    target: UnitState,
+    critical_multiplier: int,
+    override_rolls: list[int] | None = None,
+) -> tuple[int, list[int], DamageComponentResult]:
+    dice_count = get_divine_smite_dice_count(target)
+    rolls = [pull_die(state, 8, override_rolls.pop(0) if override_rolls else None) for _ in range(dice_count)]
+    subtotal = sum(rolls)
+    return (
+        dice_count,
+        rolls,
+        DamageComponentResult(
+            damage_type="radiant",
+            raw_rolls=list(rolls),
+            adjusted_rolls=list(rolls),
+            subtotal=subtotal,
+            flat_modifier=0,
+            total_damage=subtotal * critical_multiplier,
+        ),
+    )
 
 
 def resolve_undead_fortitude(
@@ -3124,6 +3206,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         savage_damage_rolls=list(args.overrides.savage_damage_rolls if args.overrides else []),
         advantage_damage_rolls=list(args.overrides.advantage_damage_rolls if args.overrides else []),
         superiority_rolls=list(args.overrides.superiority_rolls if args.overrides else []),
+        smite_damage_rolls=list(args.overrides.smite_damage_rolls if args.overrides else []),
         concentration_rolls=list(args.overrides.concentration_rolls if args.overrides else []),
     )
 
@@ -3303,6 +3386,10 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     cunning_strike_save_total: int | None = None
     cunning_strike_save_success: bool | None = None
     cunning_strike_condition_applied: bool | None = None
+    divine_smite_applied = False
+    divine_smite_dice = 0
+    divine_smite_rolls: list[int] = []
+    divine_smite_damage = 0
 
     if attack_reaction == "redirect_attack":
         condition_deltas.append(f"{args.target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
@@ -3472,6 +3559,29 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             maneuver_save_total = save_roll + save_modifier
             maneuver_save_success = maneuver_save_total >= maneuver_save_dc
             trip_save_failed = not maneuver_save_success
+
+        if can_apply_divine_smite(
+            attacker,
+            target,
+            weapon,
+            critical=critical,
+            is_opportunity_attack=args.is_opportunity_attack,
+            maneuver_id=args.maneuver_id,
+            weapon_damage_components=final_damage_components,
+        ) and attacker.resources.spend_pool("spell_slots_level_1", 1):
+            attacker._bonus_action_used_this_turn = True
+            divine_smite_applied = True
+            divine_smite_dice, divine_smite_rolls, divine_smite_component = roll_divine_smite_component(
+                state,
+                target,
+                critical_multiplier,
+                overrides.smite_damage_rolls,
+            )
+            divine_smite_damage = divine_smite_component.total_damage
+            final_damage_components.append(divine_smite_component)
+            condition_deltas.append(
+                f"{args.attacker_id} casts Divine Smite for {divine_smite_damage} radiant damage."
+            )
 
         total_damage = sum(component.total_damage for component in final_damage_components)
 
@@ -3655,6 +3765,12 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         resolved_totals["greatWeaponMasterDamageBonus"] = great_weapon_master_damage_bonus
     if assassinate_damage_bonus > 0:
         resolved_totals["assassinateDamageBonus"] = assassinate_damage_bonus
+    if divine_smite_applied:
+        resolved_totals["spellId"] = "divine_smite"
+        resolved_totals["divineSmiteApplied"] = True
+        resolved_totals["divineSmiteDice"] = divine_smite_dice
+        resolved_totals["divineSmiteDamage"] = divine_smite_damage
+        resolved_totals["spellSlotsLevel1Remaining"] = attacker.resources.spell_slots_level_1
     if attack_context.sharpshooter_applied:
         resolved_totals["sharpshooterApplied"] = True
         if attack_context.sharpshooter_ignored_cover_ac_bonus > 0:
@@ -3711,6 +3827,8 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         raw_rolls["sharpshooterIgnoredDisadvantageSources"] = attack_context.sharpshooter_ignored_disadvantage_sources
     if bless_rolls:
         raw_rolls["blessRolls"] = bless_rolls
+    if divine_smite_rolls:
+        raw_rolls["divineSmiteRolls"] = divine_smite_rolls
     if maneuver_id or precision_maneuver_applied:
         raw_rolls["superiorityDiceRolls"] = superiority_dice_rolls
     if maneuver_save_rolls:

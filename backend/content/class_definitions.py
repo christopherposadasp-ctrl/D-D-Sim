@@ -56,7 +56,7 @@ CLASS_DEFINITIONS: dict[str, ClassDefinition] = {
         category="half_caster",
         hit_die=10,
         primary_abilities=("str", "cha"),
-        max_supported_level=1,
+        max_supported_level=2,
     ),
     "wizard": ClassDefinition(
         class_id="wizard",

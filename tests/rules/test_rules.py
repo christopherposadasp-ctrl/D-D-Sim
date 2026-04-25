@@ -143,6 +143,15 @@ def build_paladin_config(seed: str, *, player_behavior: str = "smart") -> Encoun
     )
 
 
+def build_level2_paladin_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="paladin_level2_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
 def build_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
@@ -1401,6 +1410,204 @@ def test_cure_wounds_heals_two_d8_plus_charisma_and_spends_slot() -> None:
     assert heal_event.resolved_totals["healingTotal"] == 12
     assert encounter.units["F2"].current_hp == 13
     assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_divine_smite_does_not_fire_if_weapon_damage_already_kills() -> None:
+    encounter = create_encounter(build_level2_paladin_config("paladin-smite-overkill"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].current_hp = 4
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4], smite_damage_rolls=[8, 8]),
+        ),
+    )
+
+    assert attack_event.resolved_totals.get("divineSmiteApplied") is None
+    assert attack_event.damage_details.total_damage == 7
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert encounter.units["F1"]._bonus_action_used_this_turn is False
+
+
+def test_divine_smite_fires_on_surviving_critical_melee_hit() -> None:
+    encounter = create_encounter(build_level2_paladin_config("paladin-smite-crit"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].max_hp = 100
+    encounter.units["E1"].current_hp = 100
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[1], smite_damage_rolls=[8, 7]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["divineSmiteApplied"] is True
+    assert attack_event.resolved_totals["divineSmiteDice"] == 2
+    assert attack_event.raw_rolls["divineSmiteRolls"] == [8, 7]
+    assert attack_event.resolved_totals["divineSmiteDamage"] == 30
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+    assert encounter.units["F1"]._bonus_action_used_this_turn is True
+
+
+def test_divine_smite_fires_on_normal_hit_only_when_average_smite_can_finish() -> None:
+    encounter = create_encounter(build_level2_paladin_config("paladin-smite-kill-confirm"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].current_hp = 10
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[3, 3]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["divineSmiteApplied"] is True
+    assert attack_event.resolved_totals["divineSmiteDamage"] == 6
+    assert encounter.units["E1"].current_hp == 0
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+    no_smite = create_encounter(build_level2_paladin_config("paladin-smite-save-slot"))
+    no_smite.units["F1"].position = GridPosition(x=4, y=4)
+    no_smite.units["E1"].position = GridPosition(x=5, y=4)
+    no_smite.units["E1"].max_hp = 30
+    no_smite.units["E1"].current_hp = 30
+
+    no_smite_event, _ = resolve_attack(
+        no_smite,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+
+    assert no_smite_event.resolved_totals.get("divineSmiteApplied") is None
+    assert no_smite.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_divine_smite_uses_three_d8_against_undead() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-smite-undead",
+            enemy_preset_id="skeleton_benchmark",
+            player_preset_id="paladin_level2_sample_trio",
+        )
+    )
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].current_hp = 12
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[1, 2, 3]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["divineSmiteApplied"] is True
+    assert attack_event.resolved_totals["divineSmiteDice"] == 3
+    assert attack_event.raw_rolls["divineSmiteRolls"] == [1, 2, 3]
+    assert attack_event.resolved_totals["divineSmiteDamage"] == 6
+
+
+def test_divine_smite_rejects_ranged_opportunity_no_slot_and_used_bonus_action_cases() -> None:
+    ranged = create_encounter(build_level2_paladin_config("paladin-smite-ranged"))
+    ranged.units["F1"].position = GridPosition(x=4, y=4)
+    ranged.units["E1"].position = GridPosition(x=5, y=4)
+    ranged.units["E1"].current_hp = 10
+    ranged_event, _ = resolve_attack(
+        ranged,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="javelin",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+    assert ranged_event.resolved_totals.get("divineSmiteApplied") is None
+
+    opportunity = create_encounter(build_level2_paladin_config("paladin-smite-opportunity"))
+    opportunity.units["F1"].position = GridPosition(x=4, y=4)
+    opportunity.units["E1"].position = GridPosition(x=5, y=4)
+    opportunity.units["E1"].current_hp = 100
+    opportunity_event, _ = resolve_attack(
+        opportunity,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+    assert opportunity_event.resolved_totals.get("divineSmiteApplied") is None
+
+    no_slot = create_encounter(build_level2_paladin_config("paladin-smite-no-slot"))
+    no_slot.units["F1"].position = GridPosition(x=4, y=4)
+    no_slot.units["E1"].position = GridPosition(x=5, y=4)
+    no_slot.units["E1"].current_hp = 100
+    no_slot.units["F1"].resources.spell_slots_level_1 = 0
+    no_slot_event, _ = resolve_attack(
+        no_slot,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+    assert no_slot_event.resolved_totals.get("divineSmiteApplied") is None
+
+    used_bonus = create_encounter(build_level2_paladin_config("paladin-smite-bonus-used"))
+    used_bonus.units["F1"].position = GridPosition(x=4, y=4)
+    used_bonus.units["E1"].position = GridPosition(x=5, y=4)
+    used_bonus.units["E1"].current_hp = 100
+    used_bonus.units["F1"]._bonus_action_used_this_turn = True
+    used_bonus_event, _ = resolve_attack(
+        used_bonus,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+    assert used_bonus_event.resolved_totals.get("divineSmiteApplied") is None
+
+
+def test_paladin_level2_sample_trio_smoke_run_completes() -> None:
+    result = run_encounter(build_level2_paladin_config("paladin-level2-smoke-run"))
+
+    assert result.final_state.terminal_state == "complete"
+    assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
 
 
 def test_monk_unarmored_defense_uses_dex_plus_wis() -> None:

@@ -720,6 +720,33 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_ranged_weapon_id="javelin",
         prepared_combat_spell_ids=("bless", "cure_wounds"),
     ),
+    "paladin_level2_sample_build": PlayerLoadoutDefinition(
+        loadout_id="paladin_level2_sample_build",
+        display_name="Level 2 Paladin Sample Build",
+        class_id="paladin",
+        level=2,
+        template_name="Level 2 Paladin Sample Build",
+        behavior_profile="divine_guardian",
+        max_hp=22,
+        ac=21,
+        speed=30,
+        initiative_mod=0,
+        passive_perception=10,
+        ability_mods=paladin_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "longsword": player_weapons["longsword"],
+            "javelin": player_weapons["javelin"],
+        },
+        extra_feature_ids=("weapon_mastery_sap", "weapon_mastery_slow"),
+        extra_resource_pools={"javelins": 5},
+        role_tags=("healer",),
+        medicine_modifier=2,
+        default_melee_weapon_id="longsword",
+        default_ranged_weapon_id="javelin",
+        prepared_combat_spell_ids=("bless", "cure_wounds"),
+    ),
     "wizard_sample_build": PlayerLoadoutDefinition(
         loadout_id="wizard_sample_build",
         display_name="Level 1 Wizard Sample Build",
@@ -942,6 +969,15 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "paladin_level2_sample_trio": PlayerPresetDefinition(
+        preset_id="paladin_level2_sample_trio",
+        display_name="Level 2 Paladin Trio",
+        description="Three level 2 plate-and-shield paladins with Defense, Divine Smite, Bless, and Lay on Hands.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="paladin_level2_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "wizard_sample_trio": PlayerPresetDefinition(
         preset_id="wizard_sample_trio",
         display_name="Level 1 Wizard Trio",
@@ -951,10 +987,10 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 1 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+        description="One level 5 Battle Master fighter, one level 2 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
-            PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level1_sample_build"),
+            PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level2_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
             PlayerPresetUnit(unit_id="F4", loadout_id="rogue_melee_level2_sample_build"),
         ),
@@ -994,6 +1030,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "monk_sample_trio",
     "monk_level2_sample_trio",
     "paladin_level1_sample_trio",
+    "paladin_level2_sample_trio",
     "wizard_sample_trio",
     "martial_mixed_party",
 )
