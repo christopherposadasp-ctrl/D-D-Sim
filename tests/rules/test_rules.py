@@ -3084,7 +3084,7 @@ def test_step_finishes_immediately_when_all_fighters_are_already_down() -> None:
     assert result.state.terminal_state == "complete"
     assert result.state.winner == "goblins"
     assert [event.event_type for event in result.events] == ["phase_change"]
-    assert result.events[0].text_summary == "Combat ends. Goblins win."
+    assert result.events[0].text_summary == "Combat ends. Monsters win."
 
 
 def test_parallel_batch_path_matches_serial_batch_path() -> None:

@@ -81,7 +81,7 @@ def describe_winner(winner: Winner | None) -> str:
     if winner == "fighters":
         return "Fighters win"
     if winner == "goblins":
-        return "Goblins win"
+        return "Monsters win"
     if winner == "mutual_annihilation":
         return "Mutual annihilation"
     return "Unresolved"
