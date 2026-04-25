@@ -25,7 +25,7 @@ Current live martial class support:
 
 - Fighter supported to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian supported to level 2
-- Rogue supported to level 2
+- Rogue supported to level 4 for the ranged Assassin path and level 2 for the melee path
 - Monk supported to level 2
 - Wizard supported to level 1 as a narrow combat spellcasting slice
 
@@ -34,7 +34,7 @@ Current default player preset:
 - `martial_mixed_party`
 - level 5 Battle Master fighter
 - level 2 barbarian
-- level 2 ranged rogue
+- level 4 ranged Assassin rogue
 - level 2 melee rogue
 
 Active enemy presets:
@@ -108,6 +108,7 @@ Use the PowerShell task runner for the standard checks:
 
 ```powershell
 .\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 party-validation
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
@@ -120,7 +121,8 @@ Use the PowerShell task runner for the standard checks:
 
 These map to:
 
-- `check-fast`: `ruff` plus the full `pytest` suite
+- `check-fast`: `ruff` plus the non-slow backend `pytest` suite
+- `party-validation`: focused current-party validation for `martial_mixed_party` against `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile
 - `audit-health`: the code-health and benchmark audit
@@ -133,9 +135,19 @@ These map to:
 The task runner passes through extra arguments to the underlying script. Examples:
 
 ```powershell
+.\scripts\dev.ps1 party-validation --workers 4
 .\scripts\dev.ps1 audit-quick --scenario goblin_screen
 .\scripts\dev.ps1 audit-full --json
 ```
+
+Routine development should usually run:
+
+```powershell
+.\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 party-validation
+```
+
+Use the broader audit commands before major merges, broad rules changes, or release checkpoints.
 
 ## Direct Python Commands
 
@@ -155,6 +167,12 @@ Run the full scenario audit:
 
 ```powershell
 py -3.13 .\scripts\run_scenario_audit.py --full
+```
+
+Run focused party validation directly:
+
+```powershell
+py -3.13 .\scripts\run_party_validation.py
 ```
 
 Run the manual code-health audit:

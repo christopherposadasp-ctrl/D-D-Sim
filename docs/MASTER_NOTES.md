@@ -75,7 +75,7 @@ It should be updated whenever one of these changes:
   - player loadouts
   - spell definitions
   - scenario definitions
-- The current three-fighter party is now instantiated from a backend-owned player preset and loadout registry rather than a hardcoded fighter template
+- The current player party is instantiated from a backend-owned player preset and loadout registry rather than a hardcoded fighter template
 - Runtime player metadata is now tracked internally for:
   - `class_id`
   - `level`
@@ -86,7 +86,7 @@ It should be updated whenever one of these changes:
 - The live martial class baseline is now:
   - Fighter supported to level 5 as a Battle Master great-weapon striker with Great Weapon Master, Extra Attack, and Tactical Shift
   - Barbarian supported to level 2
-  - Rogue supported to level 2
+  - Rogue supported to level 4 for the ranged Assassin path and level 2 for the melee path
   - Monk supported to level 2
 - A narrow combat-only Wizard level 1 slice is also live with:
   - cantrips: `fire_bolt`, `shocking_grasp`
@@ -100,7 +100,7 @@ It should be updated whenever one of these changes:
 - The default player preset is now the four-PC mixed martial party:
   - one level 5 Battle Master fighter
   - one level 2 barbarian
-  - one level 2 ranged rogue
+  - one level 4 ranged Assassin rogue
   - one level 2 melee rogue
 - These new player-build fields are intentionally kept out of the live run/batch API payload for now so the current UI contract remains stable during the framework transition
 - A backend-owned player catalog endpoint now exists at `GET /api/catalog/classes`
@@ -111,6 +111,9 @@ It should be updated whenever one of these changes:
 - Pass 1 closed on `integration` at commit `01cecc3` with warnings and waivers.
 - Pass 2 stability completed on top of the Pass 1 closure snapshot with deterministic replay, deterministic batch, async job, and long-audit evidence.
 - Pass 3 clarity is the current audit-maintainability pass; it is behavior-preserving and does not change gameplay, scenario balance, API payloads, or catalog data.
+- Phase A added the focused `party-validation` command as the default day-to-day party behavior gate.
+- Batch health checks now use the normal multicore `run_batch` path by default, capped at 8 workers, with serial mode reserved for deterministic replay/debug checks.
+- The focused party-validation scenario battery is `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`.
 - Active monitored findings remain the scenario smart-under-dumb warning, Rogue notes, and mixed-party Fighter/Barbarian warnings documented in the audit reports.
 - Active waivers remain for dedicated Monk, Wizard, and Monster audit runners until those focused runners are implemented.
 
@@ -184,8 +187,14 @@ It should be updated whenever one of these changes:
 
 ### Current Working Version
 
-- Current class path: Fighter is live to level 5 as a Battle Master; Barbarian, Rogue, and Monk remain live up to level 2
+- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 4 as an Assassin; Barbarian, melee Rogue, and Monk remain live up to level 2
 - Wizard level 1 is live as a narrow combat-only spellcasting slice, not a full `V4.4` spell framework rollout
+- Immediate project path is now focused on one presentation-ready level 5 party rather than broad class coverage:
+  - Fighter: Battle Master
+  - ranged Rogue: Assassin
+  - Wizard: Evoker
+  - Paladin: Oath of the Ancients
+  - optional stretch: Life Cleric
 
 ### Approved V4 Roadmap
 
@@ -362,16 +371,16 @@ Preferred final architecture:
 
 ### Current Validation Workflow
 
-Use this as the routine backend gate before content-expansion work:
+Use this as the routine backend gate before focused party work:
 
-- `py -3.13 -m ruff check backend tests scripts`
-- `py -3.13 -m pytest -q tests\golden tests\rules tests\integration`
-- `py -3.13 .\scripts\run_scenario_audit.py --scenario marsh_predators --smart-smoke-runs 1 --dumb-smoke-runs 1 --mechanic-runs 10 --health-batch-size 1000 --json --report-path .\reports\marsh_predators_large_batch.json`
+- `.\scripts\dev.ps1 check-fast`
+- `.\scripts\dev.ps1 party-validation`
 
 Notes:
 
 - The monolithic `py -3.13 -m pytest` command can be noisy and unreliable in this shell capture environment even when the underlying tests are healthy.
-- Full-catalog scenario audits are still useful for slower validation passes, but the marsh-specific deep audit is the more practical control regression check right now.
+- Full-catalog scenario audits are still useful for slower validation passes, but `party-validation` is the practical inner-loop gate for the current class path.
+- Use deeper audit commands before major merges, broad rules changes, or release checkpoints.
 
 ### Pre-Barbarian Checkpoint
 

@@ -6,6 +6,8 @@
 - Pass 2 completed as stable-with-warnings: deterministic replay, deterministic batch, async batch jobs, and long audit commands passed with no blockers.
 - Pass 3 is the current clarity and audit-maintainability gate.
 - Nightly audit automation remains a pre-major-audit safety net, not a replacement for the full audit passes.
+- Phase A added the focused party-validation gate as the default day-to-day behavior check for the current party path.
+- Broad scenario, class, and nightly audits remain available, but they are no longer the normal inner-loop development gate.
 
 ## Standard Commands
 
@@ -13,6 +15,7 @@ Run these from the repo root through the PowerShell wrapper:
 
 ```powershell
 .\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 party-validation
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
@@ -32,6 +35,7 @@ Run these from the repo root through the PowerShell wrapper:
 Direct equivalents:
 
 - `check-fast`: `py -3.13 -m ruff check backend tests scripts` and `py -3.13 -m pytest -q -m "not slow" tests\golden tests\rules tests\integration`
+- `party-validation`: `py -3.13 .\scripts\run_party_validation.py`
 - `audit-quick`: `py -3.13 .\scripts\run_scenario_audit.py`
 - `audit-full`: `py -3.13 .\scripts\run_scenario_audit.py --full`
 - `audit-health`: `py -3.13 .\scripts\run_code_health_audit.py --write-report`
@@ -49,6 +53,7 @@ Direct equivalents:
 
 ## Canonical Reports
 
+- Focused party validation: `reports/party_validation/party_validation_latest.json` and `reports/party_validation/party_validation_latest.md`
 - Pass 1 readiness: `reports/pass1/pass1_readiness_2026-04-23.md`
 - Scenario audit: `reports/scenario_audit_latest.json`
 - Rogue audit: `reports/rogue_audit/rogue_audit_latest.json`
@@ -63,6 +68,19 @@ Direct equivalents:
 - Rogue monitored notes in `wolf_harriers` and `marsh_predators`.
 - Mixed-party Fighter warnings in `orc_push`, `predator_rampage`, and `captains_crossfire`.
 - Mixed-party Barbarian warning in `wolf_harriers`.
+
+## Recommended Development Gate
+
+For normal class, AI, and focused content work, run:
+
+```powershell
+.\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 party-validation
+```
+
+The party-validation command uses the current `martial_mixed_party` and the focused scenario battery: `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`. It uses default parallel batch execution and writes the focused validation reports listed above.
+
+Run the broader audit commands when changing shared combat mechanics, expanding the scenario roster, or preparing a major checkpoint.
 
 ## Active Waivers
 

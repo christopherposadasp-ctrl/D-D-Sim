@@ -108,13 +108,13 @@ Use V4.2 to establish the player-content framework:
 
 - Fighter is live to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian is live to level 2
-- Rogue is live to level 2
+- Rogue is live to level 4 for the ranged Assassin path and level 2 for the melee path
 - Monk is live to level 2 in `V4.2-C`
 - Wizard is live to level 1 as a narrow combat-only slice with `fire_bolt`, `shocking_grasp`, `magic_missile`, `shield`, `burning_hands`, and tracked spell access counts
 - The current default mixed party is:
   - level 5 Battle Master fighter
   - level 2 barbarian
-  - level 2 ranged rogue
+  - level 4 ranged Assassin rogue
   - level 2 melee rogue
 
 ### V4.2 Phase Targets
@@ -124,6 +124,29 @@ Use V4.2 to establish the player-content framework:
 | V4.2-A | framework and current fighter sample build on registries | approved |
 | V4.2-B | Fighter and Rogue | approved |
 | V4.2-C | Barbarian and Monk | approved |
+
+## Focused Level-5 Party Path
+
+Status: `active`
+
+The immediate project path is narrower than the broad V4 class roadmap. The goal is one presentation-ready level 5 party, implemented one class at a time and validated through the focused party-validation command.
+
+### Target Party
+
+| Slot | Build | Status | Notes |
+|---|---|---|---|
+| Fighter | Battle Master | live to level 5 | great-weapon striker baseline |
+| Ranged Rogue | Assassin | live to level 4 | keep ranged-first rogue identity |
+| Wizard | Evoker | after Rogue | combat spellcasting priority |
+| Paladin | Oath of the Ancients | after Wizard | durable support/frontline role |
+| Cleric | Life Domain | stretch | add only if the core four-character scope is complete |
+
+### Validation Policy
+
+- Default development gate: `.\scripts\dev.ps1 check-fast` and `.\scripts\dev.ps1 party-validation`.
+- Focused scenario battery: `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`.
+- Broad scenario/class/nightly audits remain available for major checkpoints, but they are not the default inner loop.
+- Presentation scenario design waits until the core level 5 party is implemented.
 
 ## V4.3 Non-Spell Monsters Below CR 3
 
@@ -163,7 +186,7 @@ Status: `complete for the audited V4.2/V4.3 live set`
 
 ## V4.4 Spellcaster Classes Up To Level 2
 
-Status: `approved`
+Status: `deferred as a broad roadmap item`
 
 ### Must Exist Before Broad Spell Intake
 
@@ -198,7 +221,7 @@ Status: `approved`
 
 ## V4.5 Half-Caster Classes Up To Level 2
 
-Status: `approved`
+Status: `deferred as a broad roadmap item`
 
 ### Class Scope
 
