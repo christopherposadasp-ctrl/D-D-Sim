@@ -114,6 +114,7 @@ camel_ability_mods = AbilityModifiers(str=2, dex=-1, con=3, int=-4, wis=0, cha=-
 mule_ability_mods = AbilityModifiers(str=2, dex=0, con=1, int=-4, wis=0, cha=-3)
 pony_ability_mods = AbilityModifiers(str=2, dex=0, con=1, int=-4, wis=0, cha=-2)
 commoner_ability_mods = AbilityModifiers(str=0, dex=0, con=0, int=0, wis=0, cha=0)
+deer_ability_mods = AbilityModifiers(str=0, dex=3, con=0, int=-4, wis=2, cha=-3)
 hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3)
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
@@ -1048,6 +1049,38 @@ MONSTER_DEFINITIONS.update(
             tags=("humanoid", "civilian", "melee"),
             action_ids=("melee_attack",),
             attack_actions=(melee_attack_action("club", "Club"),),
+            default_melee_attack_action_id="melee_attack",
+        ),
+        "deer": MonsterDefinition(
+            base_creature_id="deer",
+            variant_id="deer",
+            display_name="Deer",
+            combat_role="deer",
+            ai_profile_id="melee_brute",
+            max_hp=4,
+            ac=13,
+            speed=50,
+            initiative_mod=3,
+            passive_perception=14,
+            ability_mods=deer_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "ram": WeaponProfile(
+                    id="ram",
+                    display_name="Ram",
+                    attack_bonus=2,
+                    ability_modifier=0,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=0,
+                    damage_type="bludgeoning",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "deer", "melee"),
+            action_ids=("melee_attack",),
+            trait_ids=("agile",),
+            attack_actions=(melee_attack_action("ram", "Ram"),),
             default_melee_attack_action_id="melee_attack",
         ),
         "hyena": MonsterDefinition(
@@ -3082,6 +3115,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "mule",
     "pony",
     "commoner",
+    "deer",
     "hyena",
     "jackal",
     "goblin_minion",

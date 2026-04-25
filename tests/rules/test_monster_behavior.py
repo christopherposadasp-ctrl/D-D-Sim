@@ -33,6 +33,7 @@ FIXED_ATTACK_CASES = (
     ("hobgoblin_archer", "longbow", [5], ["piercing"], [6]),
     ("hobgoblin_captain", "greatsword", [3, 4, 5], ["slashing", "poison"], [9, 5]),
     ("hobgoblin_captain", "longbow", [4, 3, 2], ["piercing", "poison"], [6, 5]),
+    ("deer", "ram", [3], ["bludgeoning"], [3]),
     ("tough", "heavy_crossbow", [5], ["piercing"], [6]),
     ("tough", "mace", [4], ["bludgeoning"], [6]),
     ("axe_beak", "beak", [5], ["slashing"], [7]),

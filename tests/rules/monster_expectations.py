@@ -163,6 +163,33 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="hobgoblin_captain_benchmark",
         benchmark_count=2,
     ),
+    "deer": MonsterExpectation(
+        ai_profile_id="melee_brute",
+        max_hp=4,
+        ac=13,
+        speed=50,
+        initiative_mod=3,
+        passive_perception=14,
+        size_category="medium",
+        footprint=(1, 1),
+        ability_mods={"str": 0, "dex": 3, "con": 0, "int": -4, "wis": 2, "cha": -3},
+        trait_ids=("agile",),
+        attacks={
+            "ram": AttackExpectation(
+                kind="melee",
+                attack_bonus=2,
+                ability_modifier=0,
+                damage_modifier=0,
+                damage_type="bludgeoning",
+                damage_dice=((1, 4),),
+            )
+        },
+        opening_weapon_id="ram",
+        melee_fallback_weapon_id="ram",
+        special_mechanics=(),
+        benchmark_preset_id="deer_benchmark",
+        benchmark_count=15,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,
