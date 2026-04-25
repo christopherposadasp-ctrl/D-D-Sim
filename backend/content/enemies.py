@@ -103,6 +103,7 @@ wolf_ability_mods = AbilityModifiers(str=1, dex=2, con=1, int=-4, wis=1, cha=-2)
 giant_toad_ability_mods = AbilityModifiers(str=2, dex=1, con=1, int=-4, wis=0, cha=-4)
 crocodile_ability_mods = AbilityModifiers(str=2, dex=0, con=1, int=-4, wis=0, cha=-3)
 hobgoblin_warrior_ability_mods = AbilityModifiers(str=1, dex=1, con=1, int=0, wis=0, cha=-1)
+hobgoblin_captain_ability_mods = AbilityModifiers(str=2, dex=2, con=2, int=1, wis=0, cha=1)
 tough_ability_mods = AbilityModifiers(str=2, dex=1, con=2, int=0, wis=0, cha=0)
 axe_beak_ability_mods = AbilityModifiers(str=2, dex=1, con=1, int=-4, wis=0, cha=-3)
 draft_horse_ability_mods = AbilityModifiers(str=4, dex=0, con=2, int=-4, wis=0, cha=-2)
@@ -644,6 +645,74 @@ MONSTER_DEFINITIONS.update(
             ),
             default_melee_attack_action_id="melee_attack",
             default_ranged_attack_action_id="ranged_attack",
+        ),
+        "hobgoblin_captain": MonsterDefinition(
+            base_creature_id="hobgoblin",
+            variant_id="hobgoblin_captain",
+            display_name="Hobgoblin Captain",
+            combat_role="hobgoblin_captain",
+            ai_profile_id="line_holder",
+            max_hp=58,
+            ac=17,
+            speed=30,
+            initiative_mod=4,
+            passive_perception=10,
+            ability_mods=hobgoblin_captain_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "greatsword": WeaponProfile(
+                    id="greatsword",
+                    display_name="Greatsword",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="slashing",
+                            damage_dice=[DiceSpec(count=2, sides=6)],
+                            damage_modifier=2,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="poison",
+                            damage_dice=[DiceSpec(count=1, sides=6)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                    two_handed=True,
+                    attack_ability="str",
+                ),
+                "longbow": WeaponProfile(
+                    id="longbow",
+                    display_name="Longbow",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="piercing",
+                            damage_dice=[DiceSpec(count=1, sides=8)],
+                            damage_modifier=2,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="poison",
+                            damage_dice=[DiceSpec(count=2, sides=4)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="ranged",
+                    range=WeaponRange(normal=150, long=600),
+                ),
+            },
+            tags=("fey", "goblinoid", "hobgoblin", "leader"),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            trait_ids=("aura_of_authority",),
+            attack_actions=(
+                melee_attack_action("greatsword", "Greatsword"),
+                ranged_attack_action("longbow", "Longbow"),
+                repeated_choice_attack_action("multiattack", "Multiattack", ("greatsword", "longbow"), 2),
+            ),
+            default_melee_attack_action_id="multiattack",
+            default_ranged_attack_action_id="multiattack",
         ),
         "tough": MonsterDefinition(
             base_creature_id="tough",
@@ -3002,6 +3071,7 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "hobgoblin_warrior",
     "hobgoblin_archer",
+    "hobgoblin_captain",
     "tough",
     "axe_beak",
     "draft_horse",
