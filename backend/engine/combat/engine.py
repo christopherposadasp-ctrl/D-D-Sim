@@ -43,6 +43,7 @@ from backend.engine.rules.combat_rules import (
     attempt_patient_defense,
     attempt_second_wind,
     attempt_stabilize,
+    attempt_steady_aim,
     attempt_step_of_the_wind,
     can_use_battle_master_maneuver,
     clear_invalid_hidden_effects,
@@ -282,6 +283,7 @@ def clear_turn_flags(actor: UnitState) -> None:
     actor._savage_attacker_used_this_turn = False
     actor._rage_extended_this_turn = False
     actor._reckless_attack_available_this_turn = unit_has_feature(actor, "reckless_attack")
+    actor._steady_aim_active_this_turn = False
 
 
 def expire_turn_end_effects(state: EncounterState, actor_id: str) -> list[CombatEvent]:
@@ -451,6 +453,13 @@ def movement_distance(movement: MovementPlan | None) -> int:
     if not movement or len(movement.path) <= 1:
         return 0
     return len(movement.path) - 1
+
+
+def decision_movement_distance(decision: TurnDecision) -> int:
+    return sum(
+        movement_distance(movement)
+        for movement in (decision.pre_action_movement, decision.between_action_movement, decision.post_action_movement)
+    )
 
 
 def is_tactical_shift_movement(movement: MovementPlan | None) -> bool:
@@ -1739,6 +1748,8 @@ def resolve_bonus_action(
         )
     if bonus_action["kind"] == "hide":
         return attempt_hide(state, actor_id)
+    if bonus_action["kind"] == "steady_aim":
+        return attempt_steady_aim(state, actor_id)
     if bonus_action["kind"] == "patient_defense":
         return attempt_patient_defense(state, actor_id)
     if bonus_action["kind"] == "step_of_the_wind":
@@ -2061,6 +2072,9 @@ def execute_decision(
 ) -> None:
     if exceeds_movement_budget(state, state.units[actor_id], decision):
         events.append(create_skip_event(state, actor_id, "Planned movement exceeds the unit speed budget."))
+        return
+    if decision.bonus_action and decision.bonus_action["kind"] == "steady_aim" and decision_movement_distance(decision) > 0:
+        events.append(create_skip_event(state, actor_id, "Steady Aim cannot be used on a turn with planned movement."))
         return
 
     if decision.bonus_action and decision.bonus_action["timing"] == "before_action":

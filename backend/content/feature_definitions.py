@@ -124,6 +124,31 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         description="Bonus-action Dash, Disengage, and Hide package for rogue skirmishing turns.",
         granted_bonus_action_ids=("bonus_dash", "disengage", "hide"),
     ),
+    "steady_aim": FeatureDefinition(
+        feature_id="steady_aim",
+        display_name="Steady Aim",
+        kind="class_feature",
+        description="Bonus-action aim that grants advantage on a stationary rogue's next attack.",
+        granted_bonus_action_ids=("steady_aim",),
+    ),
+    "assassinate": FeatureDefinition(
+        feature_id="assassinate",
+        display_name="Assassinate",
+        kind="class_feature",
+        description="Assassin initiative advantage plus first-round attack and Sneak Attack damage pressure.",
+    ),
+    "assassin_tools": FeatureDefinition(
+        feature_id="assassin_tools",
+        display_name="Assassin Tools",
+        kind="class_feature",
+        description="Metadata-only Assassin tool training; poison and disguise systems are out of scope.",
+    ),
+    "sharpshooter": FeatureDefinition(
+        feature_id="sharpshooter",
+        display_name="Sharpshooter",
+        kind="feat",
+        description="Dexterity increase plus ranged weapon reliability against cover, long range, and close pressure.",
+    ),
     "rage": FeatureDefinition(
         feature_id="rage",
         display_name="Rage",

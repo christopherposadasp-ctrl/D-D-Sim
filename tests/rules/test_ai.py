@@ -775,6 +775,141 @@ def test_smart_level2_ranged_rogue_hides_from_rock_before_attacking_when_already
     assert decision.pre_action_movement is None
 
 
+def test_ranged_assassin_rogue_uses_steady_aim_when_stationary_without_advantage() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-steady-aim-open",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+            player_behavior="dumb",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert decision.bonus_action == {"kind": "steady_aim", "timing": "before_action"}
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is None
+
+
+def test_ranged_assassin_rogue_does_not_use_steady_aim_when_assassinate_already_grants_advantage() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-assassinate-no-steady",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert decision.bonus_action is None
+
+
+def test_ranged_assassin_rogue_does_not_use_steady_aim_when_hidden_already_grants_advantage() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-hidden-no-steady",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.units["F1"].temporary_effects.append(HiddenEffect(kind="hidden", source_id="F1", expires_at_turn_start_of="F1"))
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert decision.bonus_action is None
+
+
+def test_ranged_assassin_rogue_keeps_existing_hide_behavior_around_the_rock() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-hide-open",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["F1"].effective_speed = 0
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+
+    for enemy_id, enemy in encounter.units.items():
+        if not enemy_id.startswith("E") or enemy_id == "E4":
+            continue
+        enemy.current_hp = 0
+        enemy.conditions.dead = True
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "hide", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+
+
+def test_level4_ranged_assassin_uses_sharpshooter_shortbow_when_stationary_and_pinned() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level4-sharpshooter-pinned",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level4_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].effective_speed = 0
+    encounter.units["E4"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert decision.bonus_action == {"kind": "steady_aim", "timing": "before_action"}
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is None
+
+
+def test_level4_ranged_assassin_keeps_existing_hide_behavior_around_the_rock() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level4-hide-open",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level4_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["F1"].effective_speed = 0
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "hide", "timing": "before_action"}
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+
+
 def test_smart_level2_ranged_rogue_moves_to_hide_ready_square_while_dumb_rogue_does_not() -> None:
     smart = create_encounter(
         EncounterConfig(

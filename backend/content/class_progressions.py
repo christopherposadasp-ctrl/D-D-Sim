@@ -100,6 +100,43 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
         feature_scalars={"sneak_attack_d6": 1},
     ),
     (
+        "rogue",
+        3,
+    ): ClassProgressionDefinition(
+        class_id="rogue",
+        level=3,
+        feature_ids=(
+            "sneak_attack",
+            "expertise_stealth",
+            "cunning_action",
+            "steady_aim",
+            "assassinate",
+            "assassin_tools",
+        ),
+        resource_pools={},
+        attack_count=1,
+        feature_scalars={"sneak_attack_d6": 2},
+    ),
+    (
+        "rogue",
+        4,
+    ): ClassProgressionDefinition(
+        class_id="rogue",
+        level=4,
+        feature_ids=(
+            "sneak_attack",
+            "expertise_stealth",
+            "cunning_action",
+            "steady_aim",
+            "assassinate",
+            "assassin_tools",
+            "sharpshooter",
+        ),
+        resource_pools={},
+        attack_count=1,
+        feature_scalars={"sneak_attack_d6": 2},
+    ),
+    (
         "barbarian",
         1,
     ): ClassProgressionDefinition(

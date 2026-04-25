@@ -76,6 +76,12 @@ COMBAT_ACTIONS: dict[str, CombatActionDefinition] = {
         timing="bonus_action",
         description="Attempt to hide using terrain cover and a stealth check.",
     ),
+    "steady_aim": CombatActionDefinition(
+        action_id="steady_aim",
+        display_name="Steady Aim",
+        timing="bonus_action",
+        description="Gain advantage on the next attack this turn without moving.",
+    ),
     "bonus_unarmed_strike": CombatActionDefinition(
         action_id="bonus_unarmed_strike",
         display_name="Bonus Unarmed Strike",

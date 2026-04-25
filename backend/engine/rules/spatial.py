@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from backend.content.enemies import unit_has_trait
+from backend.content.feature_definitions import unit_has_feature
 from backend.engine.models.state import (
     EncounterState,
     Faction,
@@ -43,6 +44,9 @@ class AttackContext:
         cover_ac_bonus: int,
         advantage_sources: list[str],
         disadvantage_sources: list[str],
+        sharpshooter_applied: bool = False,
+        sharpshooter_ignored_cover_ac_bonus: int = 0,
+        sharpshooter_ignored_disadvantage_sources: list[str] | None = None,
     ) -> None:
         self.legal = legal
         self.distance_squares = distance_squares
@@ -53,6 +57,46 @@ class AttackContext:
         self.cover_ac_bonus = cover_ac_bonus
         self.advantage_sources = advantage_sources
         self.disadvantage_sources = disadvantage_sources
+        self.sharpshooter_applied = sharpshooter_applied
+        self.sharpshooter_ignored_cover_ac_bonus = sharpshooter_ignored_cover_ac_bonus
+        self.sharpshooter_ignored_disadvantage_sources = sharpshooter_ignored_disadvantage_sources or []
+
+
+def weapon_qualifies_for_sharpshooter(attacker: UnitState, weapon: WeaponProfile) -> bool:
+    attacker_weapon = attacker.attacks.get(weapon.id)
+    return bool(
+        unit_has_feature(attacker, "sharpshooter")
+        and weapon.kind == "ranged"
+        and attacker_weapon is not None
+        and attacker_weapon.kind == "ranged"
+    )
+
+
+def apply_sharpshooter_context_adjustments(
+    attacker: UnitState,
+    weapon: WeaponProfile,
+    cover_ac_bonus: int,
+    disadvantage_sources: list[str],
+) -> tuple[int, list[str], bool, int, list[str]]:
+    if not weapon_qualifies_for_sharpshooter(attacker, weapon):
+        return cover_ac_bonus, disadvantage_sources, False, 0, []
+
+    ignored_disadvantage_sources = [
+        source for source in ("long_range", "adjacent_enemy") if source in disadvantage_sources
+    ]
+    adjusted_disadvantage_sources = [
+        source for source in disadvantage_sources if source not in {"long_range", "adjacent_enemy"}
+    ]
+    ignored_cover_ac_bonus = cover_ac_bonus
+    sharpshooter_applied = ignored_cover_ac_bonus > 0 or bool(ignored_disadvantage_sources)
+
+    return (
+        0,
+        adjusted_disadvantage_sources,
+        sharpshooter_applied,
+        ignored_cover_ac_bonus,
+        ignored_disadvantage_sources,
+    )
 
 
 class PlacementValidationResult:
@@ -1139,6 +1183,9 @@ def get_attack_context(
     within_normal_range = False
     within_long_range = False
     cover_ac_bonus = 0
+    sharpshooter_applied = False
+    sharpshooter_ignored_cover_ac_bonus = 0
+    sharpshooter_ignored_disadvantage_sources: list[str] = []
 
     if (
         attacker.faction == "goblins"
@@ -1192,6 +1239,14 @@ def get_attack_context(
         if has_half_cover(state, attacker_id, target_id, attacker_position, target_position, index):
             cover_ac_bonus = 2
 
+        (
+            cover_ac_bonus,
+            disadvantage_sources,
+            sharpshooter_applied,
+            sharpshooter_ignored_cover_ac_bonus,
+            sharpshooter_ignored_disadvantage_sources,
+        ) = apply_sharpshooter_context_adjustments(attacker, weapon, cover_ac_bonus, disadvantage_sources)
+
     # Some bite-style weapons can only keep pressuring a creature that the
     # attacker is already holding. This rule belongs in shared range legality so
     # large grapplers like crocodiles and giant toads use the same check.
@@ -1213,6 +1268,9 @@ def get_attack_context(
         cover_ac_bonus=cover_ac_bonus,
         advantage_sources=advantage_sources,
         disadvantage_sources=disadvantage_sources,
+        sharpshooter_applied=sharpshooter_applied,
+        sharpshooter_ignored_cover_ac_bonus=sharpshooter_ignored_cover_ac_bonus,
+        sharpshooter_ignored_disadvantage_sources=sharpshooter_ignored_disadvantage_sources,
     )
 
 

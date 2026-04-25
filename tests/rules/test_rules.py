@@ -58,6 +58,7 @@ from backend.engine.rules.combat_rules import (
     resolve_death_save,
     resolve_saving_throw,
 )
+from backend.engine.utils.rng import normalize_seed, roll_die
 
 
 def build_barbarian_config(seed: str) -> EncounterConfig:
@@ -79,6 +80,24 @@ def build_level2_rogue_config(seed: str, *, player_preset_id: str = "rogue_level
         enemy_preset_id="goblin_screen",
         player_preset_id=player_preset_id,
         player_behavior="smart",
+    )
+
+
+def build_level3_rogue_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="rogue_level3_ranged_assassin_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level4_rogue_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="rogue_level4_ranged_assassin_trio",
+        player_behavior=player_behavior,
     )
 
 
@@ -2890,6 +2909,393 @@ def test_execute_movement_clears_hidden_when_the_rogue_moves_into_enemy_adjacenc
     assert move_event.condition_deltas == ["F1 is no longer hidden."]
     assert encounter.units["F1"].position == GridPosition(x=7, y=7)
     assert any(effect.kind == "hidden" for effect in encounter.units["F1"].temporary_effects) is False
+
+
+def test_assassin_initiative_uses_advantage_deterministically() -> None:
+    seed = "rogue-assassin-initiative"
+    rng = normalize_seed(seed)
+    first_roll, rng = roll_die(rng, 20)
+    second_roll, _ = roll_die(rng, 20)
+    encounter = create_encounter(build_level3_rogue_config(seed))
+
+    assert encounter.units["F1"].initiative_score == max(first_roll, second_roll) + 3
+
+
+def test_assassinate_grants_round_one_advantage_against_targets_that_have_not_acted() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-assassinate-advantage"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 15], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["attackMode"] == "advantage"
+    assert attack_event.resolved_totals["selectedRoll"] == 15
+    assert "assassinate" in attack_event.raw_rolls["advantageSources"]
+
+
+def test_assassinate_advantage_stops_after_target_turn_or_round_one() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-assassinate-no-advantage"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.initiative_order = ["E4", "F1"]
+    encounter.active_combatant_index = 1
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    after_target_turn, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    encounter.round = 2
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    after_round_one, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    assert "assassinate" not in after_target_turn.raw_rolls["advantageSources"]
+    assert "assassinate" not in after_round_one.raw_rolls["advantageSources"]
+
+
+def test_assassinate_adds_flat_rogue_level_damage_to_round_one_sneak_attack() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-assassinate-damage"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.units["E4"].current_hp = 40
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15, 12], damage_rolls=[4]),
+        ),
+    )
+
+    assassinate_component = next(
+        component
+        for component in attack_event.damage_details.damage_components
+        if component.flat_modifier == 3 and component.raw_rolls == []
+    )
+
+    assert attack_event.resolved_totals["assassinateDamageBonus"] == 3
+    assert assassinate_component.total_damage == 3
+    assert "F1 applies Assassinate for +3 damage." in attack_event.condition_deltas
+
+
+def test_assassinate_damage_does_not_double_on_critical_hits() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-assassinate-crit"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.units["E4"].current_hp = 40
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[20, 5], damage_rolls=[4]),
+        ),
+    )
+
+    assassinate_component = next(
+        component
+        for component in attack_event.damage_details.damage_components
+        if component.flat_modifier == 3 and component.raw_rolls == []
+    )
+
+    assert attack_event.resolved_totals["critical"] is True
+    assert assassinate_component.total_damage == 3
+
+
+def test_assassinate_damage_requires_sneak_attack() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-assassinate-no-sneak"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.units["F1"].feature_ids.remove("sneak_attack")
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15, 12], damage_rolls=[4]),
+        ),
+    )
+
+    assert "assassinateDamageBonus" not in attack_event.resolved_totals
+    assert all(component.damage_type != "precision" for component in attack_event.damage_details.damage_components)
+
+
+def test_steady_aim_grants_advantage_and_is_consumed_by_the_next_attack() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-steady-aim-advantage"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.round = 2
+    defeat_other_enemies(encounter, "E4")
+
+    steady_event = resolve_bonus_action(encounter, "F1", {"kind": "steady_aim", "timing": "before_action"})
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 15], damage_rolls=[4]),
+        ),
+    )
+
+    assert steady_event is not None
+    assert steady_event.event_type == "phase_change"
+    assert attack_event.resolved_totals["attackMode"] == "advantage"
+    assert "steady_aim" in attack_event.raw_rolls["advantageSources"]
+    assert "F1's Steady Aim is consumed on this attack roll." in attack_event.condition_deltas
+    assert encounter.units["F1"]._steady_aim_active_this_turn is False
+
+
+def test_execute_decision_rejects_steady_aim_when_movement_is_planned() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-steady-aim-movement-reject"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    defeat_other_enemies(encounter, "E4")
+    events: list = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            bonus_action={"kind": "steady_aim", "timing": "before_action"},
+            pre_action_movement=MovementPlan(
+                path=[GridPosition(x=1, y=1), GridPosition(x=2, y=1)],
+                mode="move",
+            ),
+            action={"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    assert [event.event_type for event in events] == ["skip"]
+    assert events[0].resolved_totals["reason"] == "Steady Aim cannot be used on a turn with planned movement."
+    assert encounter.units["F1"]._steady_aim_active_this_turn is False
+
+
+def test_sharpshooter_shortbow_ignores_half_cover_ac_bonus() -> None:
+    encounter = create_encounter(build_level4_rogue_config("rogue-sharpshooter-cover"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[9], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["coverAcBonus"] == 0
+    assert attack_event.resolved_totals["targetAc"] == encounter.units["E4"].ac
+    assert attack_event.resolved_totals["sharpshooterApplied"] is True
+    assert attack_event.resolved_totals["sharpshooterIgnoredCoverAcBonus"] == 2
+
+
+def test_sharpshooter_shortbow_ignores_long_range_disadvantage_but_not_range_legality() -> None:
+    encounter = create_encounter(build_level4_rogue_config("rogue-sharpshooter-long-range"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=11, y=1)
+    encounter.units["F1"].attacks["shortbow"].range = WeaponRange(normal=30, long=60)
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+    encounter.units["E4"].position = GridPosition(x=14, y=1)
+    out_of_range_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["attackMode"] == "normal"
+    assert "long_range" not in attack_event.raw_rolls["disadvantageSources"]
+    assert attack_event.raw_rolls["sharpshooterIgnoredDisadvantageSources"] == ["long_range"]
+    assert attack_event.resolved_totals["sharpshooterApplied"] is True
+    assert out_of_range_event.event_type == "skip"
+    assert out_of_range_event.resolved_totals["reason"] == "Shortbow is not in range."
+
+
+def test_sharpshooter_shortbow_ignores_adjacent_enemy_disadvantage() -> None:
+    encounter = create_encounter(build_level4_rogue_config("rogue-sharpshooter-adjacent"))
+    encounter.round = 2
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["attackMode"] == "normal"
+    assert "adjacent_enemy" not in attack_event.raw_rolls["disadvantageSources"]
+    assert attack_event.raw_rolls["sharpshooterIgnoredDisadvantageSources"] == ["adjacent_enemy"]
+    assert attack_event.resolved_totals["sharpshooterApplied"] is True
+
+
+def test_sharpshooter_does_not_apply_to_spells_melee_weapons_or_level3_rogues() -> None:
+    wizard = create_encounter(build_wizard_config("wizard-fire-bolt-not-sharpshooter"))
+    defeat_other_enemies(wizard, "E4")
+    wizard.units["F1"].feature_ids.append("sharpshooter")
+    wizard.units["F1"].position = GridPosition(x=4, y=8)
+    wizard.units["E4"].position = GridPosition(x=8, y=8)
+    spell_events = resolve_cast_spell_action(
+        wizard,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E4"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[6]),
+    )
+    spell_attack = next(event for event in spell_events if event.event_type == "attack")
+
+    rogue4 = create_encounter(build_level4_rogue_config("rogue-sharpshooter-not-melee"))
+    rogue4.units["F1"].position = GridPosition(x=5, y=5)
+    rogue4.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(rogue4, "E1")
+    melee_attack, _ = resolve_attack(
+        rogue4,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="shortsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    rogue3 = create_encounter(build_level3_rogue_config("rogue-level3-no-sharpshooter"))
+    rogue3.round = 2
+    rogue3.units["F1"].position = GridPosition(x=4, y=8)
+    rogue3.units["E4"].position = GridPosition(x=8, y=8)
+    defeat_other_enemies(rogue3, "E4")
+    rogue3_attack, _ = resolve_attack(
+        rogue3,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[10], damage_rolls=[4]),
+        ),
+    )
+
+    assert spell_attack.resolved_totals["coverAcBonus"] == 2
+    assert "sharpshooterApplied" not in spell_attack.resolved_totals
+    assert "sharpshooterApplied" not in melee_attack.resolved_totals
+    assert rogue3_attack.resolved_totals["coverAcBonus"] == 2
+    assert rogue3_attack.resolved_totals["hit"] is False
+    assert "sharpshooterApplied" not in rogue3_attack.resolved_totals
+
+
+def test_level4_assassinate_damage_uses_rogue_level_four() -> None:
+    encounter = create_encounter(build_level4_rogue_config("rogue-level4-assassinate-damage"))
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.units["E4"].current_hp = 40
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15, 12], damage_rolls=[4]),
+        ),
+    )
+
+    assassinate_component = next(
+        component
+        for component in attack_event.damage_details.damage_components
+        if component.flat_modifier == 4 and component.raw_rolls == []
+    )
+
+    assert attack_event.resolved_totals["assassinateDamageBonus"] == 4
+    assert assassinate_component.total_damage == 4
+    assert any(component.damage_type == "precision" and len(component.raw_rolls) == 2 for component in attack_event.damage_details.damage_components)
 
 
 def test_bonus_dash_extends_player_rogue_movement_budget_in_execute_decision() -> None:

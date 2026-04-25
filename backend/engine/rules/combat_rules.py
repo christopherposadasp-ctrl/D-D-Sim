@@ -179,6 +179,10 @@ def unit_is_hidden(unit: UnitState) -> bool:
     return any(effect.kind == "hidden" for effect in unit.temporary_effects)
 
 
+def unit_is_steady_aiming(unit: UnitState) -> bool:
+    return unit._steady_aim_active_this_turn
+
+
 def unit_is_dodging(unit: UnitState) -> bool:
     return any(effect.kind == "dodging" for effect in unit.temporary_effects)
 
@@ -354,6 +358,30 @@ def get_sneak_attack_d6_count(attacker: UnitState) -> int:
     if not attacker.class_id or attacker.level is None:
         return 0
     return get_progression_scalar(attacker.class_id, attacker.level, "sneak_attack_d6", 0)
+
+
+def unit_has_not_taken_turn_this_combat_round(state: EncounterState, unit_id: str) -> bool:
+    if state.round != 1:
+        return False
+    try:
+        unit_index = state.initiative_order.index(unit_id)
+    except ValueError:
+        return False
+    return unit_index > state.active_combatant_index
+
+
+def can_apply_assassinate_advantage(state: EncounterState, attacker: UnitState, target_id: str) -> bool:
+    return bool(
+        unit_has_feature(attacker, "assassinate")
+        and state.round == 1
+        and unit_has_not_taken_turn_this_combat_round(state, target_id)
+    )
+
+
+def get_assassinate_damage_bonus(state: EncounterState, attacker: UnitState) -> int:
+    if not unit_has_feature(attacker, "assassinate") or state.round != 1:
+        return 0
+    return attacker.level or 0
 
 
 def has_adjacent_ally_for_sneak_attack(
@@ -1023,6 +1051,27 @@ def attempt_hide(state: EncounterState, actor_id: str, override_roll: int | None
             if success
             else f"{actor_id} fails to hide with a Stealth check of {total} against DC {target_dc}."
         ),
+    )
+
+
+def attempt_steady_aim(state: EncounterState, actor_id: str) -> CombatEvent:
+    actor = state.units[actor_id]
+    if not unit_has_feature(actor, "steady_aim"):
+        return create_skip_event(state, actor_id, "Steady Aim is unavailable.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return create_skip_event(state, actor_id, "Cannot use Steady Aim while down.")
+
+    actor._steady_aim_active_this_turn = True
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[actor_id],
+        event_type="phase_change",
+        raw_rolls={},
+        resolved_totals={"steadyAim": True},
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=[f"{actor_id} uses Steady Aim."],
+        text_summary=f"{actor_id} uses Steady Aim.",
     )
 
 
@@ -1740,6 +1789,12 @@ def get_attack_mode(
 
     if target.conditions.unconscious:
         advantage_sources.append("target_unconscious")
+
+    if unit_is_steady_aiming(attacker):
+        advantage_sources.append("steady_aim")
+
+    if can_apply_assassinate_advantage(state, attacker, target_id):
+        advantage_sources.append("assassinate")
 
     if unit_is_hidden(attacker):
         advantage_sources.append("hidden")
@@ -2506,6 +2561,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     condition_deltas: list[str] = []
     savage_attacker_consumed = False
     final_damage_components: list[DamageComponentResult] = []
+    assassinate_damage_bonus = 0
 
     if attack_reaction == "redirect_attack":
         condition_deltas.append(f"{args.target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
@@ -2513,6 +2569,9 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         condition_deltas.append(f"{reaction_actor_id} uses Parry and adds 2 AC against this attack.")
 
     condition_deltas.extend(end_hidden(attacker, reason=f"{args.attacker_id} is no longer hidden after attacking."))
+    steady_aim_consumed = unit_is_steady_aiming(attacker)
+    if steady_aim_consumed:
+        attacker._steady_aim_active_this_turn = False
 
     if hit:
         # Great Weapon Fighting is applied before Savage Attacker chooses the better damage candidate.
@@ -2598,6 +2657,22 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                         total_damage=sneak_attack_component.subtotal * critical_multiplier,
                     )
                 )
+                assassinate_damage_bonus = get_assassinate_damage_bonus(state, attacker)
+                if assassinate_damage_bonus > 0:
+                    assassinate_damage_type = weapon.damage_type or (
+                        weapon.damage_components[0].damage_type if weapon.damage_components else "damage"
+                    )
+                    final_damage_components.append(
+                        DamageComponentResult(
+                            damage_type=assassinate_damage_type,
+                            raw_rolls=[],
+                            adjusted_rolls=[],
+                            subtotal=0,
+                            flat_modifier=assassinate_damage_bonus,
+                            total_damage=assassinate_damage_bonus,
+                        )
+                    )
+                    condition_deltas.append(f"{args.attacker_id} applies Assassinate for +{assassinate_damage_bonus} damage.")
 
         if maneuver_id is None and can_attempt_trip_attack(
             attacker,
@@ -2711,6 +2786,8 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         condition_deltas.append(f"{args.attacker_id}'s vex advantage is consumed on this attack roll.")
     if harried_consumed:
         condition_deltas.append(f"{args.target_id}'s harried defense is consumed on this attack roll.")
+    if steady_aim_consumed:
+        condition_deltas.append(f"{args.attacker_id}'s Steady Aim is consumed on this attack roll.")
     condition_deltas.extend(maneuver_condition_deltas)
 
     critical_multiplier = 2 if critical else 1
@@ -2751,6 +2828,12 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     }
     if great_weapon_master_damage_bonus > 0:
         resolved_totals["greatWeaponMasterDamageBonus"] = great_weapon_master_damage_bonus
+    if assassinate_damage_bonus > 0:
+        resolved_totals["assassinateDamageBonus"] = assassinate_damage_bonus
+    if attack_context.sharpshooter_applied:
+        resolved_totals["sharpshooterApplied"] = True
+        if attack_context.sharpshooter_ignored_cover_ac_bonus > 0:
+            resolved_totals["sharpshooterIgnoredCoverAcBonus"] = attack_context.sharpshooter_ignored_cover_ac_bonus
     if great_weapon_master_hewing_trigger:
         resolved_totals["greatWeaponMasterHewingTrigger"] = True
         resolved_totals["greatWeaponMasterHewingTriggerReason"] = "critical" if critical else "dropped_to_zero"
@@ -2779,6 +2862,8 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         "advantageSources": advantage_sources,
         "disadvantageSources": disadvantage_sources,
     }
+    if attack_context.sharpshooter_ignored_disadvantage_sources:
+        raw_rolls["sharpshooterIgnoredDisadvantageSources"] = attack_context.sharpshooter_ignored_disadvantage_sources
     if maneuver_id or precision_maneuver_applied:
         raw_rolls["superiorityDiceRolls"] = superiority_dice_rolls
     if maneuver_save_rolls:

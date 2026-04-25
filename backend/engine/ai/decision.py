@@ -28,6 +28,7 @@ from backend.engine.models.state import (
 from backend.engine.rules.combat_rules import (
     build_spell_attack_profile,
     can_apply_sneak_attack,
+    can_apply_assassinate_advantage,
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
     get_damage_defense_flags,
@@ -149,6 +150,10 @@ def can_use_player_bonus_dash(unit: UnitState) -> bool:
 
 def can_use_player_hide_bonus_action(unit: UnitState) -> bool:
     return can_use_player_bonus_action(unit, "hide")
+
+
+def can_use_player_steady_aim(unit: UnitState) -> bool:
+    return can_use_player_bonus_action(unit, "steady_aim")
 
 
 def can_use_player_bonus_unarmed_strike(unit: UnitState) -> bool:
@@ -689,6 +694,7 @@ def finalize_player_bonus_action_decision(
 ) -> TurnDecision:
     decision = apply_monk_martial_arts(state, actor, decision)
     decision = apply_rogue_cunning_action(state, actor, decision, position_index)
+    decision = apply_rogue_steady_aim(state, actor, decision, position_index)
     decision = apply_barbarian_opening_rage(state, actor, decision, position_index)
     decision = apply_barbarian_rage_upkeep(actor, decision)
     return apply_fighter_tactical_shift(state, actor, decision, position_index)
@@ -921,6 +927,12 @@ def get_attack_mode_for_context(
 
     if target.conditions.unconscious:
         advantage_sources.append("target_unconscious")
+
+    if attacker._steady_aim_active_this_turn:
+        advantage_sources.append("steady_aim")
+
+    if can_apply_assassinate_advantage(state, attacker, target.id):
+        advantage_sources.append("assassinate")
 
     if unit_is_hidden(attacker):
         advantage_sources.append("hidden")
@@ -2451,6 +2463,27 @@ def build_shocking_grasp_decision(
     )
 
 
+def sharpshooter_allows_adjacent_ranged_pressure(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+    ranged_weapon_id: str,
+    position_index: PositionIndex | None,
+) -> bool:
+    weapon = actor.attacks.get(ranged_weapon_id)
+    if not weapon or not actor.position:
+        return False
+
+    for target in conscious_enemies:
+        if not target.position or get_distance_between_units(actor, target) > 1:
+            continue
+        context = get_attack_context(state, actor.id, target.id, weapon, position_index=position_index)
+        if context.legal and "adjacent_enemy" in context.sharpshooter_ignored_disadvantage_sources:
+            return True
+
+    return False
+
+
 def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, conscious_enemies: list[UnitState]) -> str | None:
     if not actor.position or not can_cast_combat_spell(actor, "magic_missile"):
         return None
@@ -3009,6 +3042,41 @@ def apply_rogue_cunning_action(
     return decision
 
 
+def decision_has_planned_movement(decision: TurnDecision) -> bool:
+    return any(
+        movement and len(movement.path) > 1
+        for movement in (decision.pre_action_movement, decision.between_action_movement, decision.post_action_movement)
+    )
+
+
+def apply_rogue_steady_aim(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    position_index: PositionIndex | None = None,
+) -> TurnDecision:
+    if actor.class_id != "rogue" or decision.bonus_action or decision.action["kind"] != "attack":
+        return decision
+    if not can_use_player_steady_aim(actor) or decision_has_planned_movement(decision):
+        return decision
+    if decision.action.get("weapon_id") != "shortbow":
+        return decision
+
+    target = state.units.get(decision.action.get("target_id", ""))
+    weapon = actor.attacks.get("shortbow")
+    if not target or not weapon:
+        return decision
+
+    context = get_attack_context(state, actor.id, target.id, weapon, position_index=position_index)
+    if not context.legal:
+        return decision
+    if get_attack_mode_for_context(state, actor, target, weapon, context) == "advantage":
+        return decision
+
+    decision.bonus_action = {"kind": "steady_aim", "timing": "before_action"}
+    return decision
+
+
 def apply_monk_martial_arts(
     state: EncounterState,
     actor: UnitState,
@@ -3075,7 +3143,10 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
     has_adjacent_enemy = any(
         actor.position and target.position and get_distance_between_units(actor, target) <= 1 for target in conscious_enemies
     )
-    prefer_ranged_first = is_player_ranged_skirmisher(actor) and not has_adjacent_enemy
+    prefer_ranged_first = is_player_ranged_skirmisher(actor) and (
+        not has_adjacent_enemy
+        or sharpshooter_allows_adjacent_ranged_pressure(state, actor, conscious_enemies, ranged_weapon_id, position_index)
+    )
 
     if is_player_ranged_skirmisher(actor) and has_adjacent_enemy and can_use_player_weapon(actor, ranged_weapon_id):
         disengage_ranged_decision = build_player_disengage_ranged_attack_decision(

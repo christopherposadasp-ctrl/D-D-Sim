@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from backend.content.attack_sequences import build_player_attack_action
 from backend.content.class_progressions import get_proficiency_bonus
+from backend.content.feature_definitions import unit_has_granted_bonus_action
 from backend.engine import create_encounter
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import EncounterConfig, GridPosition
@@ -357,6 +358,8 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "rogue_melee_level2_sample_build",
         "rogue_ranged_level2_benchmark_archer",
         "rogue_ranged_level2_sample_build",
+        "rogue_ranged_level3_assassin_sample_build",
+        "rogue_ranged_level4_assassin_sample_build",
         "wizard_sample_build",
     ]
     assert [entry.id for entry in catalog.player_presets] == [
@@ -369,6 +372,8 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "rogue_melee_trio",
         "rogue_level2_ranged_trio",
         "rogue_level2_melee_trio",
+        "rogue_level3_ranged_assassin_trio",
+        "rogue_level4_ranged_assassin_trio",
         "barbarian_sample_trio",
         "barbarian_level2_sample_trio",
         "monk_sample_trio",
@@ -380,7 +385,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "barbarian": 2,
         "fighter": 5,
         "monk": 2,
-        "rogue": 2,
+        "rogue": 4,
         "wizard": 1,
     }
 
@@ -392,12 +397,12 @@ def test_default_player_preset_loads_fighter_barbarian_and_two_rogues() -> None:
     assert encounter.units["F1"].level == 5
     assert encounter.units["F2"].loadout_id == "barbarian_level2_sample_build"
     assert encounter.units["F2"].level == 2
-    assert encounter.units["F3"].loadout_id == "rogue_ranged_level2_sample_build"
-    assert encounter.units["F3"].level == 2
+    assert encounter.units["F3"].loadout_id == "rogue_ranged_level4_assassin_sample_build"
+    assert encounter.units["F3"].level == 4
     assert encounter.units["F4"].loadout_id == "rogue_melee_level2_sample_build"
     assert encounter.units["F4"].level == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 106
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 122
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:
@@ -476,6 +481,65 @@ def test_level2_rogue_melee_build_uses_cunning_action_metadata() -> None:
     assert "cunning_action" in rogue.feature_ids
 
 
+def test_level3_ranged_assassin_rogue_build_uses_assassin_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-assassin-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+        )
+    )
+
+    rogue = encounter.units["F1"]
+    assert rogue.class_id == "rogue"
+    assert rogue.level == 3
+    assert rogue.loadout_id == "rogue_ranged_level3_assassin_sample_build"
+    assert rogue.template_name == "Level 3 Ranged Assassin Rogue Sample Build"
+    assert rogue.max_hp == 26
+    assert rogue.ac == 15
+    assert tuple(sorted(rogue.attacks.keys())) == ("shortbow", "shortsword")
+    assert "sneak_attack" in rogue.feature_ids
+    assert "expertise_stealth" in rogue.feature_ids
+    assert "cunning_action" in rogue.feature_ids
+    assert "steady_aim" in rogue.feature_ids
+    assert "assassinate" in rogue.feature_ids
+    assert "assassin_tools" in rogue.feature_ids
+    assert unit_has_granted_bonus_action(rogue, "steady_aim") is True
+    assert rogue.combat_skill_modifiers == {"stealth": 7}
+
+
+def test_level4_ranged_assassin_rogue_build_uses_sharpshooter_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level4-assassin-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="rogue_level4_ranged_assassin_trio",
+        )
+    )
+
+    rogue = encounter.units["F1"]
+    assert rogue.class_id == "rogue"
+    assert rogue.level == 4
+    assert rogue.loadout_id == "rogue_ranged_level4_assassin_sample_build"
+    assert rogue.template_name == "Level 4 Ranged Assassin Rogue Sample Build"
+    assert rogue.max_hp == 34
+    assert rogue.ac == 16
+    assert rogue.ability_mods.dex == 4
+    assert rogue.initiative_mod == 4
+    assert rogue.attacks["shortbow"].attack_bonus == 6
+    assert rogue.attacks["shortbow"].damage_modifier == 4
+    assert rogue.attacks["shortsword"].attack_bonus == 6
+    assert rogue.attacks["shortsword"].damage_modifier == 4
+    assert "sneak_attack" in rogue.feature_ids
+    assert "expertise_stealth" in rogue.feature_ids
+    assert "cunning_action" in rogue.feature_ids
+    assert "steady_aim" in rogue.feature_ids
+    assert "assassinate" in rogue.feature_ids
+    assert "assassin_tools" in rogue.feature_ids
+    assert "sharpshooter" in rogue.feature_ids
+    assert rogue.combat_skill_modifiers == {"stealth": 8}
+
+
 def test_proficiency_bonus_scales_with_level_breakpoints() -> None:
     assert get_proficiency_bonus(1) == 2
     assert get_proficiency_bonus(4) == 2
@@ -531,3 +595,31 @@ def test_shortbow_can_apply_sneak_attack_with_adjacent_ally() -> None:
     )
 
     assert any(component.damage_type == "precision" for component in attack_event.damage_details.damage_components)
+
+
+def test_level3_rogue_shortbow_sneak_attack_rolls_two_d6() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-shortbow-sneak-attack",
+            placements=build_trio_placements(),
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+        )
+    )
+    encounter.round = 2
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="G1",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    sneak_component = next(
+        component for component in attack_event.damage_details.damage_components if component.damage_type == "precision"
+    )
+
+    assert len(sneak_component.raw_rolls) == 2

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.content.enemies import create_enemy, get_enemy_preset, get_enemy_variant
+from backend.content.feature_definitions import unit_has_feature
 from backend.content.player_loadouts import (
     create_player_party_units,
     get_default_player_positions,
@@ -204,6 +205,9 @@ def create_encounter(config: EncounterConfig) -> EncounterState:
     # shares one rolled value in the current model.
     for player_unit_id in player_unit_ids:
         roll_value, rng_state = roll_die(rng_state, 20)
+        if unit_has_feature(units[player_unit_id], "assassinate"):
+            second_roll, rng_state = roll_die(rng_state, 20)
+            roll_value = max(roll_value, second_roll)
         total = roll_value + units[player_unit_id].initiative_mod
         units[player_unit_id].initiative_score = total
         initiative_scores[player_unit_id] = total

@@ -1342,7 +1342,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "id": "rogue",
       "displayName": "Rogue",
       "category": "martial",
-      "maxSupportedLevel": 2
+      "maxSupportedLevel": 4
     },
     {
       "id": "wizard",
@@ -1630,6 +1630,45 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       ]
     },
     {
+      "id": "rogue_ranged_level3_assassin_sample_build",
+      "displayName": "Level 3 Ranged Assassin Rogue Sample Build",
+      "classId": "rogue",
+      "level": 3,
+      "maxHp": 26,
+      "featureIds": [
+        "sneak_attack",
+        "expertise_stealth",
+        "cunning_action",
+        "steady_aim",
+        "assassinate",
+        "assassin_tools"
+      ],
+      "weaponIds": [
+        "shortbow",
+        "shortsword"
+      ]
+    },
+    {
+      "id": "rogue_ranged_level4_assassin_sample_build",
+      "displayName": "Level 4 Ranged Assassin Rogue Sample Build",
+      "classId": "rogue",
+      "level": 4,
+      "maxHp": 34,
+      "featureIds": [
+        "sneak_attack",
+        "expertise_stealth",
+        "cunning_action",
+        "steady_aim",
+        "assassinate",
+        "assassin_tools",
+        "sharpshooter"
+      ],
+      "weaponIds": [
+        "shortbow",
+        "shortsword"
+      ]
+    },
+    {
       "id": "wizard_sample_build",
       "displayName": "Level 1 Wizard Sample Build",
       "classId": "wizard",
@@ -1818,6 +1857,44 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       ]
     },
     {
+      "id": "rogue_level3_ranged_assassin_trio",
+      "displayName": "Level 3 Ranged Assassin Rogue Trio",
+      "description": "Three level 3 ranged Assassin rogues with shortbows, Steady Aim, and Assassinate.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "rogue_ranged_level3_assassin_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "rogue_ranged_level3_assassin_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_ranged_level3_assassin_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "rogue_level4_ranged_assassin_trio",
+      "displayName": "Level 4 Ranged Assassin Rogue Trio",
+      "description": "Three level 4 ranged Assassin rogues with shortbows, Sharpshooter, Steady Aim, and Assassinate.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "rogue_ranged_level4_assassin_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "rogue_ranged_level4_assassin_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "rogue_ranged_level4_assassin_sample_build"
+        }
+      ]
+    },
+    {
       "id": "barbarian_sample_trio",
       "displayName": "Level 1 Barbarian Trio",
       "description": "Three level 1 barbarians with greataxes and thrown handaxe fallback.",
@@ -1915,7 +1992,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
     {
       "id": "martial_mixed_party",
       "displayName": "Mixed Martial Party",
-      "description": "One level 5 Battle Master fighter, one level 2 barbarian, one level 2 ranged rogue, and one level 2 melee rogue.",
+      "description": "One level 5 Battle Master fighter, one level 2 barbarian, one level 4 ranged Assassin rogue, and one level 2 melee rogue.",
       "units": [
         {
           "unitId": "F1",
@@ -1927,7 +2004,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         },
         {
           "unitId": "F3",
-          "loadoutId": "rogue_ranged_level2_sample_build"
+          "loadoutId": "rogue_ranged_level4_assassin_sample_build"
         },
         {
           "unitId": "F4",
@@ -1962,6 +2039,8 @@ const ACTIVE_PLAYER_PRESET_IDS = [
   'rogue_melee_trio',
   'rogue_level2_ranged_trio',
   'rogue_level2_melee_trio',
+  'rogue_level3_ranged_assassin_trio',
+  'rogue_level4_ranged_assassin_trio',
   'barbarian_sample_trio',
   'barbarian_level2_sample_trio',
   'monk_sample_trio',
@@ -2054,7 +2133,7 @@ function buildEncounterState(
   const units: Record<string, UnitState> = {
     F1: buildUnit('F1', 'Level 2 Fighter Sample Build', 'fighters', 'fighter', { x: 1, y: 7 }, 21),
     F2: buildUnit('F2', 'Level 2 Barbarian Sample Build', 'fighters', 'barbarian', { x: 1, y: 8 }, 25),
-    F3: buildUnit('F3', 'Level 2 Ranged Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 9 }, 18),
+    F3: buildUnit('F3', 'Level 4 Ranged Assassin Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 9 }, 34),
     F4: buildUnit('F4', 'Level 2 Melee Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 10 }, 18),
     E1: buildUnit('E1', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 6 }, 10),
     E2: buildUnit('E2', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 8 }, 10),
@@ -2508,7 +2587,7 @@ describe('App', () => {
     expect(mixedParty?.units).toEqual([
       { unitId: 'F1', loadoutId: 'fighter_level5_sample_build' },
       { unitId: 'F2', loadoutId: 'barbarian_level2_sample_build' },
-      { unitId: 'F3', loadoutId: 'rogue_ranged_level2_sample_build' },
+      { unitId: 'F3', loadoutId: 'rogue_ranged_level4_assassin_sample_build' },
       { unitId: 'F4', loadoutId: 'rogue_melee_level2_sample_build' },
     ]);
   });

@@ -358,6 +358,7 @@ class UnitState(CamelModel):
     _great_weapon_master_hewing_used_this_turn: bool = PrivateAttr(default=False)
     _savage_attacker_used_this_turn: bool = PrivateAttr(default=False)
     _reckless_attack_available_this_turn: bool = PrivateAttr(default=False)
+    _steady_aim_active_this_turn: bool = PrivateAttr(default=False)
     # Standing from prone consumes movement on the current turn, but that cost
     # should not leak into serialized encounter state.
     _turn_stand_up_cost_squares: int = PrivateAttr(default=0)
