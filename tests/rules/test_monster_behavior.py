@@ -68,6 +68,8 @@ FIXED_ATTACK_CASES = (
     ("ogre", "greatclub", [4, 5], ["bludgeoning"], [13]),
     ("ogre", "javelin", [3, 4], ["piercing"], [11]),
     ("ogre", "javelin_throw", [3, 4], ["piercing"], [11]),
+    ("ape", "fist", [2], ["bludgeoning"], [5]),
+    ("ape", "rock", [3, 4], ["bludgeoning"], [10]),
     ("black_bear", "rend", [3], ["slashing"], [5]),
     ("brown_bear", "bite", [4], ["piercing"], [7]),
     ("brown_bear", "claw", [2], ["slashing"], [5]),
@@ -651,6 +653,20 @@ def test_black_bear_multiattack_resolves_two_rend_attacks() -> None:
 
     assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
     assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend"]
+
+
+def test_ape_multiattack_resolves_two_fist_attacks_and_keeps_rock_as_profile_only() -> None:
+    encounter = build_monster_benchmark_encounter("ape")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "fist"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["fist", "fist"]
+    assert encounter.units["E1"].attacks["rock"].kind == "ranged"
 
 
 def test_brown_bear_multiattack_uses_bite_then_claw_and_claw_prones_large_or_smaller_targets() -> None:

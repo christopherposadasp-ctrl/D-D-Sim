@@ -129,6 +129,7 @@ awakened_shrub_ability_mods = AbilityModifiers(str=-4, dex=-1, con=0, int=0, wis
 awakened_tree_ability_mods = AbilityModifiers(str=4, dex=-2, con=2, int=0, wis=0, cha=-2)
 lemure_ability_mods = AbilityModifiers(str=0, dex=-3, con=0, int=-5, wis=0, cha=-4)
 ogre_ability_mods = AbilityModifiers(str=4, dex=-1, con=3, int=-3, wis=-2, cha=-2)
+ape_ability_mods = AbilityModifiers(str=3, dex=2, con=2, int=-2, wis=1, cha=-2)
 black_bear_ability_mods = AbilityModifiers(str=2, dex=1, con=2, int=-4, wis=1, cha=-2)
 brown_bear_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=-4, wis=1, cha=-2)
 tiger_ability_mods = AbilityModifiers(str=3, dex=3, con=2, int=-4, wis=1, cha=-1)
@@ -1703,6 +1704,52 @@ MONSTER_DEFINITIONS.update(
             default_melee_attack_action_id="melee_attack",
             default_ranged_attack_action_id="ranged_attack",
         ),
+        "ape": MonsterDefinition(
+            base_creature_id="ape",
+            variant_id="ape",
+            display_name="Ape",
+            combat_role="ape",
+            ai_profile_id="melee_brute",
+            max_hp=19,
+            ac=12,
+            speed=30,
+            initiative_mod=2,
+            passive_perception=13,
+            ability_mods=ape_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "fist": WeaponProfile(
+                    id="fist",
+                    display_name="Fist",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=3,
+                    damage_type="bludgeoning",
+                    kind="melee",
+                ),
+                "rock": WeaponProfile(
+                    id="rock",
+                    display_name="Rock",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_dice=[DiceSpec(count=2, sides=6)],
+                    damage_modifier=3,
+                    damage_type="bludgeoning",
+                    kind="ranged",
+                    range=WeaponRange(normal=25, long=50),
+                ),
+            },
+            tags=("beast", "ape", "melee"),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            attack_actions=(
+                melee_attack_action("fist", "Fist"),
+                ranged_attack_action("rock", "Rock"),
+                repeated_choice_attack_action("multiattack", "Multiattack", ("fist",), 2),
+            ),
+            default_melee_attack_action_id="multiattack",
+        ),
         "black_bear": MonsterDefinition(
             base_creature_id="black_bear",
             variant_id="black_bear",
@@ -2925,6 +2972,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "zombie",
     "ogre_zombie",
     "warhorse_skeleton",
+    "ape",
     "giant_rat",
     "giant_fire_beetle",
     "giant_weasel",
