@@ -6,7 +6,7 @@ from backend.content.enemies import BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT, unit_h
 from backend.engine import create_encounter
 from backend.engine.ai.decision import choose_turn_decision
 from backend.engine.combat.engine import execute_decision, resolve_attack_action
-from backend.engine.models.state import EncounterConfig, GridPosition
+from backend.engine.models.state import DiceSpec, EncounterConfig, GridPosition, WeaponProfile, WeaponRange
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
@@ -15,7 +15,11 @@ from backend.engine.rules.combat_rules import (
     resolve_attack,
     resolve_saving_throw,
 )
-from backend.engine.rules.spatial import GRID_SIZE, get_occupied_squares_for_position
+from backend.engine.rules.spatial import (
+    GRID_SIZE,
+    get_min_chebyshev_distance_between_footprints,
+    get_occupied_squares_for_position,
+)
 from tests.rules.monster_expectations import (
     MELEE_ONLY_MONSTER_IDS,
     MONSTER_EXPECTATIONS,
@@ -65,6 +69,11 @@ FIXED_ATTACK_CASES = (
     ("saber_toothed_tiger", "rend", [4, 3], ["slashing"], [11]),
     ("owlbear", "rend", [4, 3], ["slashing"], [12]),
     ("ankylosaurus", "tail", [5], ["bludgeoning"], [9]),
+    ("archelon", "bite", [3, 4, 5], ["piercing"], [16]),
+    ("grick", "beak", [3, 4], ["piercing"], [9]),
+    ("grick", "tentacles", [5], ["slashing"], [7]),
+    ("griffon", "rend", [4], ["piercing"], [8]),
+    ("hippopotamus", "bite", [5, 6], ["piercing"], [16]),
     ("berserker", "greataxe", [6], ["slashing"], [9]),
     ("gnoll_warrior", "rend", [3], ["piercing"], [5]),
     ("gnoll_warrior", "bone_bow", [5], ["piercing"], [6]),
@@ -85,6 +94,10 @@ FIXED_ATTACK_CASES = (
     ("polar_bear", "rend", [4], ["slashing"], [9]),
     ("guard_captain", "longsword", [3, 4], ["slashing"], [11]),
     ("guard_captain", "javelin_throw", [2, 3, 4], ["piercing"], [13]),
+    ("warrior_veteran", "greatsword", [3, 4], ["slashing"], [10]),
+    ("warrior_veteran", "heavy_crossbow", [5, 6], ["piercing"], [12]),
+    ("knight", "greatsword", [3, 4, 5], ["slashing", "radiant"], [10, 5]),
+    ("knight", "heavy_crossbow", [5, 6, 4], ["piercing", "radiant"], [11, 4]),
 )
 
 
@@ -252,6 +265,134 @@ def test_cultist_ritual_sickle_logs_slashing_and_necrotic_damage() -> None:
     assert [component.damage_type for component in attack.damage_details.damage_components] == ["slashing", "necrotic"]
     assert [component.total_damage for component in attack.damage_details.damage_components] == [4, 1]
     assert attack.damage_details.total_damage == 5
+
+
+def add_test_javelin_throw(encounter, unit_id: str) -> None:
+    encounter.units[unit_id].attacks["javelin_throw"] = WeaponProfile(
+        id="javelin_throw",
+        display_name="Javelin",
+        attack_bonus=3,
+        ability_modifier=1,
+        damage_dice=[DiceSpec(count=1, sides=6)],
+        damage_modifier=1,
+        damage_type="piercing",
+        kind="ranged",
+        range=WeaponRange(normal=30, long=120),
+    )
+
+
+def test_line_holder_holds_current_contact_before_chasing_evil_priority_targets() -> None:
+    encounter = build_monster_benchmark_encounter("warrior_infantry", monster_behavior="evil")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F3"].position = GridPosition(x=10, y=5)
+    encounter.units["F3"].current_hp = 1
+    encounter.units["F3"].role_tags = ["caster"]
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is None
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "spear"}
+
+
+def test_line_holder_prefers_closest_reachable_frontline_target() -> None:
+    encounter = build_monster_benchmark_encounter("warrior_infantry", monster_behavior="evil")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+    encounter.units["F3"].position = GridPosition(x=11, y=5)
+    encounter.units["F3"].current_hp = 1
+    encounter.units["F3"].role_tags = ["caster"]
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is not None
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "spear"}
+
+
+def test_line_holder_prefers_supported_melee_positions() -> None:
+    encounter = build_monster_benchmark_encounter("warrior_infantry")
+    defeat_other_units(encounter, "E1", "E2", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=9, y=6)
+    encounter.units["F1"].position = GridPosition(x=8, y=4)
+    encounter.units["F3"].position = GridPosition(x=8, y=6)
+    encounter.units["F1"].current_hp = 50
+    encounter.units["F3"].current_hp = 50
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is not None
+    assert decision.action == {"kind": "attack", "target_id": "F3", "weapon_id": "spear"}
+
+
+def test_line_holder_prefers_melee_before_ranged_fallback() -> None:
+    encounter = build_monster_benchmark_encounter("warrior_infantry")
+    defeat_other_units(encounter, "E1", "F1")
+    add_test_javelin_throw(encounter, "E1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is not None
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "spear"}
+
+
+def test_line_holder_uses_ranged_weapon_before_dashing_when_melee_is_unreachable() -> None:
+    encounter = build_monster_benchmark_encounter("warrior_infantry")
+    defeat_other_units(encounter, "E1", "F1")
+    add_test_javelin_throw(encounter, "E1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=14, y=5)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is None
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "javelin_throw"}
+
+
+def test_pack_hunter_prefers_already_supported_targets() -> None:
+    encounter = build_monster_benchmark_encounter("hyena")
+    defeat_other_units(encounter, "E1", "E2", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=9, y=6)
+    encounter.units["F1"].position = GridPosition(x=8, y=4)
+    encounter.units["F3"].position = GridPosition(x=8, y=6)
+    encounter.units["F1"].current_hp = 50
+    encounter.units["F3"].current_hp = 50
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is not None
+    assert decision.action == {"kind": "attack", "target_id": "F3", "weapon_id": "bite"}
+
+
+def test_pack_hunter_prefers_supported_flanking_attack_square() -> None:
+    encounter = build_monster_benchmark_encounter("hyena")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=6)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.path[-1] == GridPosition(x=7, y=4)
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "bite"}
+
+
+def test_pack_hunter_falls_back_to_existing_melee_dash_when_attack_is_unreachable() -> None:
+    encounter = build_monster_benchmark_encounter("giant_rat")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=1, y=1)
+    encounter.units["F1"].position = GridPosition(x=15, y=15)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.post_action_movement is not None
 
 
 def test_animated_armor_multiattack_resolves_two_slam_attacks() -> None:
@@ -484,6 +625,203 @@ def test_owlbear_multiattack_resolves_two_rend_attacks() -> None:
 
     assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
     assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend"]
+
+
+def test_grick_multiattack_uses_beak_then_tentacles() -> None:
+    encounter = build_monster_benchmark_encounter("grick")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "beak"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["beak", "tentacles"]
+
+
+def test_archelon_multiattack_resolves_two_bite_attacks_and_uses_legal_huge_footprint() -> None:
+    encounter = build_monster_benchmark_encounter("archelon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "bite"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["bite", "bite"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_hippopotamus_multiattack_resolves_two_bite_attacks_and_uses_legal_large_footprint() -> None:
+    encounter = build_monster_benchmark_encounter("hippopotamus")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "bite"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["bite", "bite"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_grick_tentacles_grapple_medium_targets_with_dc_12_but_not_large_targets() -> None:
+    encounter = build_monster_benchmark_encounter("grick")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    grapple_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="tentacles",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[5]),
+        ),
+    )
+
+    assert grapple_attack.damage_details.attack_riders_applied == ["grapple_on_hit"]
+    assert any(
+        effect.kind == "grappled_by"
+        and effect.source_id == "E1"
+        and effect.escape_dc == 12
+        and effect.maintain_reach_feet == 5
+        for effect in encounter.units["F1"].temporary_effects
+    )
+
+    blocked_encounter = build_monster_benchmark_encounter("grick")
+    defeat_other_units(blocked_encounter, "E1", "F1")
+    blocked_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    blocked_encounter.units["F1"].position = GridPosition(x=6, y=5)
+    blocked_encounter.units["F1"].size_category = "large"
+
+    blocked_attack, _ = resolve_attack(
+        blocked_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="tentacles",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[5]),
+        ),
+    )
+
+    assert blocked_attack.damage_details.attack_riders_applied is None
+    assert any(effect.kind == "grappled_by" for effect in blocked_encounter.units["F1"].temporary_effects) is False
+
+
+def test_griffon_first_turn_lands_next_to_target_then_uses_two_rend_attacks() -> None:
+    encounter = build_monster_benchmark_encounter("griffon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    decision, events = run_actor_turn(encounter, "E1")
+    move_events = [event for event in events if event.event_type == "move"]
+    attacks = enemy_attack_events(events)
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "landing"
+    assert move_events[0].resolved_totals["movementMode"] == "landing"
+    assert move_events[0].resolved_totals["landingApplied"] is True
+    assert move_events[0].resolved_totals["opportunityAttackers"] == []
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert (
+        get_min_chebyshev_distance_between_footprints(
+            encounter.units["E1"].position,
+            encounter.units["E1"].footprint,
+            encounter.units["F1"].position,
+            encounter.units["F1"].footprint,
+        )
+        <= 1
+    )
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend"]
+
+
+def test_griffon_rend_grapples_medium_targets_with_dc_14_but_not_large_targets() -> None:
+    encounter = build_monster_benchmark_encounter("griffon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    grapple_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="rend",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    assert grapple_attack.damage_details.attack_riders_applied == ["grapple_on_hit"]
+    assert any(
+        effect.kind == "grappled_by"
+        and effect.source_id == "E1"
+        and effect.escape_dc == 14
+        and effect.maintain_reach_feet == 5
+        for effect in encounter.units["F1"].temporary_effects
+    )
+
+    blocked_encounter = build_monster_benchmark_encounter("griffon")
+    defeat_other_units(blocked_encounter, "E1", "F1")
+    blocked_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    blocked_encounter.units["F1"].position = GridPosition(x=7, y=5)
+    blocked_encounter.units["F1"].size_category = "large"
+
+    blocked_attack, _ = resolve_attack(
+        blocked_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="rend",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+        ),
+    )
+
+    assert blocked_attack.damage_details.attack_riders_applied is None
+    assert any(effect.kind == "grappled_by" for effect in blocked_encounter.units["F1"].temporary_effects) is False
+
+
+def test_griffon_does_not_relocate_with_landing_when_already_adjacent() -> None:
+    encounter = build_monster_benchmark_encounter("griffon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is None
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+
+
+def test_griffon_landing_is_one_use_and_later_turns_use_ground_movement() -> None:
+    encounter = build_monster_benchmark_encounter("griffon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    first_decision, _ = run_actor_turn(encounter, "E1")
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    second_decision = choose_turn_decision(encounter, "E1")
+
+    assert first_decision.pre_action_movement is not None
+    assert first_decision.pre_action_movement.mode == "landing"
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert not second_decision.pre_action_movement or second_decision.pre_action_movement.mode != "landing"
+    assert second_decision.action["kind"] == "dash"
 
 
 def test_ankylosaurus_tail_prone_is_size_gated() -> None:
@@ -807,6 +1145,82 @@ def test_guard_captain_parry_blocks_eligible_melee_hits_but_not_ranged_hits() ->
     assert melee_attack.resolved_totals["hit"] is False
 
     ranged_encounter = build_monster_benchmark_encounter("guard_captain")
+    ranged_weapon_id = next(
+        weapon_id for weapon_id, weapon in ranged_encounter.units["F3"].attacks.items() if weapon.kind == "ranged"
+    )
+    ranged_encounter.units["F3"].position = GridPosition(x=5, y=5)
+    ranged_encounter.units["E1"].position = GridPosition(x=8, y=5)
+    ranged_hit_roll = ranged_encounter.units["E1"].ac - ranged_encounter.units["F3"].attacks[ranged_weapon_id].attack_bonus
+
+    ranged_events = resolve_attack_action(
+        ranged_encounter,
+        "F3",
+        {"kind": "attack", "target_id": "E1", "weapon_id": ranged_weapon_id},
+        step_overrides=[AttackRollOverrides(attack_rolls=[ranged_hit_roll], damage_rolls=[4])],
+    )
+    ranged_attack = next(event for event in ranged_events if event.event_type == "attack")
+
+    assert not any(event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "parry" for event in ranged_events)
+    assert ranged_attack.resolved_totals["attackReaction"] is None
+    assert ranged_encounter.units["E1"].reaction_available is True
+
+
+@pytest.mark.parametrize(
+    "variant_id, melee_weapon_id, ranged_weapon_id",
+    (("warrior_veteran", "greatsword", "heavy_crossbow"), ("knight", "greatsword", "heavy_crossbow")),
+)
+def test_line_holder_soldiers_use_melee_multiattack_and_ranged_fallback(
+    variant_id: str,
+    melee_weapon_id: str,
+    ranged_weapon_id: str,
+) -> None:
+    melee_encounter = build_monster_benchmark_encounter(variant_id)
+    defeat_other_units(melee_encounter, "E1", "F1")
+    melee_encounter.units["E1"].position = GridPosition(x=8, y=5)
+    melee_encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    melee_decision, melee_events = run_actor_turn(melee_encounter, "E1")
+    melee_attacks = enemy_attack_events(melee_events)
+
+    assert melee_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": melee_weapon_id}
+    assert [event.damage_details.weapon_id for event in melee_attacks] == [melee_weapon_id, melee_weapon_id]
+
+    ranged_encounter = build_monster_benchmark_encounter(variant_id)
+    defeat_other_units(ranged_encounter, "E1", "F1")
+    ranged_encounter.units["E1"].position = GridPosition(x=1, y=5)
+    ranged_encounter.units["F1"].position = GridPosition(x=10, y=5)
+
+    ranged_decision, ranged_events = run_actor_turn(ranged_encounter, "E1")
+    ranged_attacks = enemy_attack_events(ranged_events)
+
+    assert ranged_decision.pre_action_movement is None
+    assert ranged_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": ranged_weapon_id}
+    assert [event.damage_details.weapon_id for event in ranged_attacks] == [ranged_weapon_id, ranged_weapon_id]
+
+
+@pytest.mark.parametrize("variant_id", ("warrior_veteran", "knight"))
+def test_line_holder_soldier_parry_blocks_eligible_melee_hits_but_not_ranged_hits(variant_id: str) -> None:
+    encounter = build_monster_benchmark_encounter(variant_id)
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    melee_weapon_id = next(weapon_id for weapon_id, weapon in encounter.units["F1"].attacks.items() if weapon.kind == "melee")
+    hit_roll = encounter.units["E1"].ac - encounter.units["F1"].attacks[melee_weapon_id].attack_bonus
+
+    melee_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": melee_weapon_id},
+        step_overrides=[AttackRollOverrides(attack_rolls=[hit_roll], damage_rolls=[6])],
+    )
+    melee_attack = next(event for event in melee_events if event.event_type == "attack")
+
+    assert melee_events[0].event_type == "phase_change"
+    assert melee_events[0].resolved_totals["reaction"] == "parry"
+    assert melee_attack.resolved_totals["attackReaction"] == "parry"
+    assert melee_attack.resolved_totals["hit"] is False
+
+    ranged_encounter = build_monster_benchmark_encounter(variant_id)
     ranged_weapon_id = next(
         weapon_id for weapon_id, weapon in ranged_encounter.units["F3"].attacks.items() if weapon.kind == "ranged"
     )

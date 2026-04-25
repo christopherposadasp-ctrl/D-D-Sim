@@ -7,6 +7,7 @@ from backend.content.enemies import (
     get_monster_definition_for_unit,
     unit_has_bonus_action,
     unit_has_reaction,
+    unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature, unit_has_granted_bonus_action
 from backend.content.player_loadouts import get_player_primary_melee_weapon_id, get_player_primary_ranged_weapon_id
@@ -41,6 +42,7 @@ from backend.engine.rules.combat_rules import (
     unit_is_dodging,
 )
 from backend.engine.rules.spatial import (
+    GRID_SIZE,
     PositionIndex,
     ReachableSquare,
     build_position_index,
@@ -51,10 +53,13 @@ from backend.engine.rules.spatial import (
     get_attack_context,
     get_min_chebyshev_distance_between_footprints,
     get_min_distance_to_faction,
+    get_occupants_for_position,
     get_reachable_squares,
     get_swallow_source_id,
+    get_terrain_features_for_position,
     get_unit_footprint,
     get_units_with_positions,
+    is_within_bounds,
     path_provokes_opportunity_attack,
 )
 from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions
@@ -784,6 +789,13 @@ def get_enemy_ranged_weapon_id(actor: UnitState) -> AttackId:
     raise ValueError(f"{actor.id} has no ranged weapon profile.")
 
 
+def get_optional_enemy_ranged_weapon_id(actor: UnitState) -> AttackId | None:
+    try:
+        return get_enemy_ranged_weapon_id(actor)
+    except ValueError:
+        return None
+
+
 def get_movement_distance(plan: MovementPlan | None) -> int:
     if not plan or len(plan.path) <= 1:
         return 0
@@ -1238,7 +1250,7 @@ def get_target_threat_tier(
     return base_tier
 
 
-def build_smart_target_priority(
+def build_smart_melee_target_priority(
     state: EncounterState,
     actor: UnitState,
     target: UnitState,
@@ -1248,7 +1260,7 @@ def build_smart_target_priority(
     attacker_position: GridPosition | None = None,
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
-) -> tuple[int, int, float, int, int, int]:
+) -> tuple[int, int, int, int, float, int, str]:
     kill_band, kill_probability = classify_target_kill_band(
         state,
         actor,
@@ -1261,14 +1273,71 @@ def build_smart_target_priority(
     )
     immediacy = get_target_immediacy(state, actor, target)
     threat_tier = get_target_threat_tier(state, actor, target, immediacy)
-    allied_pressure = count_adjacent_allied_units(state, actor, target)
+    return (
+        -kill_band,
+        -immediacy,
+        get_distance_for_priority(state, actor, target),
+        -threat_tier,
+        -kill_probability,
+        target.current_hp,
+        target.id,
+    )
+
+
+def build_smart_ranged_target_priority(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> tuple[int, int, int, float, int, int, str]:
+    kill_band, kill_probability = classify_target_kill_band(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
+    immediacy = get_target_immediacy(state, actor, target)
+    threat_tier = get_target_threat_tier(state, actor, target, immediacy)
     return (
         -kill_band,
         -threat_tier,
         -immediacy,
-        -allied_pressure,
         -kill_probability,
         target.current_hp,
+        get_distance_for_priority(state, actor, target),
+        target.id,
+    )
+
+
+def build_smart_target_priority(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> tuple[int, int, int, float, int, int, str]:
+    return build_smart_ranged_target_priority(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles=attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
     )
 
 
@@ -1293,6 +1362,46 @@ def count_adjacent_allied_units(state: EncounterState, actor: UnitState, target:
             and get_distance_between_units(unit, target) <= 1
         ]
     )
+
+
+def count_adjacent_allied_units_to_position(state: EncounterState, actor: UnitState, position: GridPosition) -> int:
+    return len(
+        [
+            unit
+            for unit in get_units_by_faction(state, actor.faction)
+            if unit.id != actor.id
+            and is_unit_conscious(unit)
+            and unit.position
+            and get_min_chebyshev_distance_between_footprints(
+                position,
+                get_unit_footprint(actor),
+                unit.position,
+                get_unit_footprint(unit),
+            )
+            <= 1
+        ]
+    )
+
+
+def infer_attack_flow_kind(
+    actor: UnitState,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None,
+    preferred_weapon_id: str | None = None,
+) -> str | None:
+    if preferred_weapon_id:
+        preferred_weapon = actor.attacks.get(preferred_weapon_id)
+        if preferred_weapon is not None:
+            return preferred_weapon.kind
+
+    if not attack_step_weapon_profiles:
+        return None
+
+    weapon_kinds = {weapon.kind for step_profiles in attack_step_weapon_profiles for weapon in step_profiles}
+    if weapon_kinds == {"melee"}:
+        return "melee"
+    if weapon_kinds == {"ranged"}:
+        return "ranged"
+    return None
 
 
 def sort_player_combat_targets(
@@ -1322,8 +1431,6 @@ def sort_player_combat_targets(
                 target_position=unit.position,
                 position_index=position_index,
             ),
-            get_distance_for_priority(state, actor, unit),
-            unit.id,
         ),
     )
 
@@ -1336,32 +1443,35 @@ def sort_player_melee_targets(
     *,
     melee_weapon_id: str | None = None,
     attack_profile: WeaponProfile | None = None,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
     position_index: PositionIndex | None = None,
 ) -> list[UnitState]:
     if behavior == "dumb":
         return sort_player_combat_targets(state, actor, units, behavior)
 
-    attack_step_weapon_profiles = (
+    resolved_attack_step_weapon_profiles = attack_step_weapon_profiles if attack_step_weapon_profiles is not None else (
         build_single_attack_step_profiles(attack_profile)
         if attack_profile is not None
         else build_repeated_weapon_step_profiles(actor, melee_weapon_id)
         if melee_weapon_id is not None
         else None
     )
+    resolved_preferred_weapon_id = preferred_weapon_id or melee_weapon_id or (
+        attack_profile.id if attack_profile is not None else None
+    )
 
     return sorted(
         units,
         key=lambda unit: (
-            *build_smart_target_priority(
+            *build_smart_melee_target_priority(
                 state,
                 actor,
                 unit,
-                attack_step_weapon_profiles=attack_step_weapon_profiles,
-                preferred_weapon_id=melee_weapon_id or (attack_profile.id if attack_profile is not None else None),
+                attack_step_weapon_profiles=resolved_attack_step_weapon_profiles,
+                preferred_weapon_id=resolved_preferred_weapon_id,
                 position_index=position_index,
             ),
-            get_distance_for_priority(state, actor, unit),
-            unit.id,
         ),
     )
 
@@ -1374,32 +1484,35 @@ def sort_player_ranged_targets(
     *,
     ranged_weapon_id: str | None = None,
     attack_profile: WeaponProfile | None = None,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
     position_index: PositionIndex | None = None,
 ) -> list[UnitState]:
     if behavior == "dumb":
         return sorted(units, key=lambda unit: (get_distance_for_priority(state, actor, unit), unit.id))
 
-    attack_step_weapon_profiles = (
+    resolved_attack_step_weapon_profiles = attack_step_weapon_profiles if attack_step_weapon_profiles is not None else (
         build_single_attack_step_profiles(attack_profile)
         if attack_profile is not None
         else build_repeated_weapon_step_profiles(actor, ranged_weapon_id)
         if ranged_weapon_id is not None
         else None
     )
+    resolved_preferred_weapon_id = preferred_weapon_id or ranged_weapon_id or (
+        attack_profile.id if attack_profile is not None else None
+    )
 
     return sorted(
         units,
         key=lambda unit: (
-            *build_smart_target_priority(
+            *build_smart_ranged_target_priority(
                 state,
                 actor,
                 unit,
-                attack_step_weapon_profiles=attack_step_weapon_profiles,
-                preferred_weapon_id=ranged_weapon_id or (attack_profile.id if attack_profile is not None else None),
+                attack_step_weapon_profiles=resolved_attack_step_weapon_profiles,
+                preferred_weapon_id=resolved_preferred_weapon_id,
                 position_index=position_index,
             ),
-            get_distance_for_priority(state, actor, unit),
-            unit.id,
         ),
     )
 
@@ -1485,14 +1598,37 @@ def get_ranked_attack_targets(
             action_id=action_id,
             step_index=step_index,
         )
-        targets = sort_player_combat_targets(
-            state,
-            actor,
-            [unit for unit in get_units_by_faction(state, "goblins") if not unit.conditions.dead],
-            state.player_behavior,
-            attack_step_weapon_profiles=attack_step_weapon_profiles,
-            preferred_weapon_id=preferred_weapon_id,
-        )
+        conscious_targets = [unit for unit in get_units_by_faction(state, "goblins") if not unit.conditions.dead]
+        attack_flow_kind = infer_attack_flow_kind(actor, attack_step_weapon_profiles, preferred_weapon_id)
+        if attack_flow_kind == "melee":
+            targets = sort_player_melee_targets(
+                state,
+                actor,
+                conscious_targets,
+                state.player_behavior,
+                melee_weapon_id=preferred_weapon_id,
+                attack_step_weapon_profiles=attack_step_weapon_profiles,
+                preferred_weapon_id=preferred_weapon_id,
+            )
+        elif attack_flow_kind == "ranged":
+            targets = sort_player_ranged_targets(
+                state,
+                actor,
+                conscious_targets,
+                state.player_behavior,
+                ranged_weapon_id=preferred_weapon_id,
+                attack_step_weapon_profiles=attack_step_weapon_profiles,
+                preferred_weapon_id=preferred_weapon_id,
+            )
+        else:
+            targets = sort_player_combat_targets(
+                state,
+                actor,
+                conscious_targets,
+                state.player_behavior,
+                attack_step_weapon_profiles=attack_step_weapon_profiles,
+                preferred_weapon_id=preferred_weapon_id,
+            )
     else:
         conscious_targets = get_conscious_fighter_targets(state)
         if state.monster_behavior == "kind":
@@ -1648,6 +1784,7 @@ def build_melee_attack_options(
     weapon_id: str,
     seek_flanking: bool,
     position_index: PositionIndex | None = None,
+    allow_intentional_opportunity_attacks: bool = True,
 ) -> list[MeleeAttackOption]:
     weapon = actor.attacks.get(weapon_id)
     if not weapon or not actor.position:
@@ -1659,7 +1796,9 @@ def build_melee_attack_options(
         if not target.position:
             continue
 
-        allow_provoking = can_intentionally_provoke_opportunity_attack(state, actor, target)
+        allow_provoking = (
+            allow_intentional_opportunity_attacks and can_intentionally_provoke_opportunity_attack(state, actor, target)
+        )
         if seek_flanking:
             candidate_squares = [
                 square
@@ -1743,27 +1882,28 @@ def get_smart_melee_attack_option(
 
     attack_step_weapon_profiles = build_repeated_weapon_step_profiles(actor, melee_weapon_id)
 
-    def option_priority(option: MeleeAttackOption) -> tuple[int, int, int, int, int, int, int, float, int, str, int]:
-        target_priority = build_smart_target_priority(
+    def option_priority(option: MeleeAttackOption) -> tuple[int, int, int, int, float, int, int, int, str, int]:
+        kill_band, kill_probability = classify_target_kill_band(
             state,
             actor,
             option.target,
-            attack_step_weapon_profiles=attack_step_weapon_profiles,
+            attack_step_weapon_profiles,
             preferred_weapon_id=melee_weapon_id,
             attacker_position=option.path[-1],
             target_position=option.target.position,
             position_index=position_index,
         )
+        immediacy = get_target_immediacy(state, actor, option.target)
+        threat_tier = get_target_threat_tier(state, actor, option.target, immediacy)
         return (
-            target_priority[0],
-            target_priority[1],
-            -option.adjacent_allies if is_player_melee_opportunist(actor) else 0,
+            -kill_band,
+            -immediacy,
             option.distance,
+            -threat_tier,
+            -kill_probability,
             -int(option.creates_flank),
-            target_priority[2],
-            target_priority[3],
-            target_priority[4],
-            target_priority[5],
+            -option.adjacent_allies if is_player_melee_opportunist(actor) else 0,
+            option.target.current_hp,
             option.target.id,
             option.path[-1].x,
         )
@@ -3187,6 +3327,322 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
     )
 
 
+def sort_line_holder_targets(state: EncounterState, actor: UnitState, units: list[UnitState]) -> list[UnitState]:
+    """Prefer the nearest front-line threat, with DM behavior as a tie-breaker."""
+
+    if state.monster_behavior == "kind":
+        behavior_order = sort_kind_targets(state, actor, units)
+    elif state.monster_behavior == "balanced":
+        behavior_order = sort_balanced_monster_targets(state, actor, units)
+    else:
+        behavior_order = sort_evil_conscious_targets(state, actor, units)
+
+    behavior_rank = {unit.id: index for index, unit in enumerate(behavior_order)}
+    return sorted(
+        units,
+        key=lambda unit: (
+            int(unit_is_hidden(unit)),
+            get_distance_for_priority(state, actor, unit),
+            behavior_rank.get(unit.id, len(behavior_rank)),
+            unit.id,
+        ),
+    )
+
+
+def choose_line_holder_melee_option(
+    state: EncounterState,
+    actor: UnitState,
+    targets: list[UnitState],
+    move_squares: int,
+    melee_weapon_id: str,
+    position_index: PositionIndex | None = None,
+) -> MeleeAttackOption | None:
+    target_rank = {target.id: index for index, target in enumerate(targets)}
+    options = build_melee_attack_options(
+        state,
+        actor,
+        targets,
+        move_squares,
+        melee_weapon_id,
+        True,
+        position_index,
+        False,
+    )
+    if not options:
+        return None
+
+    return sorted(
+        options,
+        key=lambda option: (
+            option.distance,
+            -option.adjacent_allies,
+            -int(option.creates_flank),
+            target_rank.get(option.target.id, len(target_rank)),
+            option.target.id,
+            option.path[-1].x,
+            option.path[-1].y,
+        ),
+    )[0]
+
+
+def get_line_holder_ranged_attack(
+    state: EncounterState,
+    actor: UnitState,
+    targets: list[UnitState],
+    ranged_weapon_id: str,
+    position_index: PositionIndex,
+) -> TurnDecision | None:
+    weapon = actor.attacks.get(ranged_weapon_id)
+    if not weapon:
+        return None
+
+    for target in targets:
+        context = get_attack_context(state, actor.id, target.id, weapon, position_index=position_index)
+        if context.legal and context.within_long_range:
+            return TurnDecision(action={"kind": "attack", "target_id": target.id, "weapon_id": ranged_weapon_id})
+
+    return None
+
+
+def get_line_holder_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
+    move_squares = get_move_squares(actor, state)
+    dash_squares = get_total_move_squares(actor, 1, state=state)
+    position_index = build_position_index(state)
+    conscious_targets = get_conscious_fighter_targets(state)
+    melee_weapon_id = get_enemy_melee_weapon_id(actor)
+
+    if state.monster_behavior == "evil":
+        adjacent_downed_targets = sort_downed_targets(state, actor, get_adjacent_downed_fighters(state, actor))
+        if adjacent_downed_targets:
+            return TurnDecision(action={"kind": "attack", "target_id": adjacent_downed_targets[0].id, "weapon_id": melee_weapon_id})
+
+    adjacent_conscious = get_adjacent_conscious_fighters(state, actor)
+    if adjacent_conscious:
+        adjacent_targets = sort_line_holder_targets(state, actor, adjacent_conscious)
+        for target in adjacent_targets:
+            weapon = actor.attacks.get(melee_weapon_id)
+            if weapon and get_attack_context(state, actor.id, target.id, weapon, position_index=position_index).legal:
+                return TurnDecision(action={"kind": "attack", "target_id": target.id, "weapon_id": melee_weapon_id})
+
+    line_targets = sort_line_holder_targets(state, actor, conscious_targets)
+    melee_option = choose_line_holder_melee_option(
+        state,
+        actor,
+        line_targets,
+        move_squares,
+        melee_weapon_id,
+        position_index,
+    )
+    if melee_option:
+        return TurnDecision(
+            pre_action_movement=MovementPlan(path=melee_option.path, mode="move") if melee_option.distance > 0 else None,
+            action={"kind": "attack", "target_id": melee_option.target.id, "weapon_id": melee_weapon_id},
+        )
+
+    ranged_weapon_id = get_optional_enemy_ranged_weapon_id(actor)
+    if ranged_weapon_id:
+        ranged_decision = get_line_holder_ranged_attack(state, actor, line_targets, ranged_weapon_id, position_index)
+        if ranged_decision:
+            return ranged_decision
+
+    dash_target = line_targets[0] if line_targets else None
+    if not dash_target:
+        return TurnDecision(action={"kind": "skip", "reason": "No fighters remain."})
+
+    dash_path = find_preferred_advance_path(state, actor.id, dash_target.id, dash_squares, False, position_index)
+    if dash_path and dash_path.distance > 0:
+        return TurnDecision(
+            post_action_movement=MovementPlan(path=dash_path.path, mode="dash"),
+            action={"kind": "dash", "reason": f"Dashing into melee against {dash_target.id}."},
+        )
+
+    return TurnDecision(action={"kind": "skip", "reason": "No legal movement remains."})
+
+
+def sort_pack_hunter_targets(state: EncounterState, actor: UnitState, units: list[UnitState]) -> list[UnitState]:
+    if state.monster_behavior == "kind":
+        return sort_kind_targets(state, actor, units)
+    if state.monster_behavior == "balanced":
+        return sort_balanced_monster_targets(state, actor, units)
+    return sort_evil_conscious_targets(state, actor, units)
+
+
+def choose_pack_hunter_melee_option(
+    state: EncounterState,
+    actor: UnitState,
+    targets: list[UnitState],
+    move_squares: int,
+    melee_weapon_id: str,
+    position_index: PositionIndex | None = None,
+) -> MeleeAttackOption | None:
+    target_rank = {target.id: index for index, target in enumerate(targets)}
+    options = build_melee_attack_options(
+        state,
+        actor,
+        targets,
+        move_squares,
+        melee_weapon_id,
+        True,
+        position_index,
+    )
+    if not options:
+        return None
+
+    return sorted(
+        options,
+        key=lambda option: (
+            -int(option.adjacent_allies > 0),
+            -int(option.creates_flank),
+            -count_adjacent_allied_units_to_position(state, actor, option.path[-1]),
+            -option.adjacent_allies,
+            target_rank.get(option.target.id, len(target_rank)),
+            option.distance,
+            option.target.id,
+            option.path[-1].x,
+            option.path[-1].y,
+        ),
+    )[0]
+
+
+def get_pack_hunter_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
+    move_squares = get_move_squares(actor, state)
+    position_index = build_position_index(state)
+    conscious_targets = get_conscious_fighter_targets(state)
+    melee_weapon_id = get_enemy_melee_weapon_id(actor)
+
+    if state.monster_behavior == "evil":
+        adjacent_downed_targets = sort_downed_targets(state, actor, get_adjacent_downed_fighters(state, actor))
+        if adjacent_downed_targets:
+            return TurnDecision(action={"kind": "attack", "target_id": adjacent_downed_targets[0].id, "weapon_id": melee_weapon_id})
+
+    pack_targets = sort_pack_hunter_targets(state, actor, conscious_targets)
+    melee_option = choose_pack_hunter_melee_option(
+        state,
+        actor,
+        pack_targets,
+        move_squares,
+        melee_weapon_id,
+        position_index,
+    )
+    if melee_option:
+        return TurnDecision(
+            pre_action_movement=MovementPlan(path=melee_option.path, mode="move") if melee_option.distance > 0 else None,
+            action={"kind": "attack", "target_id": melee_option.target.id, "weapon_id": melee_weapon_id},
+        )
+
+    return get_enemy_melee_decision(state, actor)
+
+
+def can_use_opening_flight_landing(actor: UnitState) -> bool:
+    return unit_has_trait(actor, "opening_flight_landing") and actor.resource_pools.get("opening_landing_uses", 0) > 0
+
+
+def get_legal_landing_positions(
+    state: EncounterState,
+    actor: UnitState,
+    position_index: PositionIndex,
+) -> list[GridPosition]:
+    footprint = get_unit_footprint(actor)
+    positions: list[GridPosition] = []
+
+    for x in range(1, GRID_SIZE - footprint.width + 2):
+        for y in range(1, GRID_SIZE - footprint.height + 2):
+            position = GridPosition(x=x, y=y)
+            if not is_within_bounds(position, footprint):
+                continue
+            if get_occupants_for_position(state, position, footprint, [actor.id], position_index):
+                continue
+            if get_terrain_features_for_position(state, position, footprint, position_index):
+                continue
+            positions.append(position)
+
+    return positions
+
+
+def choose_opening_flight_landing_option(
+    state: EncounterState,
+    actor: UnitState,
+    targets: list[UnitState],
+    weapon_id: str,
+    position_index: PositionIndex,
+) -> tuple[UnitState, GridPosition] | None:
+    weapon = actor.attacks.get(weapon_id)
+    if not weapon:
+        return None
+
+    target_rank = {target.id: index for index, target in enumerate(targets)}
+    candidates: list[tuple[UnitState, GridPosition]] = []
+    for landing_position in get_legal_landing_positions(state, actor, position_index):
+        for target in targets:
+            if not target.position:
+                continue
+            context = get_attack_context(
+                state,
+                actor.id,
+                target.id,
+                weapon,
+                landing_position,
+                target.position,
+                position_index,
+            )
+            if context.legal:
+                candidates.append((target, landing_position))
+
+    if not candidates:
+        return None
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            target_rank.get(candidate[0].id, len(target_rank)),
+            get_min_chebyshev_distance_between_footprints(
+                candidate[1],
+                get_unit_footprint(actor),
+                candidate[0].position,
+                get_unit_footprint(candidate[0]),
+            ),
+            candidate[1].x,
+            candidate[1].y,
+        ),
+    )[0]
+
+
+def get_opening_flight_landing_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
+    actor.resource_pools["opening_landing_uses"] = max(0, actor.resource_pools.get("opening_landing_uses", 0) - 1)
+
+    if not actor.position:
+        return get_enemy_melee_decision(state, actor)
+
+    position_index = build_position_index(state)
+    melee_weapon_id = get_enemy_melee_weapon_id(actor)
+    weapon = actor.attacks.get(melee_weapon_id)
+    targets = [
+        target
+        for target in get_ranked_attack_targets(state, actor, preferred_weapon_id=melee_weapon_id)
+        if target.position and (is_unit_conscious(target) or (state.monster_behavior == "evil" and is_unit_downed(target)))
+    ]
+
+    if not weapon or not targets:
+        return get_enemy_melee_decision(state, actor)
+
+    for target in targets:
+        if get_attack_context(state, actor.id, target.id, weapon, position_index=position_index).legal:
+            return get_enemy_melee_decision(state, actor)
+
+    landing_option = choose_opening_flight_landing_option(state, actor, targets, melee_weapon_id, position_index)
+    if not landing_option:
+        return get_enemy_melee_decision(state, actor)
+
+    target, landing_position = landing_option
+    return TurnDecision(
+        pre_action_movement=MovementPlan(
+            path=[actor.position.model_copy(deep=True), landing_position.model_copy(deep=True)],
+            mode="landing",
+        ),
+        action={"kind": "attack", "target_id": target.id, "weapon_id": melee_weapon_id},
+    )
+
+
 def get_enemy_melee_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     move_squares = get_move_squares(actor, state)
     dash_squares = get_total_move_squares(actor, 1, state=state)
@@ -3653,11 +4109,20 @@ def choose_turn_decision(state: EncounterState, actor_id: str) -> TurnDecision:
     if actor.faction == "fighters":
         return get_player_martial_decision(state, actor)
 
+    if can_use_opening_flight_landing(actor):
+        return get_opening_flight_landing_decision(state, actor)
+
     if get_monster_profile(actor).profile_id == "swallow_predator":
         return get_swallow_predator_decision(state, actor)
 
     if get_monster_profile(actor).profile_id == "grappling_brute":
         return get_grappling_brute_decision(state, actor)
+
+    if get_monster_profile(actor).profile_id == "line_holder":
+        return get_line_holder_decision(state, actor)
+
+    if get_monster_profile(actor).profile_id == "pack_hunter":
+        return get_pack_hunter_decision(state, actor)
 
     if uses_ranged_monster_ai(actor):
         if is_committed_to_melee(actor):

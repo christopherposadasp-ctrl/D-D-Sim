@@ -60,6 +60,7 @@ from backend.engine.rules.combat_rules import (
 )
 from backend.engine.rules.spatial import (
     build_position_index,
+    chebyshev_distance,
     find_advance_path,
     get_active_grappler_ids,
     get_attack_context,
@@ -454,6 +455,10 @@ def movement_distance(movement: MovementPlan | None) -> int:
 
 def is_tactical_shift_movement(movement: MovementPlan | None) -> bool:
     return bool(movement and movement.mode == "tactical_shift")
+
+
+def is_landing_movement(movement: MovementPlan | None) -> bool:
+    return bool(movement and movement.mode == "landing")
 
 
 def can_apply_tactical_shift(actor: UnitState, decision: TurnDecision) -> bool:
@@ -1510,10 +1515,14 @@ def create_movement_event(
 
     start = path[0]
     end = path[-1]
-    distance = len(path) - 1
+    distance = chebyshev_distance(start, end) if mode == "landing" else len(path) - 1
     tactical_shift_applied = mode == "tactical_shift"
-    movement_verb = "tactically shifts" if tactical_shift_applied else "dashes" if mode == "dash" else "moves"
+    landing_applied = mode == "landing"
+    movement_verb = "lands" if landing_applied else "tactically shifts" if tactical_shift_applied else "dashes" if mode == "dash" else "moves"
     protection_note = " using Tactical Shift" if tactical_shift_applied else " using Disengage" if disengage_applied else ""
+    if landing_applied:
+        protection_note = " from flight"
+    distance_text = "" if landing_applied else f"{distance} square{'s' if distance != 1 else ''} "
     return CombatEvent(
         round=state.round,
         actor_id=actor_id,
@@ -1525,13 +1534,15 @@ def create_movement_event(
             "movementPhase": phase,
             "disengageApplied": disengage_applied,
             "tacticalShiftApplied": tactical_shift_applied,
+            "landingApplied": landing_applied,
             "opportunityAttackers": triggered_attackers,
         },
         movement_details=MovementDetails(start=start, end=end, path=path, distance=distance),
         damage_details=None,
         condition_deltas=condition_deltas or [],
         text_summary=(
-            f"{actor_id} {movement_verb} {distance} square{'s' if distance != 1 else ''} "
+            f"{actor_id} {movement_verb} "
+            f"{distance_text}"
             f"from {format_position(start)} to {format_position(end)}{protection_note} "
             f"{'before acting' if phase == 'before_action' else 'between actions' if phase == 'between_actions' else 'after acting'}."
         ),
@@ -1555,7 +1566,7 @@ def execute_movement(
     path_travelled = [movement.path[0]]
     reaction_events: list[CombatEvent] = []
     triggered_attackers: list[str] = []
-    opportunity_attacks_prevented = disengage_applied or movement.mode == "tactical_shift"
+    opportunity_attacks_prevented = disengage_applied or movement.mode in {"tactical_shift", "landing"}
 
     for index in range(1, len(movement.path)):
         previous = movement.path[index - 1]
@@ -1914,7 +1925,11 @@ def exceeds_movement_budget(state: EncounterState, actor: UnitState, decision: T
     movement_legs = [decision.pre_action_movement, decision.between_action_movement, decision.post_action_movement]
     tactical_shift_distance = sum(movement_distance(movement) for movement in movement_legs if is_tactical_shift_movement(movement))
     tactical_shift_legs = sum(1 for movement in movement_legs if is_tactical_shift_movement(movement) and movement_distance(movement) > 0)
-    normal_distance = sum(movement_distance(movement) for movement in movement_legs if not is_tactical_shift_movement(movement))
+    normal_distance = sum(
+        movement_distance(movement)
+        for movement in movement_legs
+        if not is_tactical_shift_movement(movement) and not is_landing_movement(movement)
+    )
 
     if tactical_shift_distance > 0:
         if tactical_shift_legs > 1 or not can_apply_tactical_shift(actor, decision):

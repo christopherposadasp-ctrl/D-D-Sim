@@ -68,6 +68,7 @@ class MonsterDefinition:
     damage_resistances: tuple[str, ...] = ()
     damage_immunities: tuple[str, ...] = ()
     damage_vulnerabilities: tuple[str, ...] = ()
+    condition_immunities: tuple[str, ...] = ()
     extra_resource_pools: dict[str, int] = field(default_factory=dict)
 
 
@@ -131,6 +132,10 @@ tiger_ability_mods = AbilityModifiers(str=3, dex=3, con=2, int=-4, wis=1, cha=-1
 saber_toothed_tiger_ability_mods = AbilityModifiers(str=4, dex=3, con=2, int=-4, wis=1, cha=-1)
 owlbear_ability_mods = AbilityModifiers(str=5, dex=1, con=3, int=-4, wis=1, cha=-2)
 ankylosaurus_ability_mods = AbilityModifiers(str=4, dex=0, con=2, int=-4, wis=1, cha=-3)
+archelon_ability_mods = AbilityModifiers(str=4, dex=3, con=1, int=-3, wis=2, cha=-2)
+grick_ability_mods = AbilityModifiers(str=2, dex=2, con=0, int=-4, wis=2, cha=-3)
+griffon_ability_mods = AbilityModifiers(str=4, dex=2, con=3, int=-4, wis=1, cha=-1)
+hippopotamus_ability_mods = AbilityModifiers(str=5, dex=-2, con=2, int=-4, wis=1, cha=-3)
 berserker_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=-1)
 gnoll_warrior_ability_mods = AbilityModifiers(str=2, dex=1, con=0, int=-2, wis=0, cha=-2)
 giant_hyena_ability_mods = AbilityModifiers(str=3, dex=2, con=2, int=-4, wis=1, cha=-2)
@@ -145,6 +150,8 @@ giant_lizard_ability_mods = AbilityModifiers(str=2, dex=1, con=1, int=-4, wis=0,
 violet_fungus_ability_mods = AbilityModifiers(str=-4, dex=-5, con=0, int=-5, wis=-4, cha=-5)
 polar_bear_ability_mods = AbilityModifiers(str=5, dex=2, con=3, int=-4, wis=1, cha=-2)
 guard_captain_ability_mods = AbilityModifiers(str=4, dex=2, con=3, int=1, wis=2, cha=1)
+warrior_veteran_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=0, wis=0, cha=0)
+knight_ability_mods = AbilityModifiers(str=3, dex=0, con=2, int=0, wis=0, cha=2)
 medium_footprint = Footprint(width=1, height=1)
 large_footprint = Footprint(width=2, height=2)
 huge_footprint = Footprint(width=3, height=3)
@@ -1328,7 +1335,7 @@ MONSTER_DEFINITIONS.update(
             variant_id="animated_armor",
             display_name="Animated Armor",
             combat_role="animated_armor",
-            ai_profile_id="line_holder",
+            ai_profile_id="melee_brute",
             max_hp=33,
             ac=18,
             speed=25,
@@ -1744,6 +1751,144 @@ MONSTER_DEFINITIONS.update(
             tags=("beast", "dinosaur", "melee"),
             action_ids=("multiattack",),
             attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("tail",), 2),),
+            default_melee_attack_action_id="multiattack",
+        ),
+        "archelon": MonsterDefinition(
+            base_creature_id="archelon",
+            variant_id="archelon",
+            display_name="Archelon",
+            combat_role="archelon",
+            ai_profile_id="melee_brute",
+            max_hp=90,
+            ac=17,
+            speed=20,
+            initiative_mod=3,
+            passive_perception=12,
+            ability_mods=archelon_ability_mods,
+            size_category="huge",
+            footprint=huge_footprint,
+            attacks={
+                "bite": WeaponProfile(
+                    id="bite",
+                    display_name="Bite",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=3, sides=6)],
+                    damage_modifier=4,
+                    damage_type="piercing",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "dinosaur", "melee"),
+            action_ids=("multiattack",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("bite",), 2),),
+            default_melee_attack_action_id="multiattack",
+        ),
+        "grick": MonsterDefinition(
+            base_creature_id="grick",
+            variant_id="grick",
+            display_name="Grick",
+            combat_role="grick",
+            ai_profile_id="melee_brute",
+            max_hp=54,
+            ac=14,
+            speed=30,
+            initiative_mod=2,
+            passive_perception=12,
+            ability_mods=grick_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "beak": WeaponProfile(
+                    id="beak",
+                    display_name="Beak",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=2, sides=6)],
+                    damage_modifier=2,
+                    damage_type="piercing",
+                    kind="melee",
+                ),
+                "tentacles": WeaponProfile(
+                    id="tentacles",
+                    display_name="Tentacles",
+                    attack_bonus=4,
+                    ability_modifier=2,
+                    damage_dice=[DiceSpec(count=1, sides=10)],
+                    damage_modifier=2,
+                    damage_type="slashing",
+                    kind="melee",
+                    on_hit_effects=[OnHitEffect(kind="grapple_on_hit", escape_dc=12, max_target_size="medium")],
+                ),
+            },
+            tags=("aberration", "grick", "melee"),
+            action_ids=("multiattack",),
+            attack_actions=(fixed_multiattack_action("multiattack", "Multiattack", ("beak", "tentacles")),),
+            default_melee_attack_action_id="multiattack",
+        ),
+        "griffon": MonsterDefinition(
+            base_creature_id="griffon",
+            variant_id="griffon",
+            display_name="Griffon",
+            combat_role="griffon",
+            ai_profile_id="melee_brute",
+            max_hp=59,
+            ac=12,
+            speed=30,
+            initiative_mod=2,
+            passive_perception=15,
+            ability_mods=griffon_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=6,
+                    ability_modifier=4,
+                    damage_dice=[DiceSpec(count=1, sides=8)],
+                    damage_modifier=4,
+                    damage_type="piercing",
+                    kind="melee",
+                    on_hit_effects=[OnHitEffect(kind="grapple_on_hit", escape_dc=14, max_target_size="medium")],
+                )
+            },
+            tags=("monstrosity", "griffon", "melee"),
+            action_ids=("multiattack",),
+            trait_ids=("opening_flight_landing",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 2),),
+            default_melee_attack_action_id="multiattack",
+            extra_resource_pools={"opening_landing_uses": 1},
+        ),
+        "hippopotamus": MonsterDefinition(
+            base_creature_id="hippopotamus",
+            variant_id="hippopotamus",
+            display_name="Hippopotamus",
+            combat_role="hippopotamus",
+            ai_profile_id="melee_brute",
+            max_hp=82,
+            ac=14,
+            speed=30,
+            initiative_mod=-2,
+            passive_perception=13,
+            ability_mods=hippopotamus_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "bite": WeaponProfile(
+                    id="bite",
+                    display_name="Bite",
+                    attack_bonus=7,
+                    ability_modifier=5,
+                    damage_dice=[DiceSpec(count=2, sides=10)],
+                    damage_modifier=5,
+                    damage_type="piercing",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "melee"),
+            action_ids=("multiattack",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("bite",), 2),),
             default_melee_attack_action_id="multiattack",
         ),
         "berserker": MonsterDefinition(
@@ -2290,6 +2435,125 @@ MONSTER_DEFINITIONS.update(
             default_melee_attack_action_id="multiattack",
             default_ranged_attack_action_id="multiattack",
         ),
+        "warrior_veteran": MonsterDefinition(
+            base_creature_id="warrior_veteran",
+            variant_id="warrior_veteran",
+            display_name="Warrior Veteran",
+            combat_role="warrior_veteran",
+            ai_profile_id="line_holder",
+            max_hp=65,
+            ac=17,
+            speed=30,
+            initiative_mod=3,
+            passive_perception=12,
+            ability_mods=warrior_veteran_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "greatsword": WeaponProfile(
+                    id="greatsword",
+                    display_name="Greatsword",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_dice=[DiceSpec(count=2, sides=6)],
+                    damage_modifier=3,
+                    damage_type="slashing",
+                    kind="melee",
+                    two_handed=True,
+                    attack_ability="str",
+                ),
+                "heavy_crossbow": WeaponProfile(
+                    id="heavy_crossbow",
+                    display_name="Heavy Crossbow",
+                    attack_bonus=3,
+                    ability_modifier=1,
+                    damage_dice=[DiceSpec(count=2, sides=10)],
+                    damage_modifier=1,
+                    damage_type="piercing",
+                    kind="ranged",
+                    range=WeaponRange(normal=100, long=400),
+                ),
+            },
+            tags=("humanoid", "warrior", "veteran"),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            reaction_ids=("opportunity_attack", "parry"),
+            attack_actions=(
+                melee_attack_action("greatsword", "Greatsword"),
+                ranged_attack_action("heavy_crossbow", "Heavy Crossbow"),
+                repeated_choice_attack_action("multiattack", "Multiattack", ("greatsword", "heavy_crossbow"), 2),
+            ),
+            default_melee_attack_action_id="multiattack",
+            default_ranged_attack_action_id="multiattack",
+        ),
+        "knight": MonsterDefinition(
+            base_creature_id="knight",
+            variant_id="knight",
+            display_name="Knight",
+            combat_role="knight",
+            ai_profile_id="line_holder",
+            max_hp=52,
+            ac=18,
+            speed=30,
+            initiative_mod=0,
+            passive_perception=10,
+            ability_mods=knight_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "greatsword": WeaponProfile(
+                    id="greatsword",
+                    display_name="Greatsword",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="slashing",
+                            damage_dice=[DiceSpec(count=2, sides=6)],
+                            damage_modifier=3,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="radiant",
+                            damage_dice=[DiceSpec(count=1, sides=8)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                    two_handed=True,
+                    attack_ability="str",
+                ),
+                "heavy_crossbow": WeaponProfile(
+                    id="heavy_crossbow",
+                    display_name="Heavy Crossbow",
+                    attack_bonus=2,
+                    ability_modifier=0,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="piercing",
+                            damage_dice=[DiceSpec(count=2, sides=10)],
+                            damage_modifier=0,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="radiant",
+                            damage_dice=[DiceSpec(count=1, sides=8)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="ranged",
+                    range=WeaponRange(normal=100, long=400),
+                ),
+            },
+            tags=("humanoid", "knight"),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            reaction_ids=("opportunity_attack", "parry"),
+            attack_actions=(
+                melee_attack_action("greatsword", "Greatsword"),
+                ranged_attack_action("heavy_crossbow", "Heavy Crossbow"),
+                repeated_choice_attack_action("multiattack", "Multiattack", ("greatsword", "heavy_crossbow"), 2),
+            ),
+            default_melee_attack_action_id="multiattack",
+            default_ranged_attack_action_id="multiattack",
+            condition_immunities=("frightened",),
+        ),
     }
 )
 
@@ -2464,6 +2728,9 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E9", "zombie", GridPosition(x=12, y=8)),
             EnemyPresetUnit("E10", "zombie", GridPosition(x=13, y=6)),
             EnemyPresetUnit("E11", "zombie", GridPosition(x=13, y=10)),
+            EnemyPresetUnit("E12", "zombie", GridPosition(x=13, y=4)),
+            EnemyPresetUnit("E13", "zombie", GridPosition(x=13, y=8)),
+            EnemyPresetUnit("E14", "zombie", GridPosition(x=13, y=12)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
@@ -2519,6 +2786,10 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "saber_toothed_tiger",
     "owlbear",
     "ankylosaurus",
+    "archelon",
+    "grick",
+    "griffon",
+    "hippopotamus",
     "berserker",
     "gnoll_warrior",
     "giant_hyena",
@@ -2533,6 +2804,8 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "violet_fungus",
     "polar_bear",
     "guard_captain",
+    "warrior_veteran",
+    "knight",
 )
 
 
@@ -2778,6 +3051,7 @@ def create_enemy(unit_id: str, variant_id: str) -> UnitState:
         damage_resistances=variant.damage_resistances,
         damage_immunities=variant.damage_immunities,
         damage_vulnerabilities=variant.damage_vulnerabilities,
+        condition_immunities=variant.condition_immunities,
         creature_tags=variant.creature_tags,
         resource_pools=dict(variant.extra_resource_pools),
     )

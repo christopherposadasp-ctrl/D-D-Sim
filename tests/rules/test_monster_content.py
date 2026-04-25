@@ -76,11 +76,15 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert tuple(definition.damage_resistances) == expectation.damage_resistances
     assert tuple(definition.damage_immunities) == expectation.damage_immunities
     assert tuple(definition.damage_vulnerabilities) == expectation.damage_vulnerabilities
+    assert tuple(definition.condition_immunities) == expectation.condition_immunities
     assert tuple(definition.creature_tags) == expectation.creature_tags
     runtime_unit = create_enemy("E1", variant_id)
     assert tuple(get_unit_bonus_action_ids(runtime_unit)) == expectation.bonus_action_ids
     assert tuple(get_unit_reaction_ids(runtime_unit)) == expectation.reaction_ids
     assert tuple(runtime_unit.creature_tags) == expectation.creature_tags
+    assert tuple(runtime_unit.condition_immunities) == expectation.condition_immunities
+    for pool_id, expected_uses in expectation.resource_pools:
+        assert runtime_unit.resource_pools.get(pool_id) == expected_uses
     assert unit_has_creature_tag(runtime_unit, "undead") is ("undead" in expectation.creature_tags)
     assert unit_is_undead(runtime_unit) is ("undead" in expectation.creature_tags)
 
@@ -174,13 +178,22 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert thrown_hammer.advantage_against_self_grappled_target is True
 
     if "grapple_on_hit" in expectation.special_mechanics:
-        weapon_id = "grab" if variant_id == "bugbear_warrior" else "claw"
-        expected_escape_dc = 12 if variant_id == "bugbear_warrior" else 11
+        grapple_expectations = {
+            "bugbear_warrior": ("grab", 12),
+            "giant_crab": ("claw", 11),
+            "grick": ("tentacles", 12),
+            "griffon": ("rend", 14),
+        }
+        weapon_id, expected_escape_dc = grapple_expectations[variant_id]
         weapon = definition.attacks[weapon_id]
         assert weapon.on_hit_effects is not None
         assert [(effect.kind, effect.max_target_size, effect.escape_dc) for effect in weapon.on_hit_effects] == [
             ("grapple_on_hit", "medium", expected_escape_dc)
         ]
+
+    if "opening_flight_landing" in expectation.special_mechanics:
+        assert "opening_flight_landing" in definition.trait_ids
+        assert runtime_unit.resource_pools.get("opening_landing_uses") == 1
 
     if "prone_on_hit" in expectation.special_mechanics and variant_id in {"brown_bear", "tiger", "mastiff", "ankylosaurus"}:
         if variant_id == "brown_bear":

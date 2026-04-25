@@ -29,9 +29,19 @@ def assert_primary_benchmark_behavior(variant_id: str, attack_events: list) -> N
             assert weapon_ids.index(expectation.opening_weapon_id) < weapon_ids.index(expectation.melee_fallback_weapon_id)
         return
 
+    if expectation.ai_profile_id == "line_holder" and any(attack.kind == "ranged" for attack in expectation.attacks.values()):
+        assert set(weapon_ids).issubset(set(expectation.attacks))
+        assert expectation.opening_weapon_id in weapon_ids
+        return
+
     if variant_id == "brown_bear":
         assert attack_events[0].damage_details.weapon_id == "bite"
         assert "claw" in weapon_ids
+        return
+
+    if variant_id == "grick":
+        assert attack_events[0].damage_details.weapon_id == "beak"
+        assert "tentacles" in weapon_ids
         return
 
     if variant_id == "bugbear_warrior":

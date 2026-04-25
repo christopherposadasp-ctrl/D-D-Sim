@@ -62,6 +62,14 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
             "save to remain at 1 Hit Point unless the damage was radiant or from a critical hit."
         ),
     ),
+    "opening_flight_landing": MonsterTraitDefinition(
+        trait_id="opening_flight_landing",
+        display_name="Opening Flight Landing",
+        description=(
+            "On its first turn, this creature can descend into any legal landing space, "
+            "then fights on the ground afterward."
+        ),
+    ),
 }
 
 
