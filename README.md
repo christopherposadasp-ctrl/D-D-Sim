@@ -133,7 +133,7 @@ These map to:
 - `check-fast`: `ruff` plus the non-slow backend `pytest` suite
 - `daily-housekeeping`: conservative repo status, doc-drift, and safe commit recommendation report with no automatic staging or commits
 - `party-validation`: focused current-party validation for `martial_mixed_party` against `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`
-- `pc-tuning-sample`: event-level Paladin tuning sample for current-party `F2` across the standard validation scenarios
+- `pc-tuning-sample`: event-level PC tuning sample for current-party Fighter `F1`, Paladin `F2`, or ranged Rogue `F3` across the standard validation scenarios
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile
 - `audit-health`: the code-health and benchmark audit
@@ -154,6 +154,8 @@ The task runner passes through extra arguments to the underlying script. Example
 ```powershell
 .\scripts\dev.ps1 party-validation --workers 4
 .\scripts\dev.ps1 pc-tuning-sample --runs-per-scenario 20
+.\scripts\dev.ps1 pc-tuning-sample --profile rogue --runs-per-scenario 20
+.\scripts\dev.ps1 pc-tuning-sample --profile fighter --player-behavior both --runs-per-scenario 20
 .\scripts\dev.ps1 audit-quick --scenario goblin_screen
 .\scripts\dev.ps1 audit-full --json
 ```
@@ -199,10 +201,12 @@ Run conservative daily housekeeping directly:
 py -3.13 .\scripts\run_daily_housekeeping.py
 ```
 
-Run the focused Paladin PC tuning sample directly:
+Run the focused PC tuning sample directly:
 
 ```powershell
 py -3.13 .\scripts\run_pc_tuning_sample.py
+py -3.13 .\scripts\run_pc_tuning_sample.py --profile rogue
+py -3.13 .\scripts\run_pc_tuning_sample.py --profile fighter --player-behavior both
 ```
 
 Run the manual code-health audit:
