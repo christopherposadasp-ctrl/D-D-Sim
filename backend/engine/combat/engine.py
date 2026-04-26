@@ -18,6 +18,7 @@ from backend.engine.ai.decision import (
     get_enemy_melee_weapon_id,
     get_ranked_attack_targets,
     get_smart_precision_max_miss_margin,
+    use_class_smart_delta,
 )
 from backend.engine.combat.setup import create_encounter
 from backend.engine.models.state import (
@@ -44,6 +45,7 @@ from backend.engine.rules.combat_rules import (
     SavingThrowOverrides,
     apply_damage,
     apply_heroism_start_of_turn,
+    attach_damage_result_event_fields,
     attempt_hide,
     attempt_lay_on_hands,
     attempt_natures_wrath,
@@ -52,17 +54,16 @@ from backend.engine.rules.combat_rules import (
     attempt_stabilize,
     attempt_steady_aim,
     attempt_step_of_the_wind,
+    build_cone_breath_targeting,
     can_use_battle_master_maneuver,
-    attach_damage_result_event_fields,
+    choose_cold_breath_targeting,
     clear_invalid_hidden_effects,
     create_skip_event,
-    expire_turn_effects,
     event_base,
+    expire_turn_effects,
     format_effect_kinds,
     get_active_rage_effect,
     get_attack_mode,
-    build_cone_breath_targeting,
-    choose_cold_breath_targeting,
     get_saving_throw_mode,
     maybe_commit_reckless_attack,
     pull_die,
@@ -76,8 +77,8 @@ from backend.engine.rules.combat_rules import (
     resolve_multi_target_save_spell,
     resolve_poisoned_end_of_turn_save,
     resolve_ray_of_sickness_poison_save,
-    resolve_saving_throw,
     resolve_restrained_end_of_turn_save,
+    resolve_saving_throw,
     resolve_single_target_save_spell,
 )
 from backend.engine.rules.spatial import (
@@ -264,11 +265,11 @@ def maybe_resolve_riposte_follow_up(state: EncounterState, attack_event: CombatE
         return []
 
     precision_max_miss_margin = None
-    if state.player_behavior == "smart":
+    if use_class_smart_delta(state, "fighter_riposte_precision"):
         precision_max_miss_margin = get_smart_precision_max_miss_margin(
             state, defender, attacker, riposte_weapon, defender.resources.superiority_dice
         )
-    elif state.player_behavior == "dumb":
+    else:
         precision_max_miss_margin = 8
 
     defender.reaction_available = False
@@ -1601,7 +1602,7 @@ def get_cleave_follow_up_target_id(
     if not legal_targets:
         return None
 
-    if actor.faction == "fighters" and state.player_behavior == "smart":
+    if actor.faction == "fighters" and use_class_smart_delta(state, "fighter_hew_targeting"):
         return sorted(
             legal_targets,
             key=lambda unit: (

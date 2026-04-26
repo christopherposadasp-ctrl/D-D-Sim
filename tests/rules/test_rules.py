@@ -2352,7 +2352,7 @@ def test_shield_reaction_turns_a_stoppable_hit_into_a_miss() -> None:
     assert any(effect.kind == "shield" for effect in encounter.units["F1"].temporary_effects)
 
 
-def test_smart_shield_skips_unstoppable_hits_while_dumb_shield_still_casts() -> None:
+def test_baseline_shield_overuses_against_unstoppable_hits() -> None:
     smart = create_encounter(build_wizard_config("wizard-shield-smart-skip", player_behavior="smart"))
     dumb = create_encounter(build_wizard_config("wizard-shield-dumb-cast", player_behavior="dumb"))
     for encounter in (smart, dumb):
@@ -2381,9 +2381,9 @@ def test_smart_shield_skips_unstoppable_hits_while_dumb_shield_still_casts() -> 
         ),
     )
 
-    assert smart_attack.resolved_totals.get("defenseReaction") is None
-    assert smart.units["F1"].resources.spell_slots_level_1 == 2
-    assert any(effect.kind == "shield" for effect in smart.units["F1"].temporary_effects) is False
+    assert smart_attack.resolved_totals["defenseReaction"] == "shield"
+    assert smart.units["F1"].resources.spell_slots_level_1 == 1
+    assert any(effect.kind == "shield" for effect in smart.units["F1"].temporary_effects)
 
     assert dumb_attack.resolved_totals["defenseReaction"] == "shield"
     assert dumb.units["F1"].resources.spell_slots_level_1 == 1
@@ -4911,7 +4911,7 @@ def test_rage_bonus_action_can_extend_an_existing_rage() -> None:
     assert encounter.units["F1"]._rage_extended_this_turn is True
 
 
-def test_barbarian_level2_reckless_attack_grants_advantage_on_strength_attacks_until_next_turn() -> None:
+def test_barbarian_level2_reckless_attack_is_suspended_by_default() -> None:
     encounter = create_encounter(build_level2_barbarian_config("barbarian-reckless-attack"))
     encounter.units["F1"].position = GridPosition(x=5, y=5)
     encounter.units["E1"].position = GridPosition(x=6, y=5)
@@ -4924,12 +4924,10 @@ def test_barbarian_level2_reckless_attack_grants_advantage_on_strength_attacks_u
         step_overrides=[AttackRollOverrides(attack_rolls=[4, 16], damage_rolls=[7])],
     )
 
-    assert attack_events[0].event_type == "phase_change"
-    assert attack_events[0].resolved_totals["recklessAttack"] is True
-    assert any(effect.kind == "reckless_attack" for effect in encounter.units["F1"].temporary_effects)
-    attack_event = next(event for event in attack_events if event.event_type == "attack")
-    assert attack_event.resolved_totals["attackMode"] == "advantage"
-    assert "reckless_attack" in attack_event.raw_rolls["advantageSources"]
+    assert attack_events[0].event_type == "attack"
+    assert any(effect.kind == "reckless_attack" for effect in encounter.units["F1"].temporary_effects) is False
+    assert attack_events[0].resolved_totals["attackMode"] == "normal"
+    assert "reckless_attack" not in attack_events[0].raw_rolls.get("advantageSources", [])
 
 
 def test_barbarian_level2_reckless_attack_grants_attackers_advantage_against_the_barbarian() -> None:
@@ -6418,8 +6416,8 @@ def test_attack_plus_action_surge_attack_resolves_two_separate_attack_actions() 
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "trip_attack"},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
     assert decision.surged_action == {
@@ -6427,12 +6425,14 @@ def test_attack_plus_action_surge_attack_resolves_two_separate_attack_actions() 
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
     assert [event.event_type for event in events] == ["attack", "attack", "phase_change", "attack", "attack"]
-    assert [event.target_ids for event in events if event.event_type == "attack"] == [["G1"], ["G1"], ["G1"], ["G1"]]
+    attack_target_ids = [event.target_ids for event in events if event.event_type == "attack"]
+    assert attack_target_ids[:3] == [["G1"], ["G1"], ["G1"]]
+    assert attack_target_ids[3][0].startswith("G")
     assert encounter.units["F1"].resources.action_surge_uses == 0
 
 
@@ -6452,8 +6452,8 @@ def test_dash_plus_action_surge_attack_executes_with_between_action_movement() -
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "trip_attack"},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
     assert [event.event_type for event in events] == ["phase_change", "move", "attack", "attack"]

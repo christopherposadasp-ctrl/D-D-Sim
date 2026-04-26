@@ -2453,10 +2453,9 @@ def maybe_apply_shield_reaction(
     if trigger == "attack_hit":
         if attack_total is None or target_ac is None:
             return None
-        if state.player_behavior == "smart":
-            should_cast = (not natural_twenty) and attack_total < (target_ac + shield_spell.ac_bonus)
-        else:
-            should_cast = True
+        # Baseline Wizard behavior intentionally overuses Shield. We will add
+        # conservative smart Shield timing back as a separate tuning step.
+        should_cast = True
 
     if not should_cast:
         return None
@@ -3592,20 +3591,15 @@ def should_commit_reckless_attack(
     target_id: str,
     weapon: WeaponProfile,
 ) -> bool:
+    _ = target_id, weapon
     attacker = state.units[attacker_id]
     if not attacker._reckless_attack_available_this_turn:
         return False
     if not unit_has_feature(attacker, "reckless_attack"):
         return False
-    if state.player_behavior != "smart":
-        return False
-    if weapon.kind != "melee" or weapon.attack_ability != "str":
-        return False
-    if unit_has_reckless_attack_effect(attacker):
-        return False
-
-    base_mode, _, _ = get_attack_mode(state, attacker, attacker_id, state.units[target_id], target_id, weapon)
-    return base_mode != "advantage"
+    # Barbarian-specific Reckless Attack timing is suspended while generic
+    # smart-vs-dumb behavior is tuned.
+    return False
 
 
 def maybe_commit_reckless_attack(

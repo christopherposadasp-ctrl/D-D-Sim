@@ -20,7 +20,6 @@ from backend.engine.models.state import (
     WeaponRange,
 )
 from backend.engine.rules.combat_rules import AttackRollOverrides
-from backend.engine.rules.spatial import can_attempt_hide_from_position
 
 
 def build_placements(**overrides):
@@ -80,8 +79,8 @@ def test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_defa
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "trip_attack"},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
     assert decision.post_action_movement is None
@@ -119,8 +118,8 @@ def test_level5_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallba
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "trip_attack"},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
     assert [point.model_dump() for point in decision.between_action_movement.path] == [
@@ -136,7 +135,7 @@ def test_level5_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallba
     assert decision.post_action_movement is None
 
 
-def test_level5_fighter_uses_trip_before_extra_attack_and_action_surge_when_already_in_melee() -> None:
+def test_level5_fighter_uses_baseline_auto_maneuvers_when_already_in_melee() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-adjacent-action-surge", placements=DEFAULT_POSITIONS))
     encounter.units["F1"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
@@ -148,8 +147,8 @@ def test_level5_fighter_uses_trip_before_extra_attack_and_action_surge_when_alre
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "trip_attack"},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
     assert decision.surged_action == {
@@ -157,8 +156,8 @@ def test_level5_fighter_uses_trip_before_extra_attack_and_action_surge_when_alre
         "target_id": "G1",
         "weapon_id": "greatsword",
         "maneuver_intents": [
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
-            {"maneuver_id": "precision_attack", "precision_max_miss_margin": 4},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
+            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
         ],
     }
 
@@ -176,7 +175,7 @@ def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -
     assert decision.surged_action is None
 
 
-def test_smart_level3_fighter_uses_precision_when_no_action_surge_followup_is_available() -> None:
+def test_level3_fighter_uses_baseline_auto_maneuver_when_no_action_surge_followup_is_available() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="fighter-smart-precision",
@@ -194,13 +193,13 @@ def test_smart_level3_fighter_uses_precision_when_no_action_surge_followup_is_av
         "kind": "attack",
         "target_id": "G1",
         "weapon_id": "greatsword",
-        "maneuver_id": "precision_attack",
-        "precision_max_miss_margin": 4,
+        "maneuver_id": "battle_master_auto",
+        "precision_max_miss_margin": 8,
     }
     assert decision.surged_action is None
 
 
-def test_smart_level3_fighter_uses_pressure_precision_margin_against_healthy_melee_threat() -> None:
+def test_level3_fighter_uses_baseline_auto_maneuver_against_healthy_melee_threat() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="fighter-smart-pressure-precision",
@@ -219,8 +218,8 @@ def test_smart_level3_fighter_uses_pressure_precision_margin_against_healthy_mel
         "kind": "attack",
         "target_id": "G1",
         "weapon_id": "greatsword",
-        "maneuver_id": "precision_attack",
-        "precision_max_miss_margin": 4,
+        "maneuver_id": "battle_master_auto",
+        "precision_max_miss_margin": 8,
     }
 
 
@@ -364,7 +363,7 @@ def test_dumb_monk_still_uses_bonus_unarmed_when_already_in_melee() -> None:
     assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
 
 
-def test_smart_monk_uses_dash_plus_bonus_unarmed_when_normal_move_cannot_reach_melee() -> None:
+def test_smart_monk_uses_baseline_dash_without_bonus_unarmed_when_normal_move_cannot_reach_melee() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="monk-dash-bonus-smart",
@@ -377,12 +376,9 @@ def test_smart_monk_uses_dash_plus_bonus_unarmed_when_normal_move_cannot_reach_m
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.action["kind"] == "dash"
-    assert decision.bonus_action is not None
-    assert decision.bonus_action["kind"] == "bonus_unarmed_strike"
-    assert decision.bonus_action["timing"] == "after_action"
-    assert decision.bonus_action["target_id"] in {"G5", "G6", "G7"}
-    assert decision.pre_action_movement is not None
-    assert decision.pre_action_movement.mode == "dash"
+    assert decision.bonus_action is None
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "dash"
 
 
 def test_dumb_monk_does_not_build_dash_plus_bonus_unarmed_turns() -> None:
@@ -403,7 +399,7 @@ def test_dumb_monk_does_not_build_dash_plus_bonus_unarmed_turns() -> None:
     assert decision.post_action_movement.mode == "dash"
 
 
-def test_level2_smart_monk_uses_flurry_of_blows_when_extra_pressure_is_worth_the_focus() -> None:
+def test_level2_smart_monk_uses_baseline_bonus_unarmed_instead_of_flurry() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="monk-level2-flurry-smart",
@@ -418,10 +414,10 @@ def test_level2_smart_monk_uses_flurry_of_blows_when_extra_pressure_is_worth_the
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
-    assert decision.bonus_action == {"kind": "flurry_of_blows", "timing": "after_action", "target_id": "G1"}
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
 
 
-def test_level2_smart_monk_uses_patient_defense_when_low_hp_and_ending_threatened() -> None:
+def test_level2_smart_monk_uses_baseline_bonus_unarmed_instead_of_patient_defense() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="monk-level2-patient-defense-smart",
@@ -437,10 +433,10 @@ def test_level2_smart_monk_uses_patient_defense_when_low_hp_and_ending_threatene
 
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "shortsword"
-    assert decision.bonus_action == {"kind": "patient_defense", "timing": "after_action"}
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
 
 
-def test_level2_smart_monk_uses_step_of_the_wind_only_when_dash_and_disengage_are_both_needed() -> None:
+def test_level2_smart_monk_uses_baseline_adjacent_attack_instead_of_step_of_the_wind() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="monk-level2-step-smart",
@@ -455,10 +451,9 @@ def test_level2_smart_monk_uses_step_of_the_wind_only_when_dash_and_disengage_ar
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "step_of_the_wind", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortsword"}
-    assert decision.pre_action_movement is not None
-    assert decision.pre_action_movement.mode == "dash"
+    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
+    assert decision.pre_action_movement is None
 
 
 def test_level2_dumb_monk_keeps_the_free_bonus_strike_and_does_not_spend_focus() -> None:
@@ -495,7 +490,7 @@ def test_smart_wizard_uses_fire_bolt_as_the_default_ranged_action() -> None:
     assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
 
 
-def test_smart_wizard_uses_shocking_grasp_and_retreats_when_pinned_by_one_enemy() -> None:
+def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_by_one_enemy() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="wizard-shocking-grasp-smart",
@@ -509,7 +504,7 @@ def test_smart_wizard_uses_shocking_grasp_and_retreats_when_pinned_by_one_enemy(
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.action == {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "G1"}
-    assert decision.post_action_movement is not None
+    assert decision.post_action_movement is None
 
 
 def test_dumb_wizard_uses_shocking_grasp_opportunistically_without_retreat_plan() -> None:
@@ -529,7 +524,7 @@ def test_dumb_wizard_uses_shocking_grasp_opportunistically_without_retreat_plan(
     assert decision.post_action_movement is None
 
 
-def test_smart_wizard_uses_magic_missile_to_avoid_adjacent_enemy_disadvantage_while_dumb_wizard_uses_fire_bolt() -> None:
+def test_smart_wizard_uses_baseline_fire_bolt_instead_of_magic_missile_for_bad_attack_rolls() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="wizard-magic-missile-smart",
@@ -561,11 +556,11 @@ def test_smart_wizard_uses_magic_missile_to_avoid_adjacent_enemy_disadvantage_wh
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.action == {"kind": "cast_spell", "spell_id": "magic_missile", "target_id": "G1"}
+    assert smart_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
     assert dumb_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
 
 
-def test_smart_wizard_repositions_for_ally_safe_burning_hands_cone() -> None:
+def test_smart_wizard_uses_baseline_fire_bolt_instead_of_repositioning_for_burning_hands() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="wizard-burning-hands-smart",
@@ -583,10 +578,8 @@ def test_smart_wizard_repositions_for_ally_safe_burning_hands_cone() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.pre_action_movement is not None
-    assert decision.pre_action_movement.path[-1] == GridPosition(x=5, y=4)
     assert decision.action["kind"] == "cast_spell"
-    assert decision.action["spell_id"] == "burning_hands"
+    assert decision.action["spell_id"] == "fire_bolt"
 
 
 def test_dumb_wizard_does_not_reposition_specifically_for_burning_hands() -> None:
@@ -793,7 +786,7 @@ def test_barbarian_throws_handaxe_only_after_close_and_dash_fail() -> None:
     assert decision.post_action_movement is None
 
 
-def test_smart_barbarian_commits_reckless_attack_on_an_eligible_greataxe_turn() -> None:
+def test_smart_barbarian_uses_baseline_no_reckless_attack_on_an_eligible_greataxe_turn() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="smart-barbarian-reckless",
@@ -815,11 +808,10 @@ def test_smart_barbarian_commits_reckless_attack_on_an_eligible_greataxe_turn() 
     )
 
     assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
-    assert attack_events[0].event_type == "phase_change"
-    assert attack_events[0].resolved_totals["recklessAttack"] is True
-    attack_event = next(event for event in attack_events if event.event_type == "attack")
-    assert attack_event.resolved_totals["attackMode"] == "advantage"
-    assert "reckless_attack" in attack_event.raw_rolls["advantageSources"]
+    assert attack_events[0].event_type == "attack"
+    assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
+    assert attack_events[0].resolved_totals["attackMode"] == "normal"
+    assert "reckless_attack" not in attack_events[0].raw_rolls.get("advantageSources", [])
 
 
 def test_dumb_barbarian_does_not_use_reckless_attack() -> None:
@@ -1105,7 +1097,7 @@ def test_level5_ranged_assassin_does_not_select_cunning_strike_in_normal_ai() ->
     assert "cunning_strike_id" not in decision.action
 
 
-def test_smart_level2_ranged_rogue_moves_to_hide_ready_square_while_dumb_rogue_does_not() -> None:
+def test_smart_level2_ranged_rogue_uses_baseline_no_hide_setup_movement() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="rogue-level2-smart-hide-setup",
@@ -1135,9 +1127,7 @@ def test_smart_level2_ranged_rogue_moves_to_hide_ready_square_while_dumb_rogue_d
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.bonus_action == {"kind": "hide", "timing": "after_action"}
-    assert smart_decision.pre_action_movement is not None
-    assert can_attempt_hide_from_position(smart, "F1", smart_decision.pre_action_movement.path[-1]) is True
+    assert smart_decision.bonus_action is None
     assert dumb_decision.bonus_action is None
 
 
@@ -1212,7 +1202,7 @@ def test_level2_melee_rogue_uses_bonus_dash_to_turn_distance_into_a_rapier_attac
     assert decision.pre_action_movement.mode == "dash"
 
 
-def test_smart_level2_melee_rogue_can_disengage_into_an_ally_supported_shortbow_turn() -> None:
+def test_smart_level2_melee_rogue_uses_baseline_rapier_attack_instead_of_ranged_reset() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="rogue-level2-melee-disengage",
@@ -1229,14 +1219,12 @@ def test_smart_level2_melee_rogue_can_disengage_into_an_ally_supported_shortbow_
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "disengage", "timing": "before_action"}
-    assert decision.action["kind"] == "attack"
-    assert decision.action["weapon_id"] == "shortbow"
-    assert decision.action["target_id"] in {"G1", "G2"}
-    assert decision.pre_action_movement is not None
+    assert decision.bonus_action is None
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "rapier"}
+    assert decision.pre_action_movement is None
 
 
-def test_smart_level2_melee_rogue_uses_after_action_hide_opportunistically_while_dumb_rogue_does_not() -> None:
+def test_smart_level2_melee_rogue_uses_baseline_no_opportunistic_hide() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="rogue-level2-melee-hide-smart",
@@ -1268,7 +1256,7 @@ def test_smart_level2_melee_rogue_uses_after_action_hide_opportunistically_while
     dumb_decision = choose_turn_decision(dumb, "F1")
 
     assert smart_decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
-    assert smart_decision.bonus_action == {"kind": "hide", "timing": "after_action"}
+    assert smart_decision.bonus_action is None
     assert dumb_decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
     assert dumb_decision.bonus_action is None
 

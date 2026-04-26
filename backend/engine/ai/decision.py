@@ -74,6 +74,14 @@ SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN = 2
 SMART_PRECISION_ATTACK_PRESSURE_MAX_MISS_MARGIN = 4
 SMART_PRECISION_ATTACK_FINISHER_MAX_MISS_MARGIN = 4
 DUMB_PRECISION_ATTACK_MAX_MISS_MARGIN = 8
+# Class/profile-specific smart tactics are intentionally suspended while the
+# generic smart-vs-dumb behavior is tuned. Add one key back here when we want to
+# reintroduce that class-specific delta deliberately.
+ENABLED_CLASS_SMART_DELTAS: frozenset[str] = frozenset()
+
+
+def use_class_smart_delta(state: EncounterState, key: str) -> bool:
+    return state.player_behavior == "smart" and key in ENABLED_CLASS_SMART_DELTAS
 
 
 @dataclass
@@ -435,7 +443,7 @@ def choose_tactical_shift_movement(
     if not improvements:
         return None
 
-    if state.player_behavior == "smart":
+    if use_class_smart_delta(state, "fighter_tactical_shift"):
         best_square = sorted(
             improvements,
             key=lambda option: (
@@ -485,7 +493,7 @@ def choose_action_surge_reposition(
     melee_weapon_id: str,
     position_index: PositionIndex | None = None,
 ) -> MovementPlan | None:
-    if state.player_behavior != "smart" or remaining_move_squares <= 0:
+    if not use_class_smart_delta(state, "fighter_action_surge_reposition") or remaining_move_squares <= 0:
         return None
 
     flanking_options = [
@@ -636,7 +644,7 @@ def apply_fighter_maneuver_intents(state: EncounterState, actor: UnitState, deci
         step_count = get_player_attack_step_count(actor, action)
         attack_steps.extend((action, step_index, step_count) for step_index in range(step_count))
 
-    if state.player_behavior == "dumb":
+    if state.player_behavior == "dumb" or not use_class_smart_delta(state, "fighter_maneuvers"):
         dice_available = actor.resources.superiority_dice
         for action, step_index, step_count in attack_steps:
             if dice_available <= 0:
@@ -742,7 +750,7 @@ def build_fighter_action_surge_dash_attack_decision(
 
     melee_option = (
         get_smart_melee_attack_option(state, actor, melee_targets, dash_squares, melee_weapon_id, position_index)
-        if state.player_behavior == "smart"
+        if use_class_smart_delta(state, "fighter_action_surge_dash_attack")
         else None
     )
 
@@ -2279,7 +2287,9 @@ def build_player_ranged_attack_decision(
     )
     prefer_distance_from_faction = "goblins" if is_player_ranged_skirmisher(actor) else None
     prefer_hide_positions = (
-        state.player_behavior == "smart" and is_player_ranged_skirmisher(actor) and can_use_player_hide_bonus_action(actor)
+        use_class_smart_delta(state, "rogue_hide_setup")
+        and is_player_ranged_skirmisher(actor)
+        and can_use_player_hide_bonus_action(actor)
     )
 
     for target in ranged_targets:
@@ -2392,7 +2402,7 @@ def build_burning_hands_decision(
 
     candidate_squares = (
         get_safe_reachable_squares(state, actor.id, move_squares, False, position_index)
-        if state.player_behavior == "smart"
+        if use_class_smart_delta(state, "wizard_burning_hands_reposition")
         else [ReachableSquare(position=actor.position, path=[actor.position], distance=0)]
     )
     candidate_options: list[tuple[ReachableSquare, object]] = []
@@ -2454,7 +2464,7 @@ def build_shocking_grasp_decision(
     if not adjacent_threats:
         return None
 
-    if state.player_behavior == "dumb":
+    if not use_class_smart_delta(state, "wizard_shocking_grasp_retreat"):
         return TurnDecision(action={"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": adjacent_threats[0].id})
 
     if len(adjacent_threats) != 1:
@@ -2525,7 +2535,7 @@ def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, cons
             continue
 
         obvious_finish = target.current_hp <= 6
-        if state.player_behavior == "dumb":
+        if not use_class_smart_delta(state, "wizard_magic_missile_bad_attack"):
             if obvious_finish:
                 return target.id
             continue
@@ -2580,7 +2590,11 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
         else None
     )
 
-    if state.player_behavior == "smart" and has_adjacent_enemy and can_use_player_weapon(actor, melee_weapon_id):
+    if (
+        use_class_smart_delta(state, "wizard_adjacent_dagger_fallback")
+        and has_adjacent_enemy
+        and can_use_player_weapon(actor, melee_weapon_id)
+    ):
         adjacent_targets = [
             target for target in melee_targets if actor.position and target.position and get_distance_between_units(actor, target) <= 1
         ]
@@ -3024,7 +3038,7 @@ def sort_monk_bonus_strike_targets(
     actor: UnitState,
     targets: list[UnitState],
 ) -> list[UnitState]:
-    if state.player_behavior == "dumb":
+    if not use_class_smart_delta(state, "monk_bonus_strike_targeting"):
         return sorted(targets, key=lambda unit: (unit.current_hp, unit.id))
 
     return sorted(
@@ -3064,7 +3078,7 @@ def get_monk_bonus_strike_target_id(
 
     preferred_target_id = decision.action.get("target_id")
     preferred_target = next((unit for unit in adjacent_targets if unit.id == preferred_target_id), None)
-    if preferred_target and state.player_behavior == "dumb":
+    if preferred_target and not use_class_smart_delta(state, "monk_bonus_strike_targeting"):
         return preferred_target.id
 
     ranked_targets = sort_monk_bonus_strike_targets(state, actor, adjacent_targets)
@@ -3116,7 +3130,7 @@ def should_use_monk_patient_defense(
 ) -> bool:
     if (
         not is_player_monk(actor)
-        or state.player_behavior != "smart"
+        or not use_class_smart_delta(state, "monk_patient_defense")
         or decision.bonus_action
         or not can_use_monk_focus_bonus_action(actor, "patient_defense")
         or get_hp_ratio(actor) > 0.5
@@ -3147,7 +3161,7 @@ def should_use_monk_flurry_of_blows(
 ) -> bool:
     if (
         not is_player_monk(actor)
-        or state.player_behavior != "smart"
+        or not use_class_smart_delta(state, "monk_flurry_of_blows")
         or decision.action["kind"] != "attack"
         or not can_use_monk_focus_bonus_action(actor, "flurry_of_blows")
     ):
@@ -3234,7 +3248,9 @@ def build_player_bonus_dash_ranged_attack_decision(
     )
     prefer_distance_from_faction = "goblins" if is_player_ranged_skirmisher(actor) else None
     prefer_hide_positions = (
-        state.player_behavior == "smart" and is_player_ranged_skirmisher(actor) and can_use_player_hide_bonus_action(actor)
+        use_class_smart_delta(state, "rogue_hide_setup")
+        and is_player_ranged_skirmisher(actor)
+        and can_use_player_hide_bonus_action(actor)
     )
 
     for require_normal_range in (True, False):
@@ -3281,7 +3297,7 @@ def build_player_bonus_dash_melee_attack_decision(
 
     melee_option = (
         get_smart_melee_attack_option(state, actor, melee_targets, dash_squares, melee_weapon_id, position_index)
-        if state.player_behavior == "smart"
+        if use_class_smart_delta(state, "bonus_dash_melee_setup")
         else None
     )
 
@@ -3324,7 +3340,11 @@ def build_monk_dash_bonus_unarmed_strike_decision(
     dash_squares: int,
     position_index: PositionIndex | None = None,
 ) -> TurnDecision | None:
-    if not is_player_monk(actor) or state.player_behavior != "smart" or not can_use_player_bonus_unarmed_strike(actor):
+    if (
+        not is_player_monk(actor)
+        or not use_class_smart_delta(state, "monk_dash_bonus_unarmed")
+        or not can_use_player_bonus_unarmed_strike(actor)
+    ):
         return None
 
     unarmed_weapon_id = "unarmed_strike"
@@ -3357,7 +3377,7 @@ def build_monk_step_of_the_wind_attack_decision(
 ) -> TurnDecision | None:
     if (
         not is_player_monk(actor)
-        or state.player_behavior != "smart"
+        or not use_class_smart_delta(state, "monk_step_of_the_wind")
         or not actor.position
         or get_hp_ratio(actor) > 0.5
         or not can_use_monk_focus_bonus_action(actor, "step_of_the_wind")
@@ -3448,12 +3468,14 @@ def apply_rogue_cunning_action(
             decision.post_action_movement = None
             return decision
 
-        if ends_in_hide_square and (state.player_behavior == "smart" or not decision.pre_action_movement):
+        if ends_in_hide_square and (
+            use_class_smart_delta(state, "rogue_hide_setup") or not decision.pre_action_movement
+        ):
             decision.bonus_action = {"kind": "hide", "timing": "after_action"}
             decision.post_action_movement = None
             return decision
 
-    if is_player_melee_opportunist(actor) and state.player_behavior == "smart" and ends_in_hide_square:
+    if is_player_melee_opportunist(actor) and use_class_smart_delta(state, "rogue_melee_hide") and ends_in_hide_square:
         decision.bonus_action = {"kind": "hide", "timing": "after_action"}
         decision.post_action_movement = None
 
@@ -3627,6 +3649,7 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
     if smart_melee_option:
         if (
             is_player_melee_opportunist(actor)
+            and use_class_smart_delta(state, "rogue_melee_ranged_reset")
             and has_adjacent_enemy
             and smart_melee_option.adjacent_allies == 0
             and can_use_player_weapon(actor, ranged_weapon_id)
