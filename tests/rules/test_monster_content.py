@@ -75,16 +75,19 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert definition.ability_mods.model_dump() == expectation.ability_mods
     assert tuple(definition.trait_ids) == expectation.trait_ids
     assert tuple(definition.role_tags) == expectation.role_tags
+    assert tuple(definition.special_action_ids) == expectation.special_action_ids
     assert tuple(definition.damage_resistances) == expectation.damage_resistances
     assert tuple(definition.damage_immunities) == expectation.damage_immunities
     assert tuple(definition.damage_vulnerabilities) == expectation.damage_vulnerabilities
     assert tuple(definition.condition_immunities) == expectation.condition_immunities
     assert tuple(definition.creature_tags) == expectation.creature_tags
+    assert tuple(definition.movement_modes) == expectation.movement_modes
     runtime_unit = create_enemy("E1", variant_id)
     assert tuple(get_unit_bonus_action_ids(runtime_unit)) == expectation.bonus_action_ids
     assert tuple(get_unit_reaction_ids(runtime_unit)) == expectation.reaction_ids
     assert tuple(runtime_unit.creature_tags) == expectation.creature_tags
     assert tuple(runtime_unit.condition_immunities) == expectation.condition_immunities
+    assert tuple(runtime_unit.movement_modes) == expectation.movement_modes
     assert tuple(runtime_unit.role_tags) == expectation.role_tags
     for pool_id, expected_uses in expectation.resource_pools:
         assert runtime_unit.resource_pools.get(pool_id) == expected_uses
@@ -170,7 +173,8 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     if "multiattack" in expectation.special_mechanics:
         multiattack = next(action for action in definition.attack_actions if action.action_id == "multiattack")
         assert definition.default_melee_attack_action_id == "multiattack"
-        assert len(multiattack.steps) == 2
+        expected_step_count = 3 if "triple_multiattack" in expectation.special_mechanics else 2
+        assert len(multiattack.steps) == expected_step_count
 
     if "parry" in expectation.special_mechanics:
         assert tuple(get_unit_reaction_ids(runtime_unit)) == ("opportunity_attack", "parry")
@@ -190,6 +194,13 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
 
     if "undead_fortitude" in expectation.special_mechanics:
         assert "undead_fortitude" in definition.trait_ids
+
+    if "ice_walk" in expectation.special_mechanics:
+        assert "ice_walk" in definition.trait_ids
+
+    if "cold_breath" in expectation.special_mechanics:
+        assert "cold_breath" in definition.special_action_ids
+        assert runtime_unit.resource_pools.get("cold_breath_available") == 1
 
     if "grappled_target_advantage" in expectation.special_mechanics:
         hammer = definition.attacks["light_hammer"]

@@ -48,6 +48,12 @@ MONSTER_AI_PROFILES: dict[str, MonsterAiProfile] = {
         combat_style="melee",
         description="Close quickly and attack in close quarters.",
     ),
+    "dragon": MonsterAiProfile(
+        profile_id="dragon",
+        display_name="Dragon",
+        combat_style="melee",
+        description="Use dragon-specific opening movement, then fight as a grounded melee threat.",
+    ),
     "swallow_predator": MonsterAiProfile(
         profile_id="swallow_predator",
         display_name="Swallow Predator",

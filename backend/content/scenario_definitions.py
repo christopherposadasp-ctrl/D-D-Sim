@@ -108,6 +108,18 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         enemy_preset_id="skyhunter_pincer",
         audit_expectation_ids=("griffon_opening_landing", "griffon_grapple", "centaur_multiattack", "scout_multiattack"),
     ),
+    "hobgoblin_command_screen": ScenarioDefinition(
+        scenario_id="hobgoblin_command_screen",
+        display_name="Hobgoblin Command Screen",
+        description=ENEMY_PRESETS["hobgoblin_command_screen"].description,
+        enemy_preset_id="hobgoblin_command_screen",
+        audit_expectation_ids=(
+            "hobgoblin_captain_multiattack",
+            "hobgoblin_captain_longbow_attack",
+            "hobgoblin_longsword_attack",
+            "hobgoblin_longbow_attack",
+        ),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS

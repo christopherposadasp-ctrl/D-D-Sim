@@ -31,6 +31,7 @@ from backend.engine.rules.combat_rules import (
     can_apply_sneak_attack,
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
+    choose_cold_breath_targeting,
     choose_selectable_damage_type,
     get_active_bless_effect,
     get_damage_defense_flags,
@@ -4134,6 +4135,88 @@ def get_opening_flight_landing_decision(state: EncounterState, actor: UnitState)
     )
 
 
+def can_use_cold_breath(actor: UnitState) -> bool:
+    return actor.resource_pools.get("cold_breath_available", 0) > 0
+
+
+def build_cold_breath_action(targeting) -> dict[str, str]:
+    return {
+        "kind": "special_action",
+        "action_id": "cold_breath",
+        "target_id": targeting.primary_target_id,
+        "origin_x": str(targeting.origin.x),
+        "origin_y": str(targeting.origin.y),
+        "direction": targeting.direction,
+    }
+
+
+def choose_dragon_landing_breath_option(
+    state: EncounterState,
+    actor: UnitState,
+    position_index: PositionIndex,
+):
+    if not actor.position:
+        return None
+
+    candidates = []
+    for landing_position in get_legal_landing_positions(state, actor, position_index):
+        targeting = choose_cold_breath_targeting(
+            state,
+            actor.id,
+            actor_position=landing_position,
+            minimum_enemy_targets=2,
+            allow_allies=False,
+        )
+        if targeting:
+            candidates.append((landing_position, targeting))
+
+    if not candidates:
+        return None
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            -len(candidate[1].enemy_target_ids),
+            candidate[0].x,
+            candidate[0].y,
+            candidate[1].origin.x,
+            candidate[1].origin.y,
+            candidate[1].direction,
+            candidate[1].target_ids,
+        ),
+    )[0]
+
+
+def get_dragon_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
+    position_index = build_position_index(state)
+    if can_use_cold_breath(actor):
+        current_breath = choose_cold_breath_targeting(
+            state,
+            actor.id,
+            minimum_enemy_targets=2,
+            allow_allies=False,
+        )
+        if current_breath:
+            return TurnDecision(action=build_cold_breath_action(current_breath))
+
+        if can_use_opening_flight_landing(actor):
+            landing_breath = choose_dragon_landing_breath_option(state, actor, position_index)
+            if landing_breath:
+                landing_position, targeting = landing_breath
+                actor.resource_pools["opening_landing_uses"] = max(0, actor.resource_pools.get("opening_landing_uses", 0) - 1)
+                return TurnDecision(
+                    pre_action_movement=MovementPlan(
+                        path=[actor.position.model_copy(deep=True), landing_position.model_copy(deep=True)],
+                        mode="landing",
+                    ),
+                    action=build_cold_breath_action(targeting),
+                )
+
+    if can_use_opening_flight_landing(actor):
+        return get_opening_flight_landing_decision(state, actor)
+    return get_enemy_melee_decision(state, actor)
+
+
 def get_enemy_melee_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     move_squares = get_move_squares(actor, state)
     dash_squares = get_total_move_squares(actor, 1, state=state)
@@ -4600,19 +4683,24 @@ def choose_turn_decision(state: EncounterState, actor_id: str) -> TurnDecision:
     if actor.faction == "fighters":
         return get_player_martial_decision(state, actor)
 
+    monster_profile = get_monster_profile(actor)
+
+    if monster_profile.profile_id == "dragon":
+        return get_dragon_decision(state, actor)
+
     if can_use_opening_flight_landing(actor):
         return get_opening_flight_landing_decision(state, actor)
 
-    if get_monster_profile(actor).profile_id == "swallow_predator":
+    if monster_profile.profile_id == "swallow_predator":
         return get_swallow_predator_decision(state, actor)
 
-    if get_monster_profile(actor).profile_id == "grappling_brute":
+    if monster_profile.profile_id == "grappling_brute":
         return get_grappling_brute_decision(state, actor)
 
-    if get_monster_profile(actor).profile_id == "line_holder":
+    if monster_profile.profile_id == "line_holder":
         return get_line_holder_decision(state, actor)
 
-    if get_monster_profile(actor).profile_id == "pack_hunter":
+    if monster_profile.profile_id == "pack_hunter":
         return get_pack_hunter_decision(state, actor)
 
     if uses_ranged_monster_ai(actor):

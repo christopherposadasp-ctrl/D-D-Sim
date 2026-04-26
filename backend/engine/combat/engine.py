@@ -5,6 +5,7 @@ from backend.content.class_progressions import get_progression_scalar
 from backend.content.combat_actions import action_prevents_opportunity_attacks, get_extra_movement_multiplier
 from backend.content.enemies import (
     get_attack_action_definition_for_unit,
+    get_monster_definition_for_unit,
     unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
@@ -39,6 +40,9 @@ from backend.engine.models.state import (
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
+    ResolveSavingThrowArgs,
+    SavingThrowOverrides,
+    apply_damage,
     apply_heroism_start_of_turn,
     attempt_hide,
     attempt_lay_on_hands,
@@ -49,12 +53,17 @@ from backend.engine.rules.combat_rules import (
     attempt_steady_aim,
     attempt_step_of_the_wind,
     can_use_battle_master_maneuver,
+    attach_damage_result_event_fields,
     clear_invalid_hidden_effects,
     create_skip_event,
     expire_turn_effects,
+    event_base,
     format_effect_kinds,
     get_active_rage_effect,
     get_attack_mode,
+    build_cone_breath_targeting,
+    choose_cold_breath_targeting,
+    get_saving_throw_mode,
     maybe_commit_reckless_attack,
     pull_die,
     recalculate_effective_speed_for_unit,
@@ -67,6 +76,7 @@ from backend.engine.rules.combat_rules import (
     resolve_multi_target_save_spell,
     resolve_poisoned_end_of_turn_save,
     resolve_ray_of_sickness_poison_save,
+    resolve_saving_throw,
     resolve_restrained_end_of_turn_save,
     resolve_single_target_save_spell,
 )
@@ -1023,12 +1033,55 @@ def build_ongoing_damage_event(
     )
 
 
+def resolve_cold_breath_recharge(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    roll_override: int | None = None,
+) -> CombatEvent | None:
+    actor = state.units[actor_id]
+    if actor.current_hp <= 0 or actor.conditions.dead:
+        return None
+    if "cold_breath_available" not in actor.resource_pools:
+        return None
+    if actor.resource_pools.get("cold_breath_available", 0) > 0:
+        return None
+
+    recharge_roll = pull_die(state, 6, roll_override)
+    success = recharge_roll >= 5
+    if success:
+        actor.resource_pools["cold_breath_available"] = 1
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[actor_id],
+        event_type="phase_change",
+        raw_rolls={"rechargeRoll": recharge_roll},
+        resolved_totals={
+            "specialAction": "cold_breath",
+            "rechargeThreshold": 5,
+            "rechargeSucceeded": success,
+            "coldBreathAvailable": actor.resource_pools.get("cold_breath_available", 0),
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=[f"{actor_id}'s Cold Breath recharges."] if success else [],
+        text_summary=(
+            f"{actor_id} rolls {recharge_roll} to recharge Cold Breath: "
+            f"{'recharged' if success else 'not recharged'}."
+        ),
+    )
+
+
 def apply_start_of_turn_ongoing_effects(state: EncounterState, actor_id: str) -> list[CombatEvent]:
     actor = state.units[actor_id]
     events: list[CombatEvent] = []
     heroism_event = apply_heroism_start_of_turn(state, actor_id)
     if heroism_event:
         events.append(heroism_event)
+    cold_breath_recharge_event = resolve_cold_breath_recharge(state, actor_id)
+    if cold_breath_recharge_event:
+        events.append(cold_breath_recharge_event)
 
     if actor.combat_role != "giant_toad":
         return events
@@ -1124,6 +1177,186 @@ def resolve_special_action(state: EncounterState, actor_id: str, action: dict[st
         ],
         text_summary=f"{actor_id} swallows {target_id}.",
     )
+
+
+def build_cold_breath_damage_component(base_rolls: list[int], applied_damage: int) -> list[DamageComponentResult]:
+    return [
+        DamageComponentResult(
+            damage_type="cold",
+            raw_rolls=list(base_rolls),
+            adjusted_rolls=list(base_rolls),
+            subtotal=sum(base_rolls),
+            flat_modifier=0,
+            total_damage=applied_damage,
+        )
+    ]
+
+
+def resolve_cold_breath(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    target_id = action.get("target_id")
+    required_target_id = str(target_id) if isinstance(target_id, str) else None
+
+    if "cold_breath" not in get_monster_definition_for_unit(actor).special_action_ids:
+        return [create_skip_event(state, actor_id, "Cold Breath is not available to this creature.")]
+    if actor.resource_pools.get("cold_breath_available", 0) <= 0:
+        return [create_skip_event(state, actor_id, "Cold Breath has not recharged.")]
+
+    origin = None
+    direction = action.get("direction")
+    if "origin_x" in action and "origin_y" in action:
+        origin = GridPosition(x=int(action["origin_x"]), y=int(action["origin_y"]))
+
+    targeting = (
+        build_cone_breath_targeting(
+            state,
+            actor_id,
+            origin=origin,
+            direction=str(direction),
+            range_squares=6,
+            required_primary_target_id=required_target_id,
+        )
+        if origin and isinstance(direction, str)
+        else choose_cold_breath_targeting(
+            state,
+            actor_id,
+            required_primary_target_id=required_target_id,
+            minimum_enemy_targets=1,
+            allow_allies=True,
+        )
+    )
+    if not targeting:
+        return [create_skip_event(state, actor_id, "Cold Breath has no legal cone.")]
+
+    actor.resource_pools["cold_breath_available"] = 0
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
+    damage_rolls = [pull_die(state, 8, damage_rolls_override.pop(0) if damage_rolls_override else None) for _ in range(9)]
+    full_damage = sum(damage_rolls)
+    save_dc = 15
+
+    events: list[CombatEvent] = [
+        CombatEvent(
+            **event_base(state, actor_id),
+            target_ids=list(targeting.target_ids),
+            event_type="phase_change",
+            raw_rolls={},
+            resolved_totals={
+                "specialAction": "cold_breath",
+                "origin": format_position(targeting.origin),
+                "direction": targeting.direction,
+                "enemyTargetCount": len(targeting.enemy_target_ids),
+                "allyTargetCount": len(targeting.ally_target_ids),
+                "coldBreathAvailable": actor.resource_pools.get("cold_breath_available", 0),
+            },
+            movement_details=None,
+            damage_details=None,
+            condition_deltas=[],
+            text_summary=(
+                f"{actor_id} exhales Cold Breath, catching "
+                f"{len(targeting.enemy_target_ids)} enemies and {len(targeting.ally_target_ids)} allies."
+            ),
+        )
+    ]
+
+    for resolved_target_id in targeting.target_ids:
+        target = state.units[resolved_target_id]
+        save_mode, _, _ = get_saving_throw_mode(target, "con")
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=resolved_target_id,
+                ability="con",
+                dc=save_dc,
+                reason="Cold Breath",
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        applied_damage = full_damage // 2 if save_success else full_damage
+        damage_components = build_cold_breath_damage_component(damage_rolls, applied_damage)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            damage_components,
+            False,
+            concentration_save_rolls=concentration_rolls_override,
+        )
+        events.append(save_event)
+        raw_rolls = {"damageRolls": list(damage_rolls)}
+        resolved_totals = {
+            "specialAction": "cold_breath",
+            "saveAbility": "con",
+            "saveDc": save_dc,
+            "saveSucceeded": save_success,
+            "fullDamage": full_damage,
+            "halfOnSuccess": True,
+        }
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
+        events.append(
+            CombatEvent(
+                **event_base(state, actor_id),
+                target_ids=[resolved_target_id],
+                event_type="attack",
+                raw_rolls=raw_rolls,
+                resolved_totals=resolved_totals,
+                movement_details=None,
+                damage_details=DamageDetails(
+                    weapon_id="cold_breath",
+                    weapon_name="Cold Breath",
+                    damage_components=damage_components,
+                    primary_candidate=None,
+                    savage_candidate=None,
+                    chosen_candidate=None,
+                    critical_applied=False,
+                    critical_multiplier=1,
+                    flat_modifier=0,
+                    advantage_bonus_candidate=None,
+                    mastery_applied=None,
+                    mastery_notes=None,
+                    attack_riders_applied=None,
+                    total_damage=applied_damage,
+                    resisted_damage=damage_result.resisted_damage,
+                    amplified_damage=damage_result.amplified_damage or None,
+                    temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                    final_damage_to_hp=damage_result.final_damage_to_hp,
+                    hp_delta=damage_result.hp_delta,
+                ),
+                condition_deltas=list(damage_result.condition_deltas),
+                text_summary=(
+                    f"{actor_id}'s Cold Breath hits {resolved_target_id} for {applied_damage} cold damage"
+                    f"{' after a successful save' if save_success else ' after a failed save'}"
+                    f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                    f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+                ),
+            )
+        )
+
+        if state.units[resolved_target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+
+    return events
+
+
+def resolve_special_action_events(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    *,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    if action.get("action_id") == "cold_breath":
+        return resolve_cold_breath(state, actor_id, action, overrides)
+    return [resolve_special_action(state, actor_id, action)]
 
 
 def get_expected_weapon_damage(weapon, attack_mode: str) -> float:
@@ -2269,7 +2502,7 @@ def resolve_turn_action(
     elif action["kind"] == "cast_spell" and not rescue_mode:
         events.extend(resolve_cast_spell_action(state, actor_id, action))
     elif action["kind"] == "special_action" and not rescue_mode:
-        events.append(resolve_special_action(state, actor_id, action))
+        events.extend(resolve_special_action_events(state, actor_id, action))
     elif action["kind"] == "stabilize":
         events.append(attempt_stabilize(state, actor_id, action["target_id"]))
     elif action["kind"] == "skip":

@@ -301,6 +301,14 @@ def build_signature_checks() -> dict[str, list[SignatureCheck]]:
             "hobgoblinLongbowAttack",
             lambda result: any_attack_with_weapon(result, {"hobgoblin_archer"}, "longbow"),
         ),
+        "hobgoblin_captain_multiattack": SignatureCheck(
+            "hobgoblinCaptainMultiattack",
+            lambda result: has_role_multiattack(result, {"hobgoblin_captain"}),
+        ),
+        "hobgoblin_captain_longbow_attack": SignatureCheck(
+            "hobgoblinCaptainLongbowAttack",
+            lambda result: any_attack_with_weapon(result, {"hobgoblin_captain"}, "longbow"),
+        ),
         "goblin_boss_multiattack": SignatureCheck(
             "goblinBossMultiattack",
             lambda result: has_role_multiattack(result, {"goblin_boss"}),

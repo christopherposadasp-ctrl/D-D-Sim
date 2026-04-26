@@ -90,6 +90,11 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
             "then fights on the ground afterward."
         ),
     ),
+    "ice_walk": MonsterTraitDefinition(
+        trait_id="ice_walk",
+        display_name="Ice Walk",
+        description="This creature moves across ice safely; ice terrain is not modeled by the live simulator.",
+    ),
 }
 
 

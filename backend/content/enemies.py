@@ -55,6 +55,7 @@ class MonsterDefinition:
     attacks: dict[str, WeaponProfile]
     tags: tuple[str, ...] = ()
     creature_tags: tuple[str, ...] = ()
+    movement_modes: tuple[str, ...] = ()
     role_tags: tuple[RoleTag, ...] = ()
     action_ids: tuple[str, ...] = ()
     special_action_ids: tuple[str, ...] = ()
@@ -165,6 +166,7 @@ polar_bear_ability_mods = AbilityModifiers(str=5, dex=2, con=3, int=-4, wis=1, c
 guard_captain_ability_mods = AbilityModifiers(str=4, dex=2, con=3, int=1, wis=2, cha=1)
 warrior_veteran_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=0, wis=0, cha=0)
 knight_ability_mods = AbilityModifiers(str=3, dex=0, con=2, int=0, wis=0, cha=2)
+young_white_dragon_ability_mods = AbilityModifiers(str=4, dex=0, con=4, int=-2, wis=0, cha=1)
 medium_footprint = Footprint(width=1, height=1)
 large_footprint = Footprint(width=2, height=2)
 huge_footprint = Footprint(width=3, height=3)
@@ -2447,6 +2449,53 @@ MONSTER_DEFINITIONS.update(
             attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("bite",), 2),),
             default_melee_attack_action_id="multiattack",
         ),
+        "young_white_dragon": MonsterDefinition(
+            base_creature_id="young_white_dragon",
+            variant_id="young_white_dragon",
+            display_name="Young White Dragon",
+            combat_role="young_white_dragon",
+            ai_profile_id="dragon",
+            max_hp=123,
+            ac=17,
+            speed=40,
+            initiative_mod=3,
+            passive_perception=16,
+            ability_mods=young_white_dragon_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=7,
+                    ability_modifier=4,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="slashing",
+                            damage_dice=[DiceSpec(count=2, sides=4)],
+                            damage_modifier=4,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="cold",
+                            damage_dice=[DiceSpec(count=1, sides=4)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                    reach=10,
+                )
+            },
+            tags=("dragon", "chromatic", "white", "melee"),
+            creature_tags=("dragon",),
+            movement_modes=("walk", "burrow", "fly", "swim"),
+            action_ids=("multiattack", "cold_breath"),
+            special_action_ids=("cold_breath",),
+            trait_ids=("ice_walk", "opening_flight_landing"),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),),
+            default_melee_attack_action_id="multiattack",
+            damage_immunities=("cold",),
+            extra_resource_pools={"opening_landing_uses": 1, "cold_breath_available": 1},
+        ),
         "berserker": MonsterDefinition(
             base_creature_id="berserker",
             variant_id="berserker",
@@ -3335,6 +3384,29 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
+    "hobgoblin_command_screen": EnemyPresetDefinition(
+        preset_id="hobgoblin_command_screen",
+        display_name="Hobgoblin Command Screen",
+        description="Hobgoblin captains direct a layered shell of disciplined warriors while archers punish any premature dive on the command layer.",
+        units=(
+            EnemyPresetUnit("E1", "hobgoblin_warrior", GridPosition(x=8, y=4)),
+            EnemyPresetUnit("E2", "hobgoblin_warrior", GridPosition(x=8, y=8)),
+            EnemyPresetUnit("E3", "hobgoblin_warrior", GridPosition(x=8, y=12)),
+            EnemyPresetUnit("E4", "hobgoblin_warrior", GridPosition(x=9, y=6)),
+            EnemyPresetUnit("E5", "hobgoblin_warrior", GridPosition(x=9, y=10)),
+            EnemyPresetUnit("E6", "hobgoblin_warrior", GridPosition(x=10, y=8)),
+            EnemyPresetUnit("E7", "hobgoblin_warrior", GridPosition(x=10, y=5)),
+            EnemyPresetUnit("E8", "hobgoblin_warrior", GridPosition(x=10, y=11)),
+            EnemyPresetUnit("E9", "hobgoblin_warrior", GridPosition(x=11, y=6)),
+            EnemyPresetUnit("E10", "hobgoblin_captain", GridPosition(x=11, y=10)),
+            EnemyPresetUnit("E11", "hobgoblin_captain", GridPosition(x=11, y=8)),
+            EnemyPresetUnit("E12", "hobgoblin_archer", GridPosition(x=12, y=4)),
+            EnemyPresetUnit("E13", "hobgoblin_archer", GridPosition(x=12, y=7)),
+            EnemyPresetUnit("E14", "hobgoblin_archer", GridPosition(x=12, y=10)),
+            EnemyPresetUnit("E15", "hobgoblin_archer", GridPosition(x=12, y=13)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
@@ -3389,6 +3461,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "grick",
     "griffon",
     "hippopotamus",
+    "young_white_dragon",
     "berserker",
     "gnoll_warrior",
     "giant_hyena",
@@ -3655,5 +3728,6 @@ def create_enemy(unit_id: str, variant_id: str) -> UnitState:
         damage_vulnerabilities=variant.damage_vulnerabilities,
         condition_immunities=variant.condition_immunities,
         creature_tags=variant.creature_tags,
+        movement_modes=variant.movement_modes,
         resource_pools=dict(variant.extra_resource_pools),
     )

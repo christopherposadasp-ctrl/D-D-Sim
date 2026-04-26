@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from backend.content.enemies import BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT, unit_has_trait
+from backend.content.enemies import BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT, create_enemy, unit_has_trait
 from backend.engine import create_encounter
 from backend.engine.ai.decision import choose_turn_decision
-from backend.engine.combat.engine import execute_decision, resolve_attack_action
+from backend.engine.ai.profiles import get_monster_ai_profile
+from backend.engine.combat.engine import execute_decision, resolve_attack_action, resolve_cold_breath, resolve_cold_breath_recharge
 from backend.engine.models.state import DiceSpec, EncounterConfig, Footprint, GridPosition, WeaponProfile, WeaponRange
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
@@ -93,6 +94,7 @@ FIXED_ATTACK_CASES = (
     ("grick", "tentacles", [5], ["slashing"], [7]),
     ("griffon", "rend", [4], ["piercing"], [8]),
     ("hippopotamus", "bite", [5, 6], ["piercing"], [16]),
+    ("young_white_dragon", "rend", [3, 4, 2], ["slashing", "cold"], [11, 2]),
     ("berserker", "greataxe", [6], ["slashing"], [9]),
     ("gnoll_warrior", "rend", [3], ["piercing"], [5]),
     ("gnoll_warrior", "bone_bow", [5], ["piercing"], [6]),
@@ -950,6 +952,228 @@ def test_hippopotamus_multiattack_resolves_two_bite_attacks_and_uses_legal_large
     assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "bite"}
     assert [event.damage_details.weapon_id for event in attacks] == ["bite", "bite"]
     assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_young_white_dragon_multiattack_resolves_three_rend_attacks_and_uses_legal_large_footprint() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend", "rend"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_dragon_profile_exists_as_melee_style() -> None:
+    profile = get_monster_ai_profile("dragon")
+
+    assert profile.profile_id == "dragon"
+    assert profile.combat_style == "melee"
+
+
+def test_young_white_dragon_cold_breath_failed_save_deals_full_fixed_cold_damage_and_spends_use() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=9, y=5)
+
+    events = resolve_cold_breath(
+        encounter,
+        "E1",
+        {"action_id": "cold_breath", "target_id": "F1", "origin_x": 6, "origin_y": 5, "direction": "e"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[4, 4, 4, 4, 4, 4, 4, 4, 4]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 0
+    assert attacks[0].damage_details.weapon_id == "cold_breath"
+    assert attacks[0].resolved_totals["saveSucceeded"] is False
+    assert attacks[0].damage_details.total_damage == 36
+    assert attacks[0].damage_details.final_damage_to_hp == 36
+
+
+def test_young_white_dragon_cold_breath_successful_save_halves_damage_rounded_down() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=9, y=5)
+
+    events = resolve_cold_breath(
+        encounter,
+        "E1",
+        {"action_id": "cold_breath", "target_id": "F1", "origin_x": 6, "origin_y": 5, "direction": "e"},
+        AttackRollOverrides(save_rolls=[20], damage_rolls=[3, 3, 3, 3, 3, 3, 3, 3, 3]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert attacks[0].resolved_totals["saveSucceeded"] is True
+    assert attacks[0].damage_details.total_damage == 13
+    assert attacks[0].damage_details.final_damage_to_hp == 13
+
+
+def test_young_white_dragon_cold_breath_respects_cold_immunity() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=9, y=5)
+    encounter.units["F1"].damage_immunities = ("cold",)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_cold_breath(
+        encounter,
+        "E1",
+        {"action_id": "cold_breath", "target_id": "F1", "origin_x": 6, "origin_y": 5, "direction": "e"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[4, 4, 4, 4, 4, 4, 4, 4, 4]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert attacks[0].damage_details.resisted_damage == 36
+    assert attacks[0].damage_details.final_damage_to_hp == 0
+
+
+def test_young_white_dragon_cold_breath_recharge_rolls_restore_only_on_five_or_higher() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+
+    failed_event = resolve_cold_breath_recharge(encounter, "E1", roll_override=4)
+
+    assert failed_event is not None
+    assert failed_event.raw_rolls["rechargeRoll"] == 4
+    assert failed_event.resolved_totals["rechargeSucceeded"] is False
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 0
+
+    success_event = resolve_cold_breath_recharge(encounter, "E1", roll_override=5)
+
+    assert success_event is not None
+    assert success_event.raw_rolls["rechargeRoll"] == 5
+    assert success_event.resolved_totals["rechargeSucceeded"] is True
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 1
+
+
+def test_young_white_dragon_uses_current_position_cold_breath_when_it_can_hit_two_pcs() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=9, y=5)
+    encounter.units["F3"].position = GridPosition(x=9, y=6)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is None
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "cold_breath"
+
+
+def test_young_white_dragon_first_turn_lands_then_uses_cold_breath_when_it_can_hit_two_pcs() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F3"].position = GridPosition(x=3, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+    encounter.units["F3"].max_hp = 50
+    encounter.units["F3"].current_hp = 50
+
+    decision, events = run_actor_turn(encounter, "E1")
+    move_events = [event for event in events if event.event_type == "move"]
+    attacks = enemy_attack_events(events)
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "landing"
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "cold_breath"
+    assert move_events[0].resolved_totals["movementMode"] == "landing"
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 0
+    assert [event.damage_details.weapon_id for event in attacks] == ["cold_breath", "cold_breath"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1", "F3")
+
+
+def test_young_white_dragon_first_turn_lands_then_uses_three_rend_attacks() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    decision, events = run_actor_turn(encounter, "E1")
+    move_events = [event for event in events if event.event_type == "move"]
+    attacks = enemy_attack_events(events)
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "landing"
+    assert move_events[0].resolved_totals["movementMode"] == "landing"
+    assert move_events[0].resolved_totals["landingApplied"] is True
+    assert move_events[0].resolved_totals["opportunityAttackers"] == []
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert (
+        get_min_chebyshev_distance_between_footprints(
+            encounter.units["E1"].position,
+            encounter.units["E1"].footprint,
+            encounter.units["F1"].position,
+            encounter.units["F1"].footprint,
+        )
+        <= 2
+    )
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend", "rend"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_young_white_dragon_does_not_relocate_with_landing_when_already_in_reach() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is None
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+
+
+def test_young_white_dragon_landing_is_one_use_and_later_turns_use_ground_movement() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    first_decision, _ = run_actor_turn(encounter, "E1")
+    encounter.units["E1"].position = GridPosition(x=14, y=14)
+    second_decision = choose_turn_decision(encounter, "E1")
+
+    assert first_decision.pre_action_movement is not None
+    assert first_decision.pre_action_movement.mode == "landing"
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert not second_decision.pre_action_movement or second_decision.pre_action_movement.mode != "landing"
+    assert second_decision.action["kind"] == "dash"
+
+
+def test_young_white_dragon_avoids_cold_breath_when_best_current_cone_includes_an_ally() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1", "F3")
+    encounter.units["E1"].resource_pools["opening_landing_uses"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["F1"].position = GridPosition(x=9, y=5)
+    encounter.units["F3"].position = GridPosition(x=9, y=6)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.action["kind"] != "special_action"
 
 
 def test_grick_tentacles_grapple_medium_targets_with_dc_12_but_not_large_targets() -> None:

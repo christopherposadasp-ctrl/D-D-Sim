@@ -49,6 +49,12 @@ def assert_primary_benchmark_behavior(variant_id: str, attack_events: list) -> N
         assert set(weapon_ids).issubset({"grab", "light_hammer"})
         return
 
+    if variant_id == "young_white_dragon":
+        assert set(weapon_ids).issubset({"cold_breath", "rend"})
+        if "cold_breath" in weapon_ids and "rend" in weapon_ids:
+            assert weapon_ids.index("cold_breath") < weapon_ids.index("rend")
+        return
+
     assert set(weapon_ids) == {expectation.opening_weapon_id}
     if variant_id in {"warrior_infantry", "hyena", "giant_rat", "dire_wolf"}:
         assert any(event.resolved_totals.get("attackMode") == "advantage" for event in attack_events)

@@ -85,6 +85,7 @@ from backend.engine.rules.combat_support import (
     resolve_spell_ability as resolve_spell_ability,
 )
 from backend.engine.rules.spatial import (
+    GRID_SIZE,
     build_position_index,
     can_attempt_hide_from_position,
     get_attack_context,
@@ -2509,6 +2510,153 @@ def get_burning_hands_cone_squares(origin: GridPosition, direction: str) -> list
         for square in get_line_squares(origin, endpoint)[1:]:
             square_keys.add((square.x, square.y))
     return [GridPosition(x=x, y=y) for x, y in sorted(square_keys)]
+
+
+@dataclass(frozen=True)
+class ConeBreathTargeting:
+    primary_target_id: str
+    target_ids: tuple[str, ...]
+    enemy_target_ids: tuple[str, ...]
+    ally_target_ids: tuple[str, ...]
+    origin: GridPosition
+    direction: str
+
+
+def get_self_origin_cone_endpoint_deltas(range_squares: int, direction: str) -> tuple[tuple[int, int], ...]:
+    half_width = max(1, range_squares // 2)
+    endpoints_by_direction = {
+        "n": ((-half_width, -range_squares), (0, -range_squares), (half_width, -range_squares)),
+        "ne": ((half_width, -range_squares), (range_squares, -range_squares), (range_squares, -half_width)),
+        "e": ((range_squares, -half_width), (range_squares, 0), (range_squares, half_width)),
+        "se": ((half_width, range_squares), (range_squares, half_width), (range_squares, range_squares)),
+        "s": ((-half_width, range_squares), (0, range_squares), (half_width, range_squares)),
+        "sw": ((-range_squares, half_width), (-range_squares, range_squares), (-half_width, range_squares)),
+        "w": ((-range_squares, -half_width), (-range_squares, 0), (-range_squares, half_width)),
+        "nw": ((-range_squares, -range_squares), (-range_squares, -half_width), (-half_width, -range_squares)),
+    }
+    return endpoints_by_direction[direction]
+
+
+def get_self_origin_cone_squares(origin: GridPosition, direction: str, range_squares: int) -> list[GridPosition]:
+    square_keys: set[tuple[int, int]] = set()
+    for delta_x, delta_y in get_self_origin_cone_endpoint_deltas(range_squares, direction):
+        endpoint = GridPosition(x=origin.x + delta_x, y=origin.y + delta_y)
+        for square in get_line_squares(origin, endpoint)[1:]:
+            if 1 <= square.x <= GRID_SIZE and 1 <= square.y <= GRID_SIZE:
+                square_keys.add((square.x, square.y))
+    return [GridPosition(x=x, y=y) for x, y in sorted(square_keys)]
+
+
+def build_cone_breath_targeting(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    actor_position: GridPosition | None = None,
+    origin: GridPosition,
+    direction: str,
+    range_squares: int,
+    required_primary_target_id: str | None = None,
+) -> ConeBreathTargeting | None:
+    actor = state.units[actor_id]
+    footprint_position = actor_position or actor.position
+    actor_footprint_keys = {
+        (square.x, square.y)
+        for square in (
+            get_occupied_squares_for_position(footprint_position, get_unit_footprint(actor))
+            if footprint_position
+            else []
+        )
+    }
+    cone_square_keys = {
+        (square.x, square.y)
+        for square in get_self_origin_cone_squares(origin, direction, range_squares)
+        if (square.x, square.y) not in actor_footprint_keys
+    }
+    if not cone_square_keys:
+        return None
+
+    live_units = [
+        unit
+        for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id))
+        if unit.id != actor_id and unit.position and not unit.conditions.dead
+    ]
+    hit_units = [
+        unit
+        for unit in live_units
+        if any(
+            (occupied_square.x, occupied_square.y) in cone_square_keys
+            for occupied_square in get_occupied_squares_for_position(unit.position, get_unit_footprint(unit))
+        )
+    ]
+    if required_primary_target_id and all(unit.id != required_primary_target_id for unit in hit_units):
+        return None
+
+    enemy_target_ids = tuple(unit.id for unit in hit_units if unit.faction != actor.faction)
+    if not enemy_target_ids:
+        return None
+    ally_target_ids = tuple(unit.id for unit in hit_units if unit.faction == actor.faction)
+    primary_target_id = required_primary_target_id or sorted(enemy_target_ids, key=unit_sort_key)[0]
+    return ConeBreathTargeting(
+        primary_target_id=primary_target_id,
+        target_ids=tuple(unit.id for unit in hit_units),
+        enemy_target_ids=enemy_target_ids,
+        ally_target_ids=ally_target_ids,
+        origin=origin,
+        direction=direction,
+    )
+
+
+def choose_cold_breath_targeting(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    actor_position: GridPosition | None = None,
+    required_primary_target_id: str | None = None,
+    minimum_enemy_targets: int = 1,
+    allow_allies: bool = True,
+) -> ConeBreathTargeting | None:
+    actor = state.units[actor_id]
+    position = actor_position or actor.position
+    if not position:
+        return None
+
+    actor_origins = get_occupied_squares_for_position(position, get_unit_footprint(actor))
+    viable: list[ConeBreathTargeting] = []
+    for origin in actor_origins:
+        for direction in sorted(BURNING_HANDS_CONE_ENDPOINTS):
+            targeting = build_cone_breath_targeting(
+                state,
+                actor_id,
+                actor_position=position,
+                origin=origin,
+                direction=direction,
+                range_squares=6,
+                required_primary_target_id=required_primary_target_id,
+            )
+            if not targeting:
+                continue
+            if len(targeting.enemy_target_ids) < minimum_enemy_targets:
+                continue
+            if not allow_allies and targeting.ally_target_ids:
+                continue
+            viable.append(targeting)
+
+    if not viable:
+        return None
+
+    return sorted(
+        viable,
+        key=lambda targeting: (
+            -len(targeting.enemy_target_ids),
+            len(targeting.ally_target_ids),
+            sum(state.units[target_id].current_hp for target_id in targeting.enemy_target_ids),
+            targeting.primary_target_id,
+            targeting.origin.x,
+            targeting.origin.y,
+            targeting.direction,
+            targeting.target_ids,
+        ),
+    )[0]
 
 
 def choose_burning_hands_targeting(

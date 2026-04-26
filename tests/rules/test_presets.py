@@ -137,6 +137,38 @@ def test_skyhunter_pincer_builds_air_pincer_screen() -> None:
     assert encounter.units["E6"].combat_role == "guard_captain"
 
 
+def test_hobgoblin_command_screen_builds_layered_leader_shell() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="hobgoblin-command-screen", enemy_preset_id="hobgoblin_command_screen")
+    )
+
+    assert sorted(encounter.units) == [
+        "E1",
+        "E10",
+        "E11",
+        "E12",
+        "E13",
+        "E14",
+        "E15",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+    ]
+    assert encounter.units["E1"].combat_role == "hobgoblin_melee"
+    assert encounter.units["E7"].combat_role == "hobgoblin_melee"
+    assert encounter.units["E11"].combat_role == "hobgoblin_captain"
+    assert encounter.units["E12"].combat_role == "hobgoblin_archer"
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(
@@ -284,6 +316,21 @@ def test_skyhunter_pincer_preset_runs_in_combined_batch_mode() -> None:
         EncounterConfig(
             seed="skyhunter-pincer-combined-batch",
             enemy_preset_id="skyhunter_pincer",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_hobgoblin_command_screen_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="hobgoblin-command-screen-combined-batch",
+            enemy_preset_id="hobgoblin_command_screen",
             batch_size=1,
             player_behavior="balanced",
             monster_behavior="combined",

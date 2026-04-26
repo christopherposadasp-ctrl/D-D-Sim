@@ -23,6 +23,11 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
         display_name="Swallow",
         description="Swallow a creature the monster already has grappled in its mouth.",
     ),
+    "cold_breath": SpecialActionDefinition(
+        action_id="cold_breath",
+        display_name="Cold Breath",
+        description="Exhale a freezing cone that forces Constitution saves for half cold damage.",
+    ),
     "natures_wrath": SpecialActionDefinition(
         action_id="natures_wrath",
         display_name="Nature's Wrath",

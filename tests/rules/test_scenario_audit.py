@@ -205,3 +205,41 @@ def test_audit_scenario_supports_staged_skyhunter_pincer() -> None:
         "centaurMultiattack",
         "scoutMultiattack",
     }
+
+
+def test_hobgoblin_command_screen_scenario_definition_is_staged_with_expected_expectations() -> None:
+    definition = get_scenario_definition("hobgoblin_command_screen")
+
+    assert definition.display_name == "Hobgoblin Command Screen"
+    assert definition.enemy_preset_id == "hobgoblin_command_screen"
+    assert definition.audit_expectation_ids == (
+        "hobgoblin_captain_multiattack",
+        "hobgoblin_captain_longbow_attack",
+        "hobgoblin_longsword_attack",
+        "hobgoblin_longbow_attack",
+    )
+
+
+def test_audit_scenario_supports_staged_hobgoblin_command_screen() -> None:
+    row = audit_scenario(
+        "hobgoblin_command_screen",
+        ScenarioAuditConfig(
+            smart_smoke_runs=1,
+            dumb_smoke_runs=1,
+            mechanic_runs=1,
+            health_batch_size=1,
+            seed_prefix="test-hobgoblin-command-screen-audit",
+        ),
+    )
+
+    payload = row.to_report_dict()
+
+    assert row.scenario_id == "hobgoblin_command_screen"
+    assert row.unit_count == 19
+    assert payload["scenarioId"] == "hobgoblin_command_screen"
+    assert set(payload["signatureBreakdown"]) == {
+        "hobgoblinCaptainMultiattack",
+        "hobgoblinCaptainLongbowAttack",
+        "hobgoblinLongswordAttack",
+        "hobgoblinLongbowAttack",
+    }

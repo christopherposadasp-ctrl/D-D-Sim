@@ -410,6 +410,7 @@ class UnitState(CamelModel):
     damage_vulnerabilities: tuple[str, ...] = Field(default=(), exclude=True)
     condition_immunities: tuple[str, ...] = Field(default=(), exclude=True)
     creature_tags: tuple[str, ...] = Field(default=(), exclude=True)
+    movement_modes: tuple[str, ...] = Field(default=(), exclude=True)
     longstrider_speed_bonus: int = Field(default=0, exclude=True)
     # These player-build fields are runtime-only for now. They are kept out of
     # the live API payload until the UI is ready to select classes/loadouts

@@ -46,6 +46,7 @@ class MonsterExpectation:
     benchmark_preset_id: str
     benchmark_count: int
     role_tags: tuple[str, ...] = ()
+    special_action_ids: tuple[str, ...] = ()
     bonus_action_ids: tuple[str, ...] = ()
     reaction_ids: tuple[str, ...] = ("opportunity_attack",)
     damage_resistances: tuple[str, ...] = ()
@@ -53,6 +54,7 @@ class MonsterExpectation:
     damage_vulnerabilities: tuple[str, ...] = ()
     condition_immunities: tuple[str, ...] = ()
     creature_tags: tuple[str, ...] = ()
+    movement_modes: tuple[str, ...] = ()
     resource_pools: tuple[tuple[str, int], ...] = ()
 
 
@@ -1594,6 +1596,49 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         special_mechanics=("multiattack",),
         benchmark_preset_id="hippopotamus_benchmark",
         benchmark_count=1,
+    ),
+    "young_white_dragon": MonsterExpectation(
+        ai_profile_id="dragon",
+        max_hp=123,
+        ac=17,
+        speed=40,
+        initiative_mod=3,
+        passive_perception=16,
+        size_category="large",
+        footprint=(2, 2),
+        ability_mods={"str": 4, "dex": 0, "con": 4, "int": -2, "wis": 0, "cha": 1},
+        trait_ids=("ice_walk", "opening_flight_landing"),
+        attacks={
+            "rend": AttackExpectation(
+                kind="melee",
+                attack_bonus=7,
+                ability_modifier=4,
+                damage_modifier=0,
+                damage_type=None,
+                reach=10,
+                damage_components=(
+                    DamageComponentExpectation("slashing", ((2, 4),), 4),
+                    DamageComponentExpectation("cold", ((1, 4),), 0),
+                ),
+            )
+        },
+        opening_weapon_id="rend",
+        melee_fallback_weapon_id="rend",
+        special_mechanics=(
+            "multiattack",
+            "triple_multiattack",
+            "ice_walk",
+            "opening_flight_landing",
+            "cold_breath",
+            "recharge_5_6",
+        ),
+        benchmark_preset_id="young_white_dragon_benchmark",
+        benchmark_count=1,
+        special_action_ids=("cold_breath",),
+        damage_immunities=("cold",),
+        creature_tags=("dragon",),
+        movement_modes=("walk", "burrow", "fly", "swim"),
+        resource_pools=(("opening_landing_uses", 1), ("cold_breath_available", 1)),
     ),
     "berserker": MonsterExpectation(
         ai_profile_id="melee_brute",
