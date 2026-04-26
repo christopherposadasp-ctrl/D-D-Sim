@@ -28,13 +28,13 @@ Current live martial class support:
 - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk supported to level 2
 - Wizard supported to level 1 as a narrow combat spellcasting slice
-- Paladin supported to level 2 as a plate-and-shield support tank with Lay on Hands, Bless, Cure Wounds, and Divine Smite
+- Paladin supported to level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
 
 Current default player preset:
 
 - `martial_mixed_party`
 - level 5 Battle Master fighter
-- level 2 paladin
+- level 5 Oath of the Ancients paladin
 - level 5 ranged Assassin rogue
 - level 2 melee rogue
 
@@ -110,6 +110,7 @@ Use the PowerShell task runner for the standard checks:
 ```powershell
 .\scripts\dev.ps1 check-fast
 .\scripts\dev.ps1 party-validation
+.\scripts\dev.ps1 pc-tuning-sample
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
@@ -124,6 +125,7 @@ These map to:
 
 - `check-fast`: `ruff` plus the non-slow backend `pytest` suite
 - `party-validation`: focused current-party validation for `martial_mixed_party` against `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`
+- `pc-tuning-sample`: event-level Paladin tuning sample for current-party `F2` across the standard validation scenarios
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile
 - `audit-health`: the code-health and benchmark audit
@@ -137,6 +139,7 @@ The task runner passes through extra arguments to the underlying script. Example
 
 ```powershell
 .\scripts\dev.ps1 party-validation --workers 4
+.\scripts\dev.ps1 pc-tuning-sample --runs-per-scenario 20
 .\scripts\dev.ps1 audit-quick --scenario goblin_screen
 .\scripts\dev.ps1 audit-full --json
 ```
@@ -174,6 +177,12 @@ Run focused party validation directly:
 
 ```powershell
 py -3.13 .\scripts\run_party_validation.py
+```
+
+Run the focused Paladin PC tuning sample directly:
+
+```powershell
+py -3.13 .\scripts\run_pc_tuning_sample.py
 ```
 
 Run the manual code-health audit:
