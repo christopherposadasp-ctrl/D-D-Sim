@@ -216,6 +216,32 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="cat_benchmark",
         benchmark_count=15,
     ),
+    "weasel": MonsterExpectation(
+        ai_profile_id="melee_brute",
+        max_hp=1,
+        ac=13,
+        speed=30,
+        initiative_mod=3,
+        passive_perception=13,
+        size_category="tiny",
+        footprint=(1, 1),
+        ability_mods={"str": -4, "dex": 3, "con": -1, "int": -4, "wis": 1, "cha": -4},
+        trait_ids=(),
+        attacks={
+            "bite": AttackExpectation(
+                kind="melee",
+                attack_bonus=5,
+                ability_modifier=3,
+                damage_modifier=1,
+                damage_type="piercing",
+            )
+        },
+        opening_weapon_id="bite",
+        melee_fallback_weapon_id="bite",
+        special_mechanics=(),
+        benchmark_preset_id="weasel_benchmark",
+        benchmark_count=15,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,

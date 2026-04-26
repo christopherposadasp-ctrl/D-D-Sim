@@ -116,6 +116,7 @@ pony_ability_mods = AbilityModifiers(str=2, dex=0, con=1, int=-4, wis=0, cha=-2)
 commoner_ability_mods = AbilityModifiers(str=0, dex=0, con=0, int=0, wis=0, cha=0)
 deer_ability_mods = AbilityModifiers(str=0, dex=3, con=0, int=-4, wis=2, cha=-3)
 cat_ability_mods = AbilityModifiers(str=-4, dex=2, con=0, int=-4, wis=1, cha=-2)
+weasel_ability_mods = AbilityModifiers(str=-4, dex=3, con=-1, int=-4, wis=1, cha=-4)
 hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3)
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
@@ -1114,6 +1115,37 @@ MONSTER_DEFINITIONS.update(
             action_ids=("melee_attack",),
             trait_ids=("jumper",),
             attack_actions=(melee_attack_action("scratch", "Scratch"),),
+            default_melee_attack_action_id="melee_attack",
+        ),
+        "weasel": MonsterDefinition(
+            base_creature_id="weasel",
+            variant_id="weasel",
+            display_name="Weasel",
+            combat_role="weasel",
+            ai_profile_id="melee_brute",
+            max_hp=1,
+            ac=13,
+            speed=30,
+            initiative_mod=3,
+            passive_perception=13,
+            ability_mods=weasel_ability_mods,
+            size_category="tiny",
+            footprint=medium_footprint,
+            attacks={
+                "bite": WeaponProfile(
+                    id="bite",
+                    display_name="Bite",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_dice=[],
+                    damage_modifier=1,
+                    damage_type="piercing",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "weasel", "melee"),
+            action_ids=("melee_attack",),
+            attack_actions=(melee_attack_action("bite", "Bite"),),
             default_melee_attack_action_id="melee_attack",
         ),
         "hyena": MonsterDefinition(
@@ -3132,6 +3164,21 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
+    "reaction_bastion": EnemyPresetDefinition(
+        preset_id="reaction_bastion",
+        display_name="Reaction Bastion",
+        description="Knights and veterans lock the center while a guard captain and scouts punish any attempted break.",
+        units=(
+            EnemyPresetUnit("E1", "knight", GridPosition(x=10, y=6)),
+            EnemyPresetUnit("E2", "warrior_veteran", GridPosition(x=10, y=10)),
+            EnemyPresetUnit("E3", "warrior_veteran", GridPosition(x=12, y=6)),
+            EnemyPresetUnit("E4", "warrior_veteran", GridPosition(x=12, y=10)),
+            EnemyPresetUnit("E5", "guard_captain", GridPosition(x=14, y=8)),
+            EnemyPresetUnit("E6", "bandit_archer", GridPosition(x=15, y=4)),
+            EnemyPresetUnit("E7", "scout", GridPosition(x=15, y=12)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
@@ -3150,6 +3197,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "commoner",
     "deer",
     "cat",
+    "weasel",
     "hyena",
     "jackal",
     "goblin_minion",
