@@ -117,6 +117,7 @@ commoner_ability_mods = AbilityModifiers(str=0, dex=0, con=0, int=0, wis=0, cha=
 deer_ability_mods = AbilityModifiers(str=0, dex=3, con=0, int=-4, wis=2, cha=-3)
 cat_ability_mods = AbilityModifiers(str=-4, dex=2, con=0, int=-4, wis=1, cha=-2)
 weasel_ability_mods = AbilityModifiers(str=-4, dex=3, con=-1, int=-4, wis=1, cha=-4)
+badger_ability_mods = AbilityModifiers(str=0, dex=0, con=3, int=-4, wis=1, cha=-3)
 hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3)
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
@@ -1147,6 +1148,38 @@ MONSTER_DEFINITIONS.update(
             action_ids=("melee_attack",),
             attack_actions=(melee_attack_action("bite", "Bite"),),
             default_melee_attack_action_id="melee_attack",
+        ),
+        "badger": MonsterDefinition(
+            base_creature_id="badger",
+            variant_id="badger",
+            display_name="Badger",
+            combat_role="badger",
+            ai_profile_id="melee_brute",
+            max_hp=5,
+            ac=11,
+            speed=20,
+            initiative_mod=0,
+            passive_perception=13,
+            ability_mods=badger_ability_mods,
+            size_category="tiny",
+            footprint=medium_footprint,
+            attacks={
+                "bite": WeaponProfile(
+                    id="bite",
+                    display_name="Bite",
+                    attack_bonus=2,
+                    ability_modifier=0,
+                    damage_dice=[],
+                    damage_modifier=1,
+                    damage_type="piercing",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "badger", "melee"),
+            action_ids=("melee_attack",),
+            attack_actions=(melee_attack_action("bite", "Bite"),),
+            default_melee_attack_action_id="melee_attack",
+            damage_resistances=("poison",),
         ),
         "hyena": MonsterDefinition(
             base_creature_id="hyena",
@@ -3179,6 +3212,21 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
+    "skyhunter_pincer": EnemyPresetDefinition(
+        preset_id="skyhunter_pincer",
+        display_name="Skyhunter Pincer",
+        description="A griffon dives onto the back line while centaurs and skirmishers stretch the party into a crossfire.",
+        units=(
+            EnemyPresetUnit("E1", "griffon", GridPosition(x=14, y=8)),
+            EnemyPresetUnit("E2", "centaur_trooper", GridPosition(x=10, y=5)),
+            EnemyPresetUnit("E3", "centaur_trooper", GridPosition(x=10, y=10)),
+            EnemyPresetUnit("E4", "scout", GridPosition(x=14, y=4)),
+            EnemyPresetUnit("E5", "scout", GridPosition(x=14, y=12)),
+            EnemyPresetUnit("E6", "guard_captain", GridPosition(x=12, y=8)),
+            EnemyPresetUnit("E7", "knight", GridPosition(x=11, y=8)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
@@ -3198,6 +3246,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "deer",
     "cat",
     "weasel",
+    "badger",
     "hyena",
     "jackal",
     "goblin_minion",
