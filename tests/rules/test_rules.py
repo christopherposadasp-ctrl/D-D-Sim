@@ -6,6 +6,7 @@ import backend.engine.combat.batch as batch_module
 import backend.engine.rules.combat_rules as combat_rules_module
 from backend.content.enemies import unit_has_reaction
 from backend.content.feature_definitions import unit_has_granted_bonus_action
+from backend.content.spell_definitions import get_spell_definition
 from backend.engine import create_encounter, run_encounter, step_encounter, summarize_encounter
 from backend.engine.ai.decision import MovementPlan, TurnDecision, choose_turn_decision
 from backend.engine.combat.batch import resolve_batch_execution_plan
@@ -28,6 +29,7 @@ from backend.engine.combat.engine import (
 )
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import (
+    AidEffect,
     DamageCandidate,
     DamageComponentResult,
     EncounterConfig,
@@ -40,6 +42,7 @@ from backend.engine.models.state import (
     PoisonedEffect,
     RageEffect,
     RecklessAttackEffect,
+    RestrainedEffect,
     SlowEffect,
     WeaponRange,
 )
@@ -52,6 +55,7 @@ from backend.engine.rules.combat_rules import (
     apply_great_weapon_fighting,
     attempt_hide,
     attempt_lay_on_hands,
+    attempt_natures_wrath,
     attempt_uncanny_metabolism,
     can_trigger_attack_reaction,
     choose_damage_candidate,
@@ -62,6 +66,7 @@ from backend.engine.rules.combat_rules import (
     resolve_death_save,
     resolve_bless,
     resolve_poisoned_end_of_turn_save,
+    resolve_restrained_end_of_turn_save,
     resolve_saving_throw,
 )
 from backend.engine.utils.rng import normalize_seed, roll_die
@@ -148,6 +153,33 @@ def build_level2_paladin_config(seed: str, *, player_behavior: str = "smart") ->
         seed=seed,
         enemy_preset_id="goblin_screen",
         player_preset_id="paladin_level2_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level3_paladin_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="paladin_level3_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level4_paladin_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="paladin_level4_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
+def build_level5_paladin_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="paladin_level5_sample_trio",
         player_behavior=player_behavior,
     )
 
@@ -1089,6 +1121,159 @@ def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert "No level 1 spell slots remain" in spell_events[0].text_summary
 
 
+def test_mage_armor_raises_ac_spends_slot_and_logs_event() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-mage-armor"))
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "mage_armor", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    mage_armor_event = spell_events[0]
+    assert mage_armor_event.event_type == "phase_change"
+    assert mage_armor_event.resolved_totals["spellId"] == "mage_armor"
+    assert mage_armor_event.resolved_totals["previousAc"] == 12
+    assert mage_armor_event.resolved_totals["mageArmorAc"] == 15
+    assert mage_armor_event.resolved_totals["newAc"] == 15
+    assert mage_armor_event.resolved_totals["acChanged"] is True
+    assert mage_armor_event.resolved_totals["durationRounds"] == 4800
+    assert mage_armor_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "Mage Armor" in mage_armor_event.text_summary
+    assert encounter.units["F1"].ac == 15
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_mage_armor_does_not_lower_existing_ac() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-mage-armor-no-lower"))
+    encounter.units["F1"].ac = 16
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "mage_armor", "target_id": "F1"},
+    )
+    mage_armor_event = spell_events[0]
+
+    assert encounter.units["F1"].ac == 16
+    assert mage_armor_event.resolved_totals["previousAc"] == 16
+    assert mage_armor_event.resolved_totals["mageArmorAc"] == 15
+    assert mage_armor_event.resolved_totals["newAc"] == 16
+    assert mage_armor_event.resolved_totals["acChanged"] is False
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_mage_armor_is_self_only_and_does_not_spend_slot_on_invalid_target() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-mage-armor-self-only"))
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "mage_armor", "target_id": "F2"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "can only target self" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert encounter.units["F2"].ac == 12
+
+
+def prepare_false_life_test_wizard(encounter) -> None:
+    if "false_life" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("false_life")
+
+
+def test_false_life_grants_temporary_hp_spends_slot_and_logs_event() -> None:
+    spell = get_spell_definition("false_life")
+    encounter = create_encounter(build_wizard_config("wizard-false-life"))
+    prepare_false_life_test_wizard(encounter)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "false_life", "target_id": "F1"},
+        overrides=AttackRollOverrides(damage_rolls=[4, 3]),
+    )
+
+    assert spell.level == 1
+    assert spell.school == "necromancy"
+    assert len(spell_events) == 1
+    false_life_event = spell_events[0]
+    assert false_life_event.event_type == "phase_change"
+    assert false_life_event.raw_rolls["temporaryHitPointRolls"] == [4, 3]
+    assert false_life_event.resolved_totals["spellId"] == "false_life"
+    assert false_life_event.resolved_totals["temporaryHitPointModifier"] == 4
+    assert false_life_event.resolved_totals["temporaryHitPointTotal"] == 11
+    assert false_life_event.resolved_totals["previousTemporaryHitPoints"] == 0
+    assert false_life_event.resolved_totals["temporaryHitPointsGained"] == 11
+    assert false_life_event.resolved_totals["newTemporaryHitPoints"] == 11
+    assert false_life_event.resolved_totals["durationRounds"] == 600
+    assert false_life_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "False Life" in false_life_event.text_summary
+    assert encounter.units["F1"].temporary_hit_points == 11
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_false_life_does_not_replace_higher_temporary_hp() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-false-life-no-replace"))
+    prepare_false_life_test_wizard(encounter)
+    encounter.units["F1"].temporary_hit_points = 12
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "false_life", "target_id": "F1"},
+        overrides=AttackRollOverrides(damage_rolls=[1, 1]),
+    )
+    false_life_event = spell_events[0]
+
+    assert false_life_event.resolved_totals["temporaryHitPointTotal"] == 6
+    assert false_life_event.resolved_totals["previousTemporaryHitPoints"] == 12
+    assert false_life_event.resolved_totals["temporaryHitPointsGained"] == 0
+    assert false_life_event.resolved_totals["newTemporaryHitPoints"] == 12
+    assert encounter.units["F1"].temporary_hit_points == 12
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_false_life_is_self_only_and_does_not_spend_slot_on_invalid_target() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-false-life-self-only"))
+    prepare_false_life_test_wizard(encounter)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "false_life", "target_id": "F2"},
+        overrides=AttackRollOverrides(damage_rolls=[4, 4]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "can only target self" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert encounter.units["F1"].temporary_hit_points == 0
+    assert encounter.units["F2"].temporary_hit_points == 0
+
+
+def test_false_life_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-false-life-empty"))
+    prepare_false_life_test_wizard(encounter)
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "false_life", "target_id": "F1"},
+        overrides=AttackRollOverrides(damage_rolls=[4, 4]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+    assert encounter.units["F1"].temporary_hit_points == 0
+
+
 def test_shocking_grasp_is_a_melee_spell_attack_and_applies_no_reactions() -> None:
     encounter = create_encounter(build_wizard_config("wizard-shocking-grasp-hit"))
     defeat_other_enemies(encounter, "E1")
@@ -1278,7 +1463,7 @@ def test_wizard_sample_trio_smoke_run_completes() -> None:
     assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
 
 
-def test_lay_on_hands_restores_downed_target_for_one_hp() -> None:
+def test_lay_on_hands_restores_downed_target_to_twenty_five_percent_hp() -> None:
     encounter = create_encounter(build_paladin_config("paladin-lay-on-hands-downed"))
     encounter.units["F1"].position = GridPosition(x=4, y=4)
     encounter.units["F2"].position = GridPosition(x=5, y=4)
@@ -1289,20 +1474,20 @@ def test_lay_on_hands_restores_downed_target_for_one_hp() -> None:
     heal_event = attempt_lay_on_hands(encounter, "F1", "F2")
 
     assert heal_event.event_type == "heal"
-    assert heal_event.resolved_totals["healingTotal"] == 1
-    assert encounter.units["F2"].current_hp == 1
+    assert heal_event.resolved_totals["healingTotal"] == 4
+    assert encounter.units["F2"].current_hp == 4
     assert encounter.units["F2"].conditions.unconscious is False
-    assert encounter.units["F1"].resources.lay_on_hands_points == 4
+    assert encounter.units["F1"].resources.lay_on_hands_points == 1
 
 
-def test_lay_on_hands_living_target_defaults_to_twenty_percent_heal() -> None:
+def test_lay_on_hands_living_target_heals_to_half_hp_when_triggered() -> None:
     encounter = create_encounter(build_paladin_config("paladin-lay-on-hands-living"))
-    encounter.units["F1"].current_hp = 6
+    encounter.units["F1"].current_hp = 4
 
     heal_event = attempt_lay_on_hands(encounter, "F1", "F1")
 
     assert heal_event.resolved_totals["healingTotal"] == 3
-    assert encounter.units["F1"].current_hp == 9
+    assert encounter.units["F1"].current_hp == 7
     assert encounter.units["F1"].resources.lay_on_hands_points == 2
 
 
@@ -1354,6 +1539,34 @@ def test_bless_applies_to_weapon_attacks_and_saving_throws() -> None:
         save_event.resolved_totals["total"]
         == 10 + encounter.units["F2"].ability_mods.dex + save_event.raw_rolls["blessRolls"][0]
     )
+
+
+def test_paladin_level5_bless_uses_level2_slot_and_four_targets() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-level5-bless", enemy_preset_id="goblin_screen"))
+
+    bless_event = resolve_bless(encounter, "F2", ["F2", "F1", "F3", "F4", "E1"])
+
+    assert bless_event.resolved_totals["spellLevel"] == 2
+    assert bless_event.resolved_totals["blessedTargetIds"] == ["F2", "F1", "F3", "F4"]
+    assert bless_event.resolved_totals["spellSlotsLevel2Remaining"] == 1
+    assert encounter.units["F2"].resources.spell_slots_level_1 == 4
+    assert encounter.units["F2"].resources.spell_slots_level_2 == 1
+    assert all(
+        any(effect.kind == "blessed" for effect in encounter.units[unit_id].temporary_effects)
+        for unit_id in ("F1", "F2", "F3", "F4")
+    )
+
+
+def test_paladin_level5_bless_falls_back_to_level1_when_level2_slots_are_empty() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-level5-bless-fallback"))
+    encounter.units["F1"].resources.spell_slots_level_2 = 0
+
+    bless_event = resolve_bless(encounter, "F1", ["F1", "F2", "F3"])
+
+    assert bless_event.resolved_totals["spellLevel"] == 1
+    assert bless_event.resolved_totals["spellSlotsLevel1Remaining"] == 3
+    assert bless_event.resolved_totals["spellSlotsLevel2Remaining"] == 0
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 3
 
 
 def test_bless_concentration_persists_on_success_and_drops_on_failure() -> None:
@@ -1410,6 +1623,54 @@ def test_cure_wounds_heals_two_d8_plus_charisma_and_spends_slot() -> None:
     assert heal_event.resolved_totals["healingTotal"] == 12
     assert encounter.units["F2"].current_hp == 13
     assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_aid_increases_current_and_max_hp_and_spends_level2_slot() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-aid"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F3"].position = GridPosition(x=6, y=4)
+    encounter.units["F2"].current_hp = 10
+    encounter.units["F3"].current_hp = 0
+    encounter.units["F3"].conditions.unconscious = True
+    encounter.units["F3"].conditions.prone = True
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "aid", "target_id": "F1", "target_ids": ["F1", "F2", "F3"]},
+    )
+
+    assert len(spell_events) == 1
+    aid_event = spell_events[0]
+    assert aid_event.event_type == "heal"
+    assert aid_event.resolved_totals["spellId"] == "aid"
+    assert aid_event.resolved_totals["spellLevel"] == 2
+    assert aid_event.resolved_totals["aidHpBonus"] == 5
+    assert aid_event.resolved_totals["aidAppliedTargetIds"] == ["F1", "F2", "F3"]
+    assert aid_event.resolved_totals["spellSlotsLevel2Remaining"] == 1
+    assert encounter.units["F1"].max_hp == 54
+    assert encounter.units["F2"].max_hp == 54
+    assert encounter.units["F2"].current_hp == 15
+    assert encounter.units["F3"].max_hp == 54
+    assert encounter.units["F3"].current_hp == 5
+    assert encounter.units["F3"].conditions.unconscious is False
+    assert any(isinstance(effect, AidEffect) and effect.hp_bonus == 5 for effect in encounter.units["F2"].temporary_effects)
+
+
+def test_aid_fails_cleanly_without_level2_slots() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-aid-no-slot"))
+    encounter.units["F1"].resources.spell_slots_level_2 = 0
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "aid", "target_id": "F1", "target_ids": ["F1", "F2", "F3"]},
+    )
+
+    assert spell_events[0].event_type == "skip"
+    assert "Aid: No level 2 spell slots remain." in spell_events[0].resolved_totals["reason"]
+    assert encounter.units["F1"].max_hp == 49
 
 
 def test_divine_smite_does_not_fire_if_weapon_damage_already_kills() -> None:
@@ -1503,6 +1764,103 @@ def test_divine_smite_fires_on_normal_hit_only_when_average_smite_can_finish() -
 
     assert no_smite_event.resolved_totals.get("divineSmiteApplied") is None
     assert no_smite.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_divine_smite_spends_early_slot_on_surviving_target_at_twelve_hp_or_less() -> None:
+    smite = create_encounter(build_level2_paladin_config("paladin-smite-early-slot"))
+    smite.units["F1"].position = GridPosition(x=4, y=4)
+    smite.units["E1"].position = GridPosition(x=5, y=4)
+    smite.units["E1"].max_hp = 16
+    smite.units["E1"].current_hp = 16
+
+    smite_event, _ = resolve_attack(
+        smite,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[1, 1]),
+        ),
+    )
+
+    assert smite_event.resolved_totals["divineSmiteApplied"] is True
+    assert smite_event.resolved_totals["divineSmiteDamage"] == 2
+    assert smite.units["F1"].resources.spell_slots_level_1 == 1
+
+    conserve = create_encounter(build_level2_paladin_config("paladin-smite-conserve-last-slot"))
+    conserve.units["F1"].position = GridPosition(x=4, y=4)
+    conserve.units["E1"].position = GridPosition(x=5, y=4)
+    conserve.units["E1"].max_hp = 16
+    conserve.units["E1"].current_hp = 16
+    conserve.units["F1"].resources.spell_slots_level_1 = 1
+
+    conserve_event, _ = resolve_attack(
+        conserve,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+
+    assert conserve_event.resolved_totals.get("divineSmiteApplied") is None
+    assert conserve.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_level5_divine_smite_uses_level2_slot_when_level1_average_would_not_finish() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-smite-level2-kill-confirm"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].max_hp = 18
+    encounter.units["E1"].current_hp = 18
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[4, 4, 4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["divineSmiteApplied"] is True
+    assert attack_event.resolved_totals["spellLevel"] == 2
+    assert attack_event.resolved_totals["divineSmiteDice"] == 3
+    assert attack_event.raw_rolls["divineSmiteRolls"] == [4, 4, 4]
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 4
+    assert attack_event.resolved_totals["spellSlotsLevel2Remaining"] == 1
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 4
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 1
+
+
+def test_level5_divine_smite_uses_level1_slot_when_level1_average_finishes() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-smite-level1-first"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].max_hp = 14
+    encounter.units["E1"].current_hp = 14
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[4, 4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["divineSmiteApplied"] is True
+    assert attack_event.resolved_totals["spellLevel"] == 1
+    assert attack_event.resolved_totals["divineSmiteDice"] == 2
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 3
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 2
 
 
 def test_divine_smite_uses_three_d8_against_undead() -> None:
@@ -1605,6 +1963,330 @@ def test_divine_smite_rejects_ranged_opportunity_no_slot_and_used_bonus_action_c
 
 def test_paladin_level2_sample_trio_smoke_run_completes() -> None:
     result = run_encounter(build_level2_paladin_config("paladin-level2-smoke-run"))
+
+    assert result.final_state.terminal_state == "complete"
+    assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
+
+
+def test_natures_wrath_spends_channel_divinity_and_restrains_failed_saves() -> None:
+    encounter = create_encounter(build_level3_paladin_config("paladin-natures-wrath"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    defeat_other_enemies(encounter, "E1", "E2")
+
+    event = attempt_natures_wrath(
+        encounter,
+        "F1",
+        ["E1", "E2"],
+        SavingThrowOverrides(save_rolls=[1, 20]),
+    )
+
+    assert event.event_type == "phase_change"
+    assert event.resolved_totals["saveDc"] == 12
+    assert event.resolved_totals["restrainedTargetIds"] == ["E1"]
+    assert event.resolved_totals["successfulSaveTargetIds"] == ["E2"]
+    assert encounter.units["F1"].resources.channel_divinity_uses == 1
+    assert any(effect.kind == "restrained_by" and effect.save_ends for effect in encounter.units["E1"].temporary_effects)
+    assert any(effect.kind == "restrained_by" for effect in encounter.units["E2"].temporary_effects) is False
+
+
+def test_natures_wrath_skips_invalid_targets_and_fails_without_channel_divinity() -> None:
+    encounter = create_encounter(build_level3_paladin_config("paladin-natures-wrath-invalid-targets"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=10, y=5)
+    encounter.units["E3"].position = GridPosition(x=7, y=5)
+    encounter.units["E3"].conditions.unconscious = True
+    encounter.units["E3"].current_hp = 0
+    encounter.units["E4"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].temporary_effects.append(
+        RestrainedEffect(
+            kind="restrained_by",
+            source_id="F2",
+            escape_dc=12,
+            save_ability="str",
+            save_ends=True,
+            remaining_rounds=10,
+        )
+    )
+    defeat_other_enemies(encounter, "E1", "E2", "E3", "E4")
+
+    event = attempt_natures_wrath(
+        encounter,
+        "F1",
+        ["E1", "E2", "E3", "E4"],
+        SavingThrowOverrides(save_rolls=[1]),
+    )
+
+    assert event.target_ids == ["E4"]
+    assert event.resolved_totals["restrainedTargetIds"] == ["E4"]
+
+    no_channel = create_encounter(build_level3_paladin_config("paladin-natures-wrath-no-channel"))
+    no_channel.units["F1"].position = GridPosition(x=5, y=5)
+    no_channel.units["E1"].position = GridPosition(x=6, y=5)
+    no_channel.units["F1"].resources.channel_divinity_uses = 0
+
+    no_channel_event = attempt_natures_wrath(no_channel, "F1", ["E1"])
+
+    assert no_channel_event.event_type == "skip"
+    assert "No Channel Divinity uses remain" in no_channel_event.text_summary
+
+
+def test_natures_wrath_end_of_turn_save_removes_or_preserves_restraint() -> None:
+    success = create_encounter(build_level3_paladin_config("paladin-natures-wrath-end-save-success"))
+    success.units["E1"].temporary_effects.append(
+        RestrainedEffect(
+            kind="restrained_by",
+            source_id="F1",
+            escape_dc=12,
+            save_ability="str",
+            save_ends=True,
+            remaining_rounds=10,
+        )
+    )
+    success.units["E1"].effective_speed = 0
+
+    success_event = resolve_restrained_end_of_turn_save(
+        success,
+        "E1",
+        SavingThrowOverrides(save_rolls=[20]),
+    )
+
+    assert success_event is not None
+    assert success_event.resolved_totals["restrainedEnded"] is True
+    assert any(effect.kind == "restrained_by" for effect in success.units["E1"].temporary_effects) is False
+    assert success.units["E1"].effective_speed == success.units["E1"].speed
+
+    failure = create_encounter(build_level3_paladin_config("paladin-natures-wrath-end-save-failure"))
+    failure.units["E1"].temporary_effects.append(
+        RestrainedEffect(
+            kind="restrained_by",
+            source_id="F1",
+            escape_dc=12,
+            save_ability="str",
+            save_ends=True,
+            remaining_rounds=10,
+        )
+    )
+    failure.units["E1"].effective_speed = 0
+
+    failure_event = resolve_restrained_end_of_turn_save(
+        failure,
+        "E1",
+        SavingThrowOverrides(save_rolls=[1]),
+    )
+
+    assert failure_event is not None
+    assert failure_event.resolved_totals["restrainedEnded"] is False
+    assert any(effect.kind == "restrained_by" for effect in failure.units["E1"].temporary_effects) is True
+    assert failure.units["E1"].effective_speed == 0
+
+
+def test_paladin_level3_sample_trio_smoke_run_completes() -> None:
+    result = run_encounter(build_level3_paladin_config("paladin-level3-smoke-run"))
+
+    assert result.final_state.terminal_state == "complete"
+    assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
+
+
+def test_sentinel_halt_reduces_speed_after_opportunity_attack_hit() -> None:
+    encounter = create_encounter(build_level4_paladin_config("paladin-sentinel-halt"))
+    encounter.initiative_order = ["E1", "F1", "F2", "F3"]
+    encounter.active_combatant_index = 0
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[1]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["sentinelHaltApplied"] is True
+    assert attack_event.resolved_totals["speedReducedToZero"] is True
+    assert encounter.units["E1"].effective_speed == 0
+    assert any(effect.kind == "halted" and effect.expires_at_turn_end_of == "E1" for effect in encounter.units["E1"].temporary_effects)
+
+    expire_turn_end_effects(encounter, "E1")
+
+    assert any(effect.kind == "halted" for effect in encounter.units["E1"].temporary_effects) is False
+    assert encounter.units["E1"].effective_speed == encounter.units["E1"].speed
+
+
+def test_sentinel_halt_does_not_apply_on_missed_opportunity_attack() -> None:
+    encounter = create_encounter(build_level4_paladin_config("paladin-sentinel-halt-miss"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 40
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            overrides=AttackRollOverrides(attack_rolls=[1], damage_rolls=[1]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals.get("sentinelHaltApplied") is None
+    assert encounter.units["E1"].effective_speed == encounter.units["E1"].speed
+    assert any(effect.kind == "halted" for effect in encounter.units["E1"].temporary_effects) is False
+
+
+def test_sentinel_guardian_reacts_when_adjacent_enemy_hits_an_ally() -> None:
+    encounter = create_encounter(build_level4_paladin_config("paladin-sentinel-guardian"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=6, y=5)
+    encounter.units["F3"].position = GridPosition(x=1, y=1)
+    encounter.units["E1"].position = GridPosition(x=5, y=6)
+    defeat_other_enemies(encounter, "E1")
+
+    events = resolve_attack_action(
+        encounter,
+        "E1",
+        {"kind": "attack", "target_id": "F2", "weapon_id": "scimitar"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[20], damage_rolls=[1])],
+    )
+
+    guardian_phase = next(
+        event for event in events if event.event_type == "phase_change" and event.resolved_totals.get("reaction") == "sentinel_guardian"
+    )
+    guardian_attack = next(
+        event
+        for event in events
+        if event.event_type == "attack" and event.actor_id == "F1" and event.resolved_totals.get("opportunityAttack") is True
+    )
+
+    assert guardian_phase.actor_id == "F1"
+    assert guardian_phase.target_ids == ["E1"]
+    assert guardian_attack.damage_details.weapon_id == "longsword"
+    assert encounter.units["F1"].reaction_available is False
+
+
+def test_sentinel_guardian_respects_target_reaction_and_reach_limits() -> None:
+    paladin_target = create_encounter(build_level4_paladin_config("paladin-sentinel-guardian-target"))
+    paladin_target.units["F1"].position = GridPosition(x=5, y=5)
+    paladin_target.units["E1"].position = GridPosition(x=5, y=6)
+    defeat_other_enemies(paladin_target, "E1")
+
+    target_events = resolve_attack_action(
+        paladin_target,
+        "E1",
+        {"kind": "attack", "target_id": "F1", "weapon_id": "scimitar"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[20], damage_rolls=[1])],
+    )
+    assert any(event.resolved_totals.get("reaction") == "sentinel_guardian" for event in target_events) is False
+
+    no_reaction = create_encounter(build_level4_paladin_config("paladin-sentinel-guardian-no-reaction"))
+    no_reaction.units["F1"].position = GridPosition(x=5, y=5)
+    no_reaction.units["F2"].position = GridPosition(x=6, y=5)
+    no_reaction.units["F3"].position = GridPosition(x=1, y=1)
+    no_reaction.units["E1"].position = GridPosition(x=5, y=6)
+    no_reaction.units["F1"].reaction_available = False
+    defeat_other_enemies(no_reaction, "E1")
+
+    no_reaction_events = resolve_attack_action(
+        no_reaction,
+        "E1",
+        {"kind": "attack", "target_id": "F2", "weapon_id": "scimitar"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[20], damage_rolls=[1])],
+    )
+    assert any(event.resolved_totals.get("reaction") == "sentinel_guardian" for event in no_reaction_events) is False
+
+    out_of_reach = create_encounter(build_level4_paladin_config("paladin-sentinel-guardian-out-of-reach"))
+    out_of_reach.units["F1"].position = GridPosition(x=1, y=1)
+    out_of_reach.units["F2"].position = GridPosition(x=6, y=5)
+    out_of_reach.units["F3"].position = GridPosition(x=2, y=1)
+    out_of_reach.units["E1"].position = GridPosition(x=5, y=6)
+    defeat_other_enemies(out_of_reach, "E1")
+
+    out_of_reach_events = resolve_attack_action(
+        out_of_reach,
+        "E1",
+        {"kind": "attack", "target_id": "F2", "weapon_id": "scimitar"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[20], damage_rolls=[1])],
+    )
+    assert any(event.resolved_totals.get("reaction") == "sentinel_guardian" for event in out_of_reach_events) is False
+
+
+def test_sentinel_opportunity_attacks_do_not_trigger_divine_smite() -> None:
+    encounter = create_encounter(build_level4_paladin_config("paladin-sentinel-no-smite"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            is_opportunity_attack=True,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals.get("divineSmiteApplied") is None
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 3
+
+
+def test_sentinel_can_opportunity_attack_through_disengage_movement() -> None:
+    encounter = create_encounter(build_level4_paladin_config("paladin-sentinel-disengage"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=1, y=1)
+    encounter.units["F3"].position = GridPosition(x=2, y=1)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].current_hp = 100
+    defeat_other_enemies(encounter, "E1")
+
+    events, _ = execute_movement(
+        encounter,
+        "E1",
+        MovementPlan(
+            path=[GridPosition(x=6, y=5), GridPosition(x=7, y=5)],
+            mode="move",
+        ),
+        disengage_applied=True,
+        phase="before_action",
+    )
+
+    move_event = next(event for event in events if event.event_type == "move")
+    opportunity_events = [event for event in events if event.event_type == "attack" and event.actor_id == "F1"]
+
+    assert move_event.resolved_totals["disengageApplied"] is True
+    assert move_event.resolved_totals["opportunityAttackers"] == ["F1"]
+    assert opportunity_events
+    assert opportunity_events[0].resolved_totals["opportunityAttack"] is True
+    assert encounter.units["F1"].reaction_available is False
+
+
+def test_paladin_level4_sample_trio_smoke_run_completes() -> None:
+    result = run_encounter(build_level4_paladin_config("paladin-level4-smoke-run"))
+
+    assert result.final_state.terminal_state == "complete"
+    assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
+
+
+def test_paladin_level5_sample_trio_smoke_run_completes() -> None:
+    result = run_encounter(build_level5_paladin_config("paladin-level5-smoke-run"))
 
     assert result.final_state.terminal_state == "complete"
     assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
@@ -4355,9 +5037,10 @@ def test_scout_multiattack_retargets_after_dropping_the_first_target() -> None:
     encounter.units["F3"].position = GridPosition(x=1, y=13)
     encounter.units["F3"].current_hp = 20
     encounter.units["F3"].ac = 25
-    encounter.units["F4"].position = GridPosition(x=1, y=15)
-    encounter.units["F4"].current_hp = 20
-    encounter.units["F4"].ac = 25
+    if "F4" in encounter.units:
+        encounter.units["F4"].position = GridPosition(x=1, y=15)
+        encounter.units["F4"].current_hp = 20
+        encounter.units["F4"].ac = 25
     encounter.units["F1"].current_hp = 1
     encounter.units["F1"].ac = 1
     encounter.units["F2"].current_hp = 1
@@ -4378,7 +5061,12 @@ def test_scout_multiattack_retargets_after_dropping_the_first_target() -> None:
 
 def test_scout_multiattack_can_switch_weapons_between_steps() -> None:
     encounter = create_encounter(
-        EncounterConfig(seed="scout-switches-weapons", enemy_preset_id="bandit_ambush", monster_behavior="balanced")
+        EncounterConfig(
+            seed="scout-switches-weapons",
+            enemy_preset_id="bandit_ambush",
+            player_preset_id="fighter_level5_sample_trio",
+            monster_behavior="balanced",
+        )
     )
     encounter.units["E5"].position = GridPosition(x=6, y=6)
     encounter.units["F1"].position = GridPosition(x=10, y=6)
@@ -4386,9 +5074,10 @@ def test_scout_multiattack_can_switch_weapons_between_steps() -> None:
     encounter.units["F3"].position = GridPosition(x=1, y=13)
     encounter.units["F3"].current_hp = 20
     encounter.units["F3"].ac = 25
-    encounter.units["F4"].position = GridPosition(x=1, y=15)
-    encounter.units["F4"].current_hp = 20
-    encounter.units["F4"].ac = 25
+    if "F4" in encounter.units:
+        encounter.units["F4"].position = GridPosition(x=1, y=15)
+        encounter.units["F4"].current_hp = 20
+        encounter.units["F4"].ac = 25
     encounter.units["F1"].current_hp = 1
     encounter.units["F1"].ac = 1
     encounter.units["F2"].current_hp = 1
@@ -4404,8 +5093,12 @@ def test_scout_multiattack_can_switch_weapons_between_steps() -> None:
         ],
     )
 
-    assert attack_events[0].damage_details.weapon_id == "longbow"
-    assert attack_events[1].damage_details.weapon_id == "club"
+    scout_attack_events = [
+        event for event in attack_events if event.event_type == "attack" and event.actor_id == "E5"
+    ]
+
+    assert scout_attack_events[0].damage_details.weapon_id == "longbow"
+    assert scout_attack_events[1].damage_details.weapon_id == "club"
 
 
 def test_wolf_pack_tactics_uses_advantage_on_attack_rolls() -> None:

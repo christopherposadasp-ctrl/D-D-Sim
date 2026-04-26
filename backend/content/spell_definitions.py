@@ -25,6 +25,9 @@ class SpellDefinition:
         "self_cone_save",
         "multi_ally_buff",
         "touch_heal",
+        "self_ac_buff",
+        "self_temp_hp",
+        "multi_ally_hp_buff",
     ]
     range_feet: int
     damage_dice: tuple[DiceSpec, ...]
@@ -41,6 +44,9 @@ class SpellDefinition:
     max_targets: int = 1
     healing_dice: tuple[DiceSpec, ...] = ()
     healing_modifier_ability: str | None = None
+    temporary_hit_point_dice: tuple[DiceSpec, ...] = ()
+    temporary_hit_point_modifier: int = 0
+    hp_bonus: int = 0
 
 
 SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
@@ -146,6 +152,54 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         damage_type="none",
         healing_dice=(DiceSpec(count=2, sides=8),),
         healing_modifier_ability="spellcasting",
+    ),
+    "aid": SpellDefinition(
+        spell_id="aid",
+        display_name="Aid",
+        level=2,
+        school="abjuration",
+        description="Non-concentration support magic that increases current and maximum HP for up to three allies.",
+        timing="action",
+        targeting_mode="multi_ally_hp_buff",
+        range_feet=30,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        duration_rounds=4800,
+        max_targets=3,
+        hp_bonus=5,
+    ),
+    "mage_armor": SpellDefinition(
+        spell_id="mage_armor",
+        display_name="Mage Armor",
+        level=1,
+        school="abjuration",
+        description="Self-only abjuration that sets base AC to 13 + Dexterity modifier when better.",
+        timing="action",
+        targeting_mode="self_ac_buff",
+        range_feet=0,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        concentration=False,
+        duration_rounds=4800,
+    ),
+    "false_life": SpellDefinition(
+        spell_id="false_life",
+        display_name="False Life",
+        level=1,
+        school="necromancy",
+        description="Self-only necromancy spell granting 2d4 + 4 temporary hit points.",
+        timing="action",
+        targeting_mode="self_temp_hp",
+        range_feet=0,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        concentration=False,
+        duration_rounds=600,
+        temporary_hit_point_dice=(DiceSpec(count=2, sides=4),),
+        temporary_hit_point_modifier=4,
     ),
     "divine_smite": SpellDefinition(
         spell_id="divine_smite",

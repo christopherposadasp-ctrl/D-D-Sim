@@ -41,6 +41,7 @@ from backend.engine.rules.combat_rules import (
     ResolveAttackArgs,
     attempt_hide,
     attempt_lay_on_hands,
+    attempt_natures_wrath,
     attempt_patient_defense,
     attempt_second_wind,
     attempt_stabilize,
@@ -55,12 +56,15 @@ from backend.engine.rules.combat_rules import (
     get_attack_mode,
     maybe_commit_reckless_attack,
     pull_die,
+    recalculate_effective_speed_for_unit,
     resolve_attack,
+    resolve_aid,
     resolve_burning_hands,
     resolve_bless,
     resolve_cast_spell,
     resolve_death_save,
     resolve_poisoned_end_of_turn_save,
+    resolve_restrained_end_of_turn_save,
 )
 from backend.engine.rules.spatial import (
     build_position_index,
@@ -285,6 +289,105 @@ def maybe_resolve_riposte_follow_up(state: EncounterState, attack_event: CombatE
     return events
 
 
+def get_legal_sentinel_guardian_weapon_id(
+    state: EncounterState,
+    reactor: UnitState,
+    attacker: UnitState,
+) -> str | None:
+    try:
+        weapon_id = get_opportunity_attack_weapon_id(reactor)
+    except ValueError:
+        return None
+
+    weapon = reactor.attacks.get(weapon_id)
+    if not weapon or not reactor.position or not attacker.position:
+        return None
+    if (
+        get_min_chebyshev_distance_between_footprints(
+            reactor.position,
+            get_unit_footprint(reactor),
+            attacker.position,
+            get_unit_footprint(attacker),
+        )
+        > get_melee_reach_squares(weapon)
+    ):
+        return None
+    if not get_attack_context(state, reactor.id, attacker.id, weapon).legal:
+        return None
+    return weapon_id
+
+
+def maybe_resolve_sentinel_guardian_follow_up(state: EncounterState, attack_event: CombatEvent) -> list[CombatEvent]:
+    if attack_event.event_type != "attack" or attack_event.resolved_totals.get("hit") is not True:
+        return []
+    if not attack_event.target_ids:
+        return []
+
+    attacker = state.units.get(attack_event.actor_id)
+    target = state.units.get(attack_event.target_ids[0])
+    if not attacker or not target or attacker.faction == target.faction:
+        return []
+    if attacker.conditions.dead or attacker.current_hp <= 0 or attacker.conditions.unconscious or not attacker.position:
+        return []
+
+    eligible_reactors: list[tuple[UnitState, str]] = []
+    for reactor in state.units.values():
+        if reactor.id == target.id:
+            continue
+        if reactor.faction != target.faction or not unit_has_feature(reactor, "sentinel"):
+            continue
+        if not unit_can_take_reactions(reactor):
+            continue
+        if reactor.conditions.dead or reactor.current_hp <= 0 or reactor.conditions.unconscious:
+            continue
+
+        weapon_id = get_legal_sentinel_guardian_weapon_id(state, reactor, attacker)
+        if weapon_id:
+            eligible_reactors.append((reactor, weapon_id))
+
+    events: list[CombatEvent] = []
+    for reactor, weapon_id in sorted(eligible_reactors, key=lambda item: unit_sort_key(item[0].id)):
+        if not unit_can_take_reactions(reactor):
+            continue
+        if attacker.conditions.dead or attacker.current_hp <= 0 or attacker.conditions.unconscious:
+            break
+        if not get_legal_sentinel_guardian_weapon_id(state, reactor, attacker):
+            continue
+
+        reactor.reaction_available = False
+        events.append(
+            add_unit_phase_event(
+                state,
+                reactor.id,
+                attacker.id,
+                f"{reactor.id} uses Sentinel: Guardian against {attacker.id}.",
+                condition_deltas=[f"{reactor.id} makes a Sentinel opportunity attack."],
+                resolved_totals={"reaction": "sentinel_guardian"},
+            )
+        )
+        guardian_attack, _ = resolve_attack(
+            state,
+            ResolveAttackArgs(
+                attacker_id=reactor.id,
+                target_id=attacker.id,
+                weapon_id=weapon_id,
+                savage_attacker_available=unit_has_feature(reactor, "savage_attacker"),
+                is_opportunity_attack=True,
+            ),
+        )
+        events.extend(build_attack_reaction_pre_events(state, guardian_attack))
+        events.extend(build_attack_reaction_phase_events(state, guardian_attack))
+        events.append(guardian_attack)
+        events.extend(maybe_resolve_riposte_follow_up(state, guardian_attack))
+
+        resolved_target_id = guardian_attack.target_ids[0] if guardian_attack.target_ids else attacker.id
+        if state.units[resolved_target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+
+    return events
+
+
 def update_encounter_phase(state: EncounterState, actor_id: str) -> list[CombatEvent]:
     events: list[CombatEvent] = []
 
@@ -328,6 +431,7 @@ def expire_turn_end_effects(state: EncounterState, actor_id: str) -> list[Combat
                 and getattr(effect, "expires_at_round", state.round) <= state.round
             )
         ]
+        recalculate_effective_speed_for_unit(unit)
 
         events.append(
             add_unit_phase_event(
@@ -433,8 +537,12 @@ def is_grappled(state: EncounterState | None, unit: UnitState) -> bool:
     return bool(get_active_grappler_ids(state, unit.id))
 
 
+def is_restrained(unit: UnitState) -> bool:
+    return any(effect.kind == "restrained_by" for effect in unit.temporary_effects)
+
+
 def get_move_squares(state: EncounterState | None, unit: UnitState) -> int:
-    if is_grappled(state, unit):
+    if is_grappled(state, unit) or is_restrained(unit):
         return 0
     return unit.effective_speed // 5
 
@@ -963,12 +1071,22 @@ def can_use_swallow_special_action(state: EncounterState, actor_id: str, target_
     return is_active_grapple(state, actor_id, target_id)
 
 
-def resolve_special_action(state: EncounterState, actor_id: str, action: dict[str, str]) -> CombatEvent:
-    action_id = action.get("action_id")
+def resolve_special_action(state: EncounterState, actor_id: str, action: dict[str, object]) -> CombatEvent:
+    action_id = str(action.get("action_id") or "")
     target_id = action.get("target_id")
 
     if action_id:
         get_special_action(action_id)
+
+    if action_id == "natures_wrath":
+        raw_target_ids = action.get("target_ids")
+        target_ids = [str(target_id)] if target_id else []
+        if isinstance(raw_target_ids, list):
+            target_ids = [str(candidate_id) for candidate_id in raw_target_ids]
+        return attempt_natures_wrath(state, actor_id, target_ids)
+
+    if not isinstance(target_id, str):
+        target_id = None
 
     if action_id != "swallow" or not target_id or not can_use_swallow_special_action(state, actor_id, target_id):
         return create_skip_event(state, actor_id, "Special action is not legal.")
@@ -1484,6 +1602,7 @@ def resolve_attack_action(
         attack_events.extend(build_attack_reaction_phase_events(state, attack_event))
         attack_events.append(attack_event)
         attack_events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
+        attack_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, attack_event))
         cleave_events: list[CombatEvent] = []
         resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else target_id
 
@@ -1547,7 +1666,20 @@ def resolve_cast_spell_action(
         target_ids = action.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [action["target_id"]]
-        return [resolve_bless(state, actor_id, [str(target_id) for target_id in target_ids])]
+        return [
+            resolve_bless(
+                state,
+                actor_id,
+                [str(target_id) for target_id in target_ids],
+                spell_level=int(action["spell_level"]) if "spell_level" in action else None,
+            )
+        ]
+
+    if spell.targeting_mode == "multi_ally_hp_buff":
+        target_ids = action.get("target_ids")
+        if not isinstance(target_ids, list):
+            target_ids = [action["target_id"]]
+        return [resolve_aid(state, actor_id, [str(target_id) for target_id in target_ids])]
 
     spell_event = resolve_cast_spell(
         state,
@@ -1560,6 +1692,8 @@ def resolve_cast_spell_action(
     if spell_event.event_type == "attack":
         spell_events.extend(build_attack_reaction_phase_events(state, spell_event))
     spell_events.append(spell_event)
+    if spell_event.event_type == "attack":
+        spell_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, spell_event))
 
     for target_id in spell_event.target_ids:
         if state.units[target_id].conditions.dead:
@@ -1656,7 +1790,7 @@ def execute_movement(
     path_travelled = [movement.path[0]]
     reaction_events: list[CombatEvent] = []
     triggered_attackers: list[str] = []
-    opportunity_attacks_prevented = disengage_applied or movement.mode in {"tactical_shift", "landing", "cunning_withdraw"}
+    opportunity_attacks_prevented = movement.mode in {"tactical_shift", "landing", "cunning_withdraw"}
 
     for index in range(1, len(movement.path)):
         previous = movement.path[index - 1]
@@ -1673,6 +1807,7 @@ def execute_movement(
                 for unit in state.units.values()
                 if unit.faction != actor.faction
                 and unit_can_take_reactions(unit)
+                and (not disengage_applied or unit_has_feature(unit, "sentinel"))
                 and unit.position
                 and get_min_chebyshev_distance_between_footprints(
                     unit.position,
@@ -1696,6 +1831,10 @@ def execute_movement(
             reaction_unit.reaction_available = False
             triggered_attackers.append(reaction_unit.id)
 
+            # Opportunity attacks resolve as the mover leaves reach, before the
+            # destination square is fully established for attack legality.
+            post_step_position = actor.position.model_copy(deep=True) if actor.position else None
+            actor.position = previous.model_copy(deep=True)
             attack_event, savage_consumed = resolve_attack(
                 state,
                 ResolveAttackArgs(
@@ -1707,10 +1846,13 @@ def execute_movement(
                     maneuver_id="precision_attack" if reaction_unit.faction == "fighters" else None,
                 ),
             )
+            if post_step_position is not None:
+                actor.position = post_step_position
             reaction_events.extend(build_attack_reaction_pre_events(state, attack_event))
             reaction_events.extend(build_attack_reaction_phase_events(state, attack_event))
             reaction_events.append(attack_event)
             reaction_events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
+            reaction_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, attack_event))
             resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else actor_id
 
             if attack_event.resolved_totals.get("hit"):
@@ -1736,7 +1878,9 @@ def execute_movement(
                 reaction_events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
                 reaction_events.extend(release_swallowed_units_from_source(state, resolved_target_id))
 
-            if actor.conditions.dead or actor.current_hp == 0:
+            if actor.conditions.dead or actor.current_hp == 0 or (
+                resolved_target_id == actor_id and attack_event.resolved_totals.get("sentinelHaltApplied") is True
+            ):
                 movement_condition_deltas = clear_invalid_hidden_effects(state)
                 move_event = create_movement_event(
                     state,
@@ -2156,6 +2300,9 @@ def step_encounter_internal(
     poisoned_save_event = resolve_poisoned_end_of_turn_save(next_state, actor_id)
     if poisoned_save_event:
         events.append(poisoned_save_event)
+    restrained_save_event = resolve_restrained_end_of_turn_save(next_state, actor_id)
+    if restrained_save_event:
+        events.append(restrained_save_event)
     events.extend(expire_turn_end_effects(next_state, actor_id))
     events.extend(update_encounter_phase(next_state, actor_id))
     if record_log:

@@ -10,7 +10,7 @@ import type {
 } from '../shared/sim/types';
 
 export const DEFAULT_SEED = 'fighters-vs-goblin-screen-001';
-export const DEFAULT_PARTY_MAX_HP = 66;
+export const DEFAULT_PARTY_MAX_HP = 154;
 export const MAX_BATCH_SIZE = 1000;
 
 export const FIGHTER_IDS = ['F1', 'F2', 'F3', 'F4'] as const;

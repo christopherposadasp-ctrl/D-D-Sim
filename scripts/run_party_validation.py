@@ -39,7 +39,7 @@ RULES_GATE_TARGETS = (
     "tests/rules/test_ai.py",
     "tests/rules/test_rules.py",
     "-k",
-    "fighter or action_surge or battle_master or superiority or maneuver or riposte or trip or precision or great_weapon_master or hewing or barbarian or rage or reckless or rogue or sneak_attack or hide or paladin or bless or lay_on_hands or concentration or cure_wounds or smite or divine_smite",
+    "fighter or action_surge or battle_master or superiority or maneuver or riposte or trip or precision or great_weapon_master or hewing or barbarian or rage or reckless or rogue or sneak_attack or hide or paladin or bless or lay_on_hands or concentration or cure_wounds or smite or divine_smite or channel_divinity or natures_wrath or sentinel",
     "-q",
 )
 
@@ -221,7 +221,17 @@ def feature_signatures_for_unit(unit: UnitState) -> tuple[str, tuple[str, ...]]:
     if class_id == "wizard":
         return "wizard", ("casts", "shield")
     if class_id == "paladin":
-        return "paladin", ("lay on hands", "smite", "divine")
+        return "paladin", (
+            "bless",
+            "lay on hands",
+            "smite",
+            "divine",
+            "nature's wrath",
+            "channel divinity",
+            "sentinel",
+            "guardian",
+            "halt",
+        )
     return loadout_id or unit.template_name, ()
 
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from backend.engine.models.state import UnitState
 
-FeatureKind = Literal["class_feature", "fighting_style", "feat", "weapon_mastery", "resource", "passive"]
+FeatureKind = Literal["class_feature", "fighting_style", "feat", "weapon_mastery", "resource", "passive", "subclass"]
 
 
 @dataclass(frozen=True)
@@ -240,11 +240,49 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Always prepares Divine Smite, allowing a bonus-action smite immediately after a melee hit.",
     ),
+    "channel_divinity": FeatureDefinition(
+        feature_id="channel_divinity",
+        display_name="Channel Divinity",
+        kind="resource",
+        description="Subclass-fueled divine power used by oath features.",
+    ),
+    "oath_of_the_ancients": FeatureDefinition(
+        feature_id="oath_of_the_ancients",
+        display_name="Oath of the Ancients",
+        kind="subclass",
+        description="Paladin oath focused on durable support and battlefield control.",
+    ),
+    "natures_wrath": FeatureDefinition(
+        feature_id="natures_wrath",
+        display_name="Nature's Wrath",
+        kind="class_feature",
+        description="Channel Divinity action that restrains nearby chosen enemies with spectral vines.",
+        granted_action_ids=("natures_wrath",),
+    ),
+    "oath_spells_ancients": FeatureDefinition(
+        feature_id="oath_spells_ancients",
+        display_name="Oath Spells: Ancients",
+        kind="class_feature",
+        description="Ancients oath spells tracked as metadata; no extra live combat spell is added in this phase.",
+    ),
+    "faithful_steed": FeatureDefinition(
+        feature_id="faithful_steed",
+        display_name="Faithful Steed",
+        kind="class_feature",
+        description="Paladin level 5 steed support tracked as metadata; mounted combat is not live yet.",
+    ),
+    "sentinel": FeatureDefinition(
+        feature_id="sentinel",
+        display_name="Sentinel",
+        kind="feat",
+        description="Feat granting Strength +1, Guardian reaction attacks, and Halt on opportunity attack hits.",
+        granted_reaction_ids=("sentinel_guardian",),
+    ),
     "spellcasting": FeatureDefinition(
         feature_id="spellcasting",
         display_name="Spellcasting",
         kind="class_feature",
-        description="Prepared spellcasting with spell counts and first-level spell slots.",
+        description="Prepared spellcasting with spell counts and spell slot resources.",
     ),
     "ritual_adept": FeatureDefinition(
         feature_id="ritual_adept",
@@ -268,7 +306,7 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         feature_id="extra_attack",
         display_name="Extra Attack",
         kind="class_feature",
-        description="The fighter makes two weapon attacks when taking the Attack action.",
+        description="The character makes two weapon attacks when taking the Attack action.",
     ),
 }
 
@@ -282,6 +320,17 @@ def get_feature_definition(feature_id: str) -> FeatureDefinition:
 
 def unit_has_feature(unit: UnitState, feature_id: str) -> bool:
     return feature_id in unit.feature_ids
+
+
+def get_granted_action_ids_for_unit(unit: UnitState) -> tuple[str, ...]:
+    granted_action_ids: set[str] = set()
+    for feature_id in unit.feature_ids:
+        granted_action_ids.update(get_feature_definition(feature_id).granted_action_ids)
+    return tuple(sorted(granted_action_ids))
+
+
+def unit_has_granted_action(unit: UnitState, action_id: str) -> bool:
+    return action_id in get_granted_action_ids_for_unit(unit)
 
 
 def get_granted_bonus_action_ids_for_unit(unit: UnitState) -> tuple[str, ...]:

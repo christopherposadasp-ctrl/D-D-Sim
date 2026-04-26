@@ -14,7 +14,7 @@ from backend.content.cunning_strike_definitions import (
     unit_has_cunning_strike,
 )
 from backend.content.enemies import unit_has_reaction, unit_has_trait
-from backend.content.feature_definitions import unit_has_feature
+from backend.content.feature_definitions import unit_has_feature, unit_has_granted_action
 from backend.content.maneuver_definitions import (
     get_maneuver_definition,
     get_maneuver_save_dc,
@@ -27,6 +27,7 @@ from backend.engine.models.state import (
     AttackId,
     AttackMode,
     AttackRiderType,
+    AidEffect,
     BlessedEffect,
     CombatEvent,
     ConcentrationEffect,
@@ -37,6 +38,7 @@ from backend.engine.models.state import (
     EncounterState,
     GrappledEffect,
     GridPosition,
+    HaltedEffect,
     HarriedEffect,
     HiddenEffect,
     MasteryType,
@@ -323,7 +325,10 @@ def resolve_spell_ability(unit: UnitState, ability: str | None) -> str:
 
 def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProfile:
     spell = get_spell_definition(spell_id)
-    spell_attack_bonus = 2 + get_ability_modifier(attacker, resolve_spell_ability(attacker, spell.attack_ability))
+    spell_attack_bonus = get_proficiency_bonus(attacker.level or 1) + get_ability_modifier(
+        attacker,
+        resolve_spell_ability(attacker, spell.attack_ability),
+    )
     is_melee_spell = spell.targeting_mode == "melee_spell_attack"
     return WeaponProfile(
         id=spell_id,
@@ -341,7 +346,14 @@ def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProf
 
 def get_spell_save_dc(caster: UnitState, spell_id: str) -> int:
     spell = get_spell_definition(spell_id)
-    return 8 + 2 + get_ability_modifier(caster, resolve_spell_ability(caster, spell.attack_ability))
+    return get_unit_spell_save_dc(caster, resolve_spell_ability(caster, spell.attack_ability))
+
+
+def get_unit_spell_save_dc(caster: UnitState, ability: str | None = None) -> int:
+    return 8 + get_proficiency_bonus(caster.level or 1) + get_ability_modifier(
+        caster,
+        resolve_spell_ability(caster, ability),
+    )
 
 
 def unit_has_no_reactions_effect(unit: UnitState) -> bool:
@@ -368,6 +380,44 @@ def get_active_concentration_effect(unit: UnitState, spell_id: str | None = None
 
 def unit_is_concentrating_on(unit: UnitState, spell_id: str) -> bool:
     return get_active_concentration_effect(unit, spell_id) is not None
+
+
+def unit_is_halted(unit: UnitState) -> bool:
+    return any(effect.kind == "halted" for effect in unit.temporary_effects)
+
+
+def apply_sentinel_halt(
+    state: EncounterState,
+    attacker: UnitState,
+    target: UnitState,
+    *,
+    hit: bool,
+    is_opportunity_attack: bool | None,
+) -> bool:
+    if not hit or not is_opportunity_attack or not unit_has_feature(attacker, "sentinel"):
+        return False
+    if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+        return False
+
+    active_actor_id = (
+        state.initiative_order[state.active_combatant_index]
+        if 0 <= state.active_combatant_index < len(state.initiative_order)
+        else target.id
+    )
+    target.temporary_effects = [
+        effect
+        for effect in target.temporary_effects
+        if not (
+            effect.kind == "halted"
+            and effect.source_id == attacker.id
+            and effect.expires_at_turn_end_of == active_actor_id
+        )
+    ]
+    target.temporary_effects.append(
+        HaltedEffect(kind="halted", source_id=attacker.id, expires_at_turn_end_of=active_actor_id)
+    )
+    recalculate_effective_speed_for_unit(target)
+    return True
 
 
 def get_active_bless_effect(state: EncounterState, unit: UnitState) -> BlessedEffect | None:
@@ -853,6 +903,14 @@ def choose_damage_candidate(primary: DamageCandidate, savage: DamageCandidate | 
 
 
 def recalculate_effective_speed_for_unit(unit: UnitState) -> None:
+    if unit_is_halted(unit):
+        unit.effective_speed = 0
+        return
+
+    if any(effect.kind == "restrained_by" for effect in unit.temporary_effects):
+        unit.effective_speed = 0
+        return
+
     slow_penalty = sum(effect.penalty for effect in unit.temporary_effects if effect.kind == "slow")
     unit.effective_speed = max(0, unit.speed - min(10, slow_penalty))
 
@@ -1057,6 +1115,211 @@ def resolve_poisoned_end_of_turn_save(state: EncounterState, actor_id: str) -> C
     return save_event
 
 
+def is_natures_wrath_restrained(unit: UnitState, source_id: str | None = None) -> bool:
+    return any(
+        effect.kind == "restrained_by"
+        and effect.save_ends
+        and effect.save_ability == "str"
+        and (source_id is None or effect.source_id == source_id)
+        for effect in unit.temporary_effects
+    )
+
+
+def get_natures_wrath_legal_targets(
+    state: EncounterState,
+    actor_id: str,
+    target_ids: list[str],
+) -> list[UnitState]:
+    actor = state.units[actor_id]
+    if not actor.position:
+        return []
+
+    actor_footprint = get_unit_footprint(actor)
+    legal_targets: list[UnitState] = []
+    seen_target_ids: set[str] = set()
+    for target_id in target_ids:
+        if target_id in seen_target_ids:
+            continue
+        seen_target_ids.add(target_id)
+        target = state.units.get(target_id)
+        if not target or target.faction == actor.faction:
+            continue
+        if target.conditions.dead or target.conditions.unconscious or target.current_hp <= 0 or not target.position:
+            continue
+        if is_natures_wrath_restrained(target):
+            continue
+        distance = get_min_chebyshev_distance_between_footprints(
+            actor.position,
+            actor_footprint,
+            target.position,
+            get_unit_footprint(target),
+        )
+        if distance <= 3:
+            legal_targets.append(target)
+
+    return sorted(legal_targets, key=lambda unit: unit_sort_key(unit.id))
+
+
+def attempt_natures_wrath(
+    state: EncounterState,
+    actor_id: str,
+    target_ids: list[str],
+    overrides: SavingThrowOverrides | None = None,
+) -> CombatEvent:
+    actor = state.units[actor_id]
+    if (
+        actor.conditions.dead
+        or actor.conditions.unconscious
+        or actor.current_hp <= 0
+        or not unit_has_granted_action(actor, "natures_wrath")
+    ):
+        return create_skip_event(state, actor_id, "Nature's Wrath is not available.")
+
+    legal_targets = get_natures_wrath_legal_targets(state, actor_id, target_ids)
+    if not legal_targets:
+        return create_skip_event(state, actor_id, "Nature's Wrath has no legal targets.")
+    if not actor.resources.spend_pool("channel_divinity", 1):
+        return create_skip_event(state, actor_id, "No Channel Divinity uses remain.")
+
+    save_dc = get_unit_spell_save_dc(actor)
+    save_overrides = SavingThrowOverrides(save_rolls=list(overrides.save_rolls if overrides else []))
+    raw_save_rolls: list[int] = []
+    save_totals: list[int] = []
+    restrained_target_ids: list[str] = []
+    successful_save_target_ids: list[str] = []
+    condition_deltas: list[str] = []
+
+    for target in legal_targets:
+        save_roll = pull_die(state, 20, save_overrides.save_rolls.pop(0) if save_overrides.save_rolls else None)
+        save_total = save_roll + get_ability_modifier(target, "str")
+        raw_save_rolls.append(save_roll)
+        save_totals.append(save_total)
+
+        if save_total >= save_dc:
+            successful_save_target_ids.append(target.id)
+            condition_deltas.append(f"{target.id} resists Nature's Wrath.")
+            continue
+
+        target.temporary_effects = [
+            effect
+            for effect in target.temporary_effects
+            if not (
+                effect.kind == "restrained_by"
+                and effect.source_id == actor_id
+                and effect.save_ends
+                and effect.save_ability == "str"
+            )
+        ]
+        target.temporary_effects.append(
+            RestrainedEffect(
+                kind="restrained_by",
+                source_id=actor_id,
+                escape_dc=save_dc,
+                save_ability="str",
+                save_ends=True,
+                remaining_rounds=10,
+            )
+        )
+        recalculate_effective_speed_for_unit(target)
+        restrained_target_ids.append(target.id)
+        condition_deltas.append(f"{target.id} is restrained by Nature's Wrath (DC {save_dc}).")
+
+    legal_target_ids = [target.id for target in legal_targets]
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=legal_target_ids,
+        event_type="phase_change",
+        raw_rolls={"savingThrowRolls": raw_save_rolls},
+        resolved_totals={
+            "specialAction": "natures_wrath",
+            "success": True,
+            "saveAbility": "str",
+            "saveDc": save_dc,
+            "saveTotals": save_totals,
+            "affectedTargetIds": legal_target_ids,
+            "restrainedTargetIds": restrained_target_ids,
+            "successfulSaveTargetIds": successful_save_target_ids,
+            "channelDivinityUsesRemaining": actor.resources.channel_divinity_uses,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=condition_deltas,
+        text_summary=(
+            f"{actor_id} invokes Nature's Wrath, restraining "
+            f"{len(restrained_target_ids)} of {len(legal_target_ids)} targets."
+        ),
+    )
+
+
+def resolve_restrained_end_of_turn_save(
+    state: EncounterState,
+    actor_id: str,
+    overrides: SavingThrowOverrides | None = None,
+) -> CombatEvent | None:
+    actor = state.units[actor_id]
+    effects = [
+        effect
+        for effect in actor.temporary_effects
+        if effect.kind == "restrained_by" and effect.save_ends and effect.save_ability
+    ]
+    if not effects or actor.conditions.dead or actor.current_hp <= 0:
+        return None
+
+    effect = effects[0]
+    save_event = resolve_saving_throw(
+        state,
+        ResolveSavingThrowArgs(
+            actor_id=actor_id,
+            ability=effect.save_ability or "str",
+            dc=effect.escape_dc,
+            reason="Nature's Wrath",
+            overrides=overrides,
+        ),
+    )
+    success = bool(save_event.resolved_totals["success"])
+    save_event.resolved_totals["sourceId"] = effect.source_id
+    save_event.resolved_totals["restrainedSaveEnds"] = True
+
+    if success:
+        actor.temporary_effects = [active_effect for active_effect in actor.temporary_effects if active_effect is not effect]
+        recalculate_effective_speed_for_unit(actor)
+        save_event.condition_deltas.append(f"{actor_id} breaks free from Nature's Wrath.")
+        save_event.resolved_totals["restrainedEnded"] = True
+    else:
+        if effect.remaining_rounds is not None:
+            effect.remaining_rounds -= 1
+            save_event.resolved_totals["restrainedRemainingRounds"] = effect.remaining_rounds
+        if effect.remaining_rounds is not None and effect.remaining_rounds <= 0:
+            actor.temporary_effects = [active_effect for active_effect in actor.temporary_effects if active_effect is not effect]
+            recalculate_effective_speed_for_unit(actor)
+            save_event.condition_deltas.append(f"{actor_id}'s Nature's Wrath restraint expires.")
+            save_event.resolved_totals["restrainedEnded"] = True
+            save_event.resolved_totals["restrainedExpired"] = True
+        else:
+            save_event.condition_deltas.append(f"{actor_id} remains restrained by Nature's Wrath.")
+            save_event.resolved_totals["restrainedEnded"] = False
+
+    return save_event
+
+
+def release_save_ending_restrained_effects_from_source(state: EncounterState, source_id: str) -> list[str]:
+    condition_deltas: list[str] = []
+    for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id)):
+        released = [
+            effect
+            for effect in unit.temporary_effects
+            if effect.kind == "restrained_by" and effect.source_id == source_id and effect.save_ends
+        ]
+        if not released:
+            continue
+
+        unit.temporary_effects = [effect for effect in unit.temporary_effects if effect not in released]
+        recalculate_effective_speed_for_unit(unit)
+        condition_deltas.append(f"{unit.id} is no longer restrained by {source_id}.")
+
+    return condition_deltas
+
+
 def resolve_death_save(state: EncounterState, actor_id: str, override_roll: int | None = None) -> CombatEvent:
     actor = state.units[actor_id]
     raw_roll = pull_die(state, 20, override_roll)
@@ -1222,9 +1485,11 @@ def attempt_lay_on_hands(state: EncounterState, actor_id: str, target_id: str | 
         return create_skip_event(state, actor_id, "Lay on Hands target is not within touch range.")
 
     if target.current_hp == 0:
-        intended_healing = 1
+        # Rescue pickups should leave the ally with enough HP to survive incidental follow-up damage.
+        intended_healing = max(1, (target.max_hp + 3) // 4)
     else:
-        intended_healing = max(1, (target.max_hp + 4) // 5)
+        target_half_hp = max(1, (target.max_hp + 1) // 2)
+        intended_healing = max(1, target_half_hp - target.current_hp)
     healing_total = min(intended_healing, target.max_hp - target.current_hp, actor.resources.lay_on_hands_points)
     if healing_total <= 0:
         return create_skip_event(state, actor_id, "Lay on Hands target does not need healing.")
@@ -1529,11 +1794,11 @@ def unit_is_fiend_or_undead(unit: UnitState) -> bool:
     return "fiend" in creature_tags or "undead" in creature_tags
 
 
-def get_divine_smite_dice_count(target: UnitState) -> int:
-    return 2 + int(unit_is_fiend_or_undead(target))
+def get_divine_smite_dice_count(target: UnitState, spell_level: int = 1) -> int:
+    return 2 + max(0, spell_level - 1) + int(unit_is_fiend_or_undead(target))
 
 
-def can_apply_divine_smite(
+def choose_divine_smite_spell_level(
     attacker: UnitState,
     target: UnitState,
     weapon: WeaponProfile,
@@ -1542,33 +1807,51 @@ def can_apply_divine_smite(
     is_opportunity_attack: bool | None,
     maneuver_id: str | None,
     weapon_damage_components: list[DamageComponentResult],
-) -> bool:
+) -> int | None:
     if not unit_has_feature(attacker, "paladins_smite"):
-        return False
+        return None
     if weapon.kind != "melee":
-        return False
+        return None
     if is_opportunity_attack or maneuver_id == "riposte":
-        return False
-    if attacker.resources.spell_slots_level_1 <= 0 or attacker._bonus_action_used_this_turn:
-        return False
+        return None
+    if attacker._bonus_action_used_this_turn:
+        return None
+
+    has_level_1_slot = attacker.resources.spell_slots_level_1 > 0
+    has_level_2_slot = attacker.resources.spell_slots_level_2 > 0
+    if not (has_level_1_slot or has_level_2_slot):
+        return None
 
     remaining_effective_hp = estimate_remaining_effective_hp_after_damage(target, weapon_damage_components)
     if remaining_effective_hp <= 0:
-        return False
+        return None
     if critical:
-        return True
+        return 1 if has_level_1_slot else 2
 
-    # Compare against exact average d8 damage without floating point: 1d8 avg is 4.5.
-    return remaining_effective_hp * 2 <= get_divine_smite_dice_count(target) * 9
+    level_1_average_finishes = remaining_effective_hp * 2 <= get_divine_smite_dice_count(target, 1) * 9
+    level_2_average_finishes = remaining_effective_hp * 2 <= get_divine_smite_dice_count(target, 2) * 9
+
+    if has_level_1_slot and level_1_average_finishes:
+        return 1
+    if has_level_2_slot and level_2_average_finishes and not level_1_average_finishes:
+        return 2
+    if not has_level_1_slot and has_level_2_slot and level_2_average_finishes:
+        return 2
+
+    if has_level_1_slot and not has_level_2_slot and attacker.resources.spell_slots_level_1 >= 2 and remaining_effective_hp <= 12:
+        return 1
+
+    return None
 
 
 def roll_divine_smite_component(
     state: EncounterState,
     target: UnitState,
+    spell_level: int,
     critical_multiplier: int,
     override_rolls: list[int] | None = None,
 ) -> tuple[int, list[int], DamageComponentResult]:
-    dice_count = get_divine_smite_dice_count(target)
+    dice_count = get_divine_smite_dice_count(target, spell_level)
     rolls = [pull_die(state, 8, override_rolls.pop(0) if override_rolls else None) for _ in range(dice_count)]
     subtotal = sum(rolls)
     return (
@@ -1981,6 +2264,9 @@ def apply_damage(
             target.death_save_successes = 0
             condition_deltas.append(f"{target_id} drops to 0 HP and falls unconscious.")
             condition_deltas.extend(end_rage(target, reason=f"{target_id}'s rage ends."))
+
+    if target.current_hp <= 0 or target.conditions.dead or target.conditions.unconscious:
+        condition_deltas.extend(release_save_ending_restrained_effects_from_source(state, target_id))
 
     concentration_data, concentration_deltas = resolve_concentration_after_damage(
         state,
@@ -3016,9 +3302,35 @@ def resolve_burning_hands(
     return events
 
 
-def get_legal_bless_target_ids(state: EncounterState, actor_id: str, target_ids: list[str]) -> list[str]:
+def choose_bless_spell_level(actor: UnitState) -> int:
+    if actor.class_id == "paladin" and (actor.level or 0) >= 5 and actor.resources.spell_slots_level_2 > 0:
+        return 2
+    return 1
+
+
+def get_bless_max_targets_for_spell_level(spell_level: int) -> int:
+    spell = get_spell_definition("bless")
+    return spell.max_targets + max(0, spell_level - spell.level)
+
+
+def spend_spell_slot(unit: UnitState, spell_level: int) -> bool:
+    return unit.resources.spend_pool(f"spell_slots_level_{spell_level}", 1)
+
+
+def get_remaining_spell_slots(unit: UnitState, spell_level: int) -> int:
+    return unit.resources.get_pool(f"spell_slots_level_{spell_level}")
+
+
+def get_legal_bless_target_ids(
+    state: EncounterState,
+    actor_id: str,
+    target_ids: list[str],
+    *,
+    spell_level: int | None = None,
+) -> list[str]:
     actor = state.units[actor_id]
     spell = get_spell_definition("bless")
+    target_limit = get_bless_max_targets_for_spell_level(spell_level or choose_bless_spell_level(actor))
     legal_target_ids: list[str] = []
     seen_target_ids: set[str] = set()
 
@@ -3034,26 +3346,35 @@ def get_legal_bless_target_ids(state: EncounterState, actor_id: str, target_ids:
         if not units_are_within_spell_range(state, actor_id, target_id, spell.range_feet):
             continue
         legal_target_ids.append(target_id)
-        if len(legal_target_ids) >= spell.max_targets:
+        if len(legal_target_ids) >= target_limit:
             break
 
     return legal_target_ids
 
 
-def resolve_bless(state: EncounterState, actor_id: str, target_ids: list[str]) -> CombatEvent:
+def resolve_bless(
+    state: EncounterState,
+    actor_id: str,
+    target_ids: list[str],
+    *,
+    spell_level: int | None = None,
+) -> CombatEvent:
     actor = state.units[actor_id]
     spell = get_spell_definition("bless")
+    cast_level = spell_level or choose_bless_spell_level(actor)
 
     if not unit_has_combat_spell(actor, "bless"):
         return build_spell_skip_event(state, actor_id, "bless", "is not prepared.")
     if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
         return build_spell_skip_event(state, actor_id, "bless", "cannot be cast while down.")
+    if cast_level < spell.level:
+        return build_spell_skip_event(state, actor_id, "bless", "cannot be cast below spell level.")
 
-    legal_target_ids = get_legal_bless_target_ids(state, actor_id, target_ids)
+    legal_target_ids = get_legal_bless_target_ids(state, actor_id, target_ids, spell_level=cast_level)
     if not legal_target_ids:
         return build_spell_skip_event(state, actor_id, "bless", "has no legal targets.")
-    if not actor.resources.spend_pool("spell_slots_level_1", 1):
-        return build_spell_skip_event(state, actor_id, "bless", "No level 1 spell slots remain.")
+    if not spend_spell_slot(actor, cast_level):
+        return build_spell_skip_event(state, actor_id, "bless", f"No level {cast_level} spell slots remain.")
 
     condition_deltas = end_concentration(
         state,
@@ -3087,11 +3408,12 @@ def resolve_bless(state: EncounterState, actor_id: str, target_ids: list[str]) -
         raw_rolls={},
         resolved_totals={
             "spellId": "bless",
-            "spellLevel": spell.level,
+            "spellLevel": cast_level,
             "concentration": True,
             "durationRounds": spell.duration_rounds,
             "blessedTargetIds": legal_target_ids,
             "spellSlotsLevel1Remaining": actor.resources.spell_slots_level_1,
+            "spellSlotsLevel2Remaining": actor.resources.spell_slots_level_2,
         },
         movement_details=None,
         damage_details=None,
@@ -3155,6 +3477,206 @@ def resolve_cure_wounds(
     )
 
 
+def get_legal_aid_target_ids(state: EncounterState, actor_id: str, target_ids: list[str]) -> list[str]:
+    actor = state.units[actor_id]
+    spell = get_spell_definition("aid")
+    legal_target_ids: list[str] = []
+    seen_target_ids: set[str] = set()
+
+    for target_id in target_ids:
+        if target_id in seen_target_ids:
+            continue
+        seen_target_ids.add(target_id)
+        target = state.units.get(target_id)
+        if not target:
+            continue
+        if target.faction != actor.faction or target.conditions.dead:
+            continue
+        if not units_are_within_spell_range(state, actor_id, target_id, spell.range_feet):
+            continue
+        legal_target_ids.append(target_id)
+        if len(legal_target_ids) >= spell.max_targets:
+            break
+
+    return legal_target_ids
+
+
+def get_active_aid_bonus(unit: UnitState) -> int:
+    return max((effect.hp_bonus for effect in unit.temporary_effects if effect.kind == "aid"), default=0)
+
+
+def resolve_aid(state: EncounterState, actor_id: str, target_ids: list[str]) -> CombatEvent:
+    actor = state.units[actor_id]
+    spell = get_spell_definition("aid")
+
+    if not unit_has_combat_spell(actor, "aid"):
+        return build_spell_skip_event(state, actor_id, "aid", "is not prepared.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return build_spell_skip_event(state, actor_id, "aid", "cannot be cast while down.")
+
+    legal_target_ids = get_legal_aid_target_ids(state, actor_id, target_ids)
+    if not legal_target_ids:
+        return build_spell_skip_event(state, actor_id, "aid", "has no legal targets.")
+    if not spend_spell_slot(actor, 2):
+        return build_spell_skip_event(state, actor_id, "aid", "No level 2 spell slots remain.")
+
+    total_current_hp_added = 0
+    applied_target_ids: list[str] = []
+    condition_deltas: list[str] = []
+    for target_id in legal_target_ids:
+        target = state.units[target_id]
+        existing_bonus = get_active_aid_bonus(target)
+        if existing_bonus >= spell.hp_bonus:
+            condition_deltas.append(f"{target_id} is already bolstered by Aid.")
+            continue
+
+        bonus_delta = spell.hp_bonus - existing_bonus
+        target.max_hp += bonus_delta
+        healed, healing_deltas = apply_healing_to_unit(target, bonus_delta)
+        total_current_hp_added += healed
+        target.temporary_effects = [effect for effect in target.temporary_effects if effect.kind != "aid"]
+        target.temporary_effects.append(
+            AidEffect(
+                kind="aid",
+                source_id=actor_id,
+                hp_bonus=spell.hp_bonus,
+                remaining_rounds=spell.duration_rounds,
+            )
+        )
+        applied_target_ids.append(target_id)
+        condition_deltas.extend(healing_deltas)
+        condition_deltas.append(f"{target_id}'s maximum HP increases by {bonus_delta}.")
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=legal_target_ids,
+        event_type="heal",
+        raw_rolls={},
+        resolved_totals={
+            "spellId": "aid",
+            "spellLevel": spell.level,
+            "aidHpBonus": spell.hp_bonus,
+            "aidTargetIds": legal_target_ids,
+            "aidAppliedTargetIds": applied_target_ids,
+            "healingTotal": total_current_hp_added,
+            "durationRounds": spell.duration_rounds,
+            "spellSlotsLevel2Remaining": actor.resources.spell_slots_level_2,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=condition_deltas,
+        text_summary=f"{actor_id} casts {spell.display_name} on {', '.join(legal_target_ids)}.",
+    )
+
+
+def resolve_mage_armor(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
+    actor = state.units[actor_id]
+    target = state.units.get(target_id)
+    spell = get_spell_definition("mage_armor")
+
+    if not unit_has_combat_spell(actor, "mage_armor"):
+        return build_spell_skip_event(state, actor_id, "mage_armor", "is not prepared.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return build_spell_skip_event(state, actor_id, "mage_armor", "cannot be cast while down.")
+    if not target:
+        return build_spell_skip_event(state, actor_id, "mage_armor", "target is unavailable.")
+    if target_id != actor_id:
+        return build_spell_skip_event(state, actor_id, "mage_armor", "can only target self.")
+    if not actor.resources.spend_pool("spell_slots_level_1", 1):
+        return build_spell_skip_event(state, actor_id, "mage_armor", "No level 1 spell slots remain.")
+
+    # UnitState has no equipment or worn-armor field yet, so this cannot reject
+    # armored targets. Apply only as a beneficial AC floor.
+    previous_ac = target.ac
+    mage_armor_ac = 13 + target.ability_mods.dex
+    target.ac = max(target.ac, mage_armor_ac)
+    ac_changed = target.ac != previous_ac
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[target_id],
+        event_type="phase_change",
+        raw_rolls={},
+        resolved_totals={
+            "spellId": "mage_armor",
+            "spellLevel": spell.level,
+            "previousAc": previous_ac,
+            "mageArmorAc": mage_armor_ac,
+            "newAc": target.ac,
+            "acChanged": ac_changed,
+            "durationRounds": spell.duration_rounds,
+            "spellSlotsLevel1Remaining": actor.resources.spell_slots_level_1,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=[
+            f"{target_id}'s AC becomes {target.ac}."
+            if ac_changed
+            else f"{target_id}'s AC remains {target.ac}."
+        ],
+        text_summary=f"{actor_id} casts {spell.display_name} on {target_id}.",
+    )
+
+
+def resolve_false_life(
+    state: EncounterState,
+    actor_id: str,
+    target_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> CombatEvent:
+    actor = state.units[actor_id]
+    target = state.units.get(target_id)
+    spell = get_spell_definition("false_life")
+
+    if not unit_has_combat_spell(actor, "false_life"):
+        return build_spell_skip_event(state, actor_id, "false_life", "is not prepared.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return build_spell_skip_event(state, actor_id, "false_life", "cannot be cast while down.")
+    if not target:
+        return build_spell_skip_event(state, actor_id, "false_life", "target is unavailable.")
+    if target_id != actor_id:
+        return build_spell_skip_event(state, actor_id, "false_life", "can only target self.")
+    if not actor.resources.spend_pool("spell_slots_level_1", 1):
+        return build_spell_skip_event(state, actor_id, "false_life", "No level 1 spell slots remain.")
+
+    roll_overrides = list(overrides.damage_rolls if overrides else [])
+    temporary_hp_rolls = [
+        pull_die(state, dice.sides, roll_overrides.pop(0) if roll_overrides else None)
+        for dice in spell.temporary_hit_point_dice
+        for _ in range(dice.count)
+    ]
+    temporary_hp_total = sum(temporary_hp_rolls) + spell.temporary_hit_point_modifier
+    previous_temporary_hp = target.temporary_hit_points
+    target.temporary_hit_points = max(target.temporary_hit_points, temporary_hp_total)
+    temporary_hp_gained = target.temporary_hit_points - previous_temporary_hp
+
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[target_id],
+        event_type="phase_change",
+        raw_rolls={"temporaryHitPointRolls": temporary_hp_rolls},
+        resolved_totals={
+            "spellId": "false_life",
+            "spellLevel": spell.level,
+            "temporaryHitPointModifier": spell.temporary_hit_point_modifier,
+            "temporaryHitPointTotal": temporary_hp_total,
+            "previousTemporaryHitPoints": previous_temporary_hp,
+            "temporaryHitPointsGained": temporary_hp_gained,
+            "newTemporaryHitPoints": target.temporary_hit_points,
+            "durationRounds": spell.duration_rounds,
+            "spellSlotsLevel1Remaining": actor.resources.spell_slots_level_1,
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=[
+            f"{target_id} gains {temporary_hp_gained} temporary HP."
+            if temporary_hp_gained > 0
+            else f"{target_id}'s temporary HP remains {target.temporary_hit_points}."
+        ],
+        text_summary=f"{actor_id} casts {spell.display_name} and gains {temporary_hp_gained} temporary HP.",
+    )
+
+
 def resolve_cast_spell(
     state: EncounterState,
     actor_id: str,
@@ -3168,8 +3690,12 @@ def resolve_cast_spell(
     if not unit_has_combat_spell(actor, spell_id):
         return build_spell_skip_event(state, actor_id, spell_id, "is not prepared.")
 
-    if spell.level > 0 and spell_id in actor.prepared_combat_spell_ids and spell.level == 1 and actor.resources.spell_slots_level_1 <= 0:
-        return build_spell_skip_event(state, actor_id, spell_id, "No level 1 spell slots remain.")
+    if (
+        spell.level > 0
+        and spell_id in actor.prepared_combat_spell_ids
+        and get_remaining_spell_slots(actor, spell.level) <= 0
+    ):
+        return build_spell_skip_event(state, actor_id, spell_id, f"No level {spell.level} spell slots remain.")
 
     if spell.targeting_mode in {"ranged_spell_attack", "melee_spell_attack"}:
         return resolve_ranged_spell_attack(state, actor_id, target_id, spell_id, overrides)
@@ -3179,6 +3705,12 @@ def resolve_cast_spell(
         return resolve_bless(state, actor_id, [target_id])
     if spell.targeting_mode == "touch_heal":
         return resolve_cure_wounds(state, actor_id, target_id, overrides)
+    if spell.targeting_mode == "multi_ally_hp_buff":
+        return resolve_aid(state, actor_id, [target_id])
+    if spell.targeting_mode == "self_ac_buff":
+        return resolve_mage_armor(state, actor_id, target_id)
+    if spell.targeting_mode == "self_temp_hp":
+        return resolve_false_life(state, actor_id, target_id, overrides)
 
     return build_spell_skip_event(state, actor_id, spell_id, "cannot be resolved by the live simulator.")
 
@@ -3387,9 +3919,11 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     cunning_strike_save_success: bool | None = None
     cunning_strike_condition_applied: bool | None = None
     divine_smite_applied = False
+    divine_smite_spell_level = 0
     divine_smite_dice = 0
     divine_smite_rolls: list[int] = []
     divine_smite_damage = 0
+    sentinel_halt_applied = False
 
     if attack_reaction == "redirect_attack":
         condition_deltas.append(f"{args.target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
@@ -3560,7 +4094,7 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             maneuver_save_success = maneuver_save_total >= maneuver_save_dc
             trip_save_failed = not maneuver_save_success
 
-        if can_apply_divine_smite(
+        selected_smite_spell_level = choose_divine_smite_spell_level(
             attacker,
             target,
             weapon,
@@ -3568,12 +4102,15 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
             is_opportunity_attack=args.is_opportunity_attack,
             maneuver_id=args.maneuver_id,
             weapon_damage_components=final_damage_components,
-        ) and attacker.resources.spend_pool("spell_slots_level_1", 1):
+        )
+        if selected_smite_spell_level and spend_spell_slot(attacker, selected_smite_spell_level):
             attacker._bonus_action_used_this_turn = True
             divine_smite_applied = True
+            divine_smite_spell_level = selected_smite_spell_level
             divine_smite_dice, divine_smite_rolls, divine_smite_component = roll_divine_smite_component(
                 state,
                 target,
+                divine_smite_spell_level,
                 critical_multiplier,
                 overrides.smite_damage_rolls,
             )
@@ -3680,6 +4217,15 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         if not attack_riders_applied:
             attack_riders_applied = None
         condition_deltas.extend(attack_rider_condition_deltas)
+        sentinel_halt_applied = apply_sentinel_halt(
+            state,
+            attacker,
+            target,
+            hit=hit,
+            is_opportunity_attack=args.is_opportunity_attack,
+        )
+        if sentinel_halt_applied:
+            condition_deltas.append(f"{resolved_target_id}'s speed becomes 0 for the rest of the turn.")
     elif weapon.mastery == "graze":
         mastery_applied = "graze"
         mastery_notes = f"{target.id} takes {weapon.ability_modifier} graze damage on the miss."
@@ -3767,10 +4313,12 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
         resolved_totals["assassinateDamageBonus"] = assassinate_damage_bonus
     if divine_smite_applied:
         resolved_totals["spellId"] = "divine_smite"
+        resolved_totals["spellLevel"] = divine_smite_spell_level
         resolved_totals["divineSmiteApplied"] = True
         resolved_totals["divineSmiteDice"] = divine_smite_dice
         resolved_totals["divineSmiteDamage"] = divine_smite_damage
         resolved_totals["spellSlotsLevel1Remaining"] = attacker.resources.spell_slots_level_1
+        resolved_totals["spellSlotsLevel2Remaining"] = attacker.resources.spell_slots_level_2
     if attack_context.sharpshooter_applied:
         resolved_totals["sharpshooterApplied"] = True
         if attack_context.sharpshooter_ignored_cover_ac_bonus > 0:
@@ -3778,6 +4326,9 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     if great_weapon_master_hewing_trigger:
         resolved_totals["greatWeaponMasterHewingTrigger"] = True
         resolved_totals["greatWeaponMasterHewingTriggerReason"] = "critical" if critical else "dropped_to_zero"
+    if sentinel_halt_applied:
+        resolved_totals["sentinelHaltApplied"] = True
+        resolved_totals["speedReducedToZero"] = True
     if defense_reaction_data:
         resolved_totals.update(defense_reaction_data)
     if undead_fortitude_triggered:

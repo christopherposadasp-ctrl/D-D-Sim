@@ -88,6 +88,12 @@ COMBAT_ACTIONS: dict[str, CombatActionDefinition] = {
         timing="bonus_action",
         description="Spend Paladin healing pool points to restore a touched creature.",
     ),
+    "natures_wrath": CombatActionDefinition(
+        action_id="natures_wrath",
+        display_name="Nature's Wrath",
+        timing="action",
+        description="Spend Channel Divinity to restrain nearby chosen enemies with spectral vines.",
+    ),
     "bonus_unarmed_strike": CombatActionDefinition(
         action_id="bonus_unarmed_strike",
         display_name="Bonus Unarmed Strike",

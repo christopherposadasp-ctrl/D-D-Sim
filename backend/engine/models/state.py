@@ -96,7 +96,9 @@ RESOURCE_FIELD_BY_POOL = {
     "focus_points": "focus_points",
     "uncanny_metabolism": "uncanny_metabolism_uses",
     "spell_slots_level_1": "spell_slots_level_1",
+    "spell_slots_level_2": "spell_slots_level_2",
     "lay_on_hands": "lay_on_hands_points",
+    "channel_divinity": "channel_divinity_uses",
 }
 
 
@@ -110,7 +112,9 @@ class ResourceState(CamelModel):
     focus_points: int
     uncanny_metabolism_uses: int
     spell_slots_level_1: int
+    spell_slots_level_2: int
     lay_on_hands_points: int
+    channel_divinity_uses: int
 
     def get_pool(self, pool_id: str) -> int:
         field_name = RESOURCE_FIELD_BY_POOL.get(pool_id)
@@ -224,6 +228,13 @@ class ConcentrationEffect(CamelModel):
     remaining_rounds: int
 
 
+class AidEffect(CamelModel):
+    kind: Literal["aid"]
+    source_id: str
+    hp_bonus: int
+    remaining_rounds: int
+
+
 class HiddenEffect(CamelModel):
     kind: Literal["hidden"]
     source_id: str | None = None
@@ -260,6 +271,9 @@ class RestrainedEffect(CamelModel):
     kind: Literal["restrained_by"]
     source_id: str
     escape_dc: int
+    save_ability: Literal["str", "dex", "con", "int", "wis", "cha"] | None = None
+    save_ends: bool = False
+    remaining_rounds: int | None = None
 
 
 class BlindedEffect(CamelModel):
@@ -300,6 +314,12 @@ class HarriedEffect(CamelModel):
     expires_at_turn_start_of: str
 
 
+class HaltedEffect(CamelModel):
+    kind: Literal["halted"]
+    source_id: str
+    expires_at_turn_end_of: str
+
+
 TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
@@ -307,6 +327,7 @@ TemporaryEffect: TypeAlias = (
     | PoisonedEffect
     | BlessedEffect
     | ConcentrationEffect
+    | AidEffect
     | HiddenEffect
     | DodgingEffect
     | ShieldEffect
@@ -319,6 +340,7 @@ TemporaryEffect: TypeAlias = (
     | SwallowedEffect
     | VexEffect
     | HarriedEffect
+    | HaltedEffect
 )
 
 

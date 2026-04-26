@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from backend.content.attack_sequences import build_player_attack_action
 from backend.content.class_progressions import get_proficiency_bonus
-from backend.content.feature_definitions import unit_has_granted_bonus_action, unit_has_granted_cunning_strike
+from backend.content.feature_definitions import (
+    unit_has_granted_action,
+    unit_has_granted_bonus_action,
+    unit_has_granted_cunning_strike,
+)
 from backend.engine import create_encounter
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import EncounterConfig, GridPosition
@@ -253,7 +257,7 @@ def test_wizard_sample_build_uses_spellcasting_registry_metadata() -> None:
     assert wizard.role_tags == ["caster"]
     assert wizard.resources.spell_slots_level_1 == 2
     assert wizard.combat_cantrip_ids == ["fire_bolt", "shocking_grasp"]
-    assert wizard.prepared_combat_spell_ids == ["magic_missile", "shield", "burning_hands"]
+    assert wizard.prepared_combat_spell_ids == ["magic_missile", "shield", "burning_hands", "mage_armor"]
     assert wizard.cantrips_known == 3
     assert wizard.spellbook_spells == 6
     assert wizard.prepared_spells == 4
@@ -323,6 +327,145 @@ def test_level2_paladin_sample_build_uses_smite_tank_registry_metadata() -> None
     assert "fighting_style_defense" in paladin.feature_ids
     assert "paladins_smite" in paladin.feature_ids
     assert paladin.resource_pools == {"lay_on_hands": 10, "spell_slots_level_1": 2, "javelins": 5}
+
+
+def test_level3_paladin_sample_build_uses_ancients_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-level3-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="paladin_level3_sample_trio",
+        )
+    )
+    paladin = encounter.units["F1"]
+
+    assert paladin.class_id == "paladin"
+    assert paladin.level == 3
+    assert paladin.loadout_id == "paladin_level3_sample_build"
+    assert paladin.behavior_profile == "divine_guardian"
+    assert paladin.role_tags == ["healer"]
+    assert paladin.max_hp == 31
+    assert paladin.ac == 21
+    assert tuple(sorted(paladin.attacks.keys())) == ("javelin", "longsword")
+    assert paladin.resources.lay_on_hands_points == 15
+    assert paladin.resources.spell_slots_level_1 == 3
+    assert paladin.resources.channel_divinity_uses == 2
+    assert paladin.prepared_combat_spell_ids == ["bless", "cure_wounds"]
+    assert paladin.prepared_spells == 4
+    for feature_id in (
+        "fighting_style_defense",
+        "paladins_smite",
+        "channel_divinity",
+        "oath_of_the_ancients",
+        "natures_wrath",
+        "oath_spells_ancients",
+    ):
+        assert feature_id in paladin.feature_ids
+    assert unit_has_granted_action(paladin, "natures_wrath") is True
+    assert paladin.resource_pools == {
+        "lay_on_hands": 15,
+        "spell_slots_level_1": 3,
+        "channel_divinity": 2,
+        "javelins": 5,
+    }
+
+
+def test_level4_paladin_sample_build_uses_sentinel_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-level4-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="paladin_level4_sample_trio",
+        )
+    )
+    paladin = encounter.units["F1"]
+
+    assert paladin.class_id == "paladin"
+    assert paladin.level == 4
+    assert paladin.loadout_id == "paladin_level4_sample_build"
+    assert paladin.behavior_profile == "divine_guardian"
+    assert paladin.role_tags == ["healer"]
+    assert paladin.max_hp == 40
+    assert paladin.ac == 21
+    assert paladin.ability_mods.str == 4
+    assert tuple(sorted(paladin.attacks.keys())) == ("javelin", "longsword")
+    assert paladin.attacks["longsword"].attack_bonus == 6
+    assert paladin.attacks["longsword"].damage_modifier == 4
+    assert paladin.attacks["javelin"].attack_bonus == 6
+    assert paladin.attacks["javelin"].damage_modifier == 4
+    assert paladin.resources.lay_on_hands_points == 20
+    assert paladin.resources.spell_slots_level_1 == 3
+    assert paladin.resources.channel_divinity_uses == 2
+    assert paladin.prepared_combat_spell_ids == ["bless", "cure_wounds"]
+    assert paladin.prepared_spells == 5
+    for feature_id in (
+        "fighting_style_defense",
+        "paladins_smite",
+        "channel_divinity",
+        "oath_of_the_ancients",
+        "natures_wrath",
+        "oath_spells_ancients",
+        "sentinel",
+    ):
+        assert feature_id in paladin.feature_ids
+    assert unit_has_granted_action(paladin, "natures_wrath") is True
+    assert paladin.resource_pools == {
+        "lay_on_hands": 20,
+        "spell_slots_level_1": 3,
+        "channel_divinity": 2,
+        "javelins": 5,
+    }
+
+
+def test_level5_paladin_sample_build_uses_extra_attack_spell_registry_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-level5-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="paladin_level5_sample_trio",
+        )
+    )
+    paladin = encounter.units["F1"]
+
+    assert paladin.class_id == "paladin"
+    assert paladin.level == 5
+    assert paladin.loadout_id == "paladin_level5_sample_build"
+    assert paladin.behavior_profile == "divine_guardian"
+    assert paladin.role_tags == ["healer"]
+    assert paladin.max_hp == 49
+    assert paladin.ac == 21
+    assert paladin.ability_mods.str == 4
+    assert tuple(sorted(paladin.attacks.keys())) == ("javelin", "longsword")
+    assert paladin.attacks["longsword"].attack_bonus == 7
+    assert paladin.attacks["longsword"].damage_modifier == 4
+    assert paladin.attacks["javelin"].attack_bonus == 7
+    assert paladin.attacks["javelin"].damage_modifier == 4
+    assert paladin.resources.lay_on_hands_points == 25
+    assert paladin.resources.spell_slots_level_1 == 4
+    assert paladin.resources.spell_slots_level_2 == 2
+    assert paladin.resources.channel_divinity_uses == 2
+    assert paladin.prepared_combat_spell_ids == ["bless", "cure_wounds", "aid"]
+    assert paladin.prepared_spells == 6
+    for feature_id in (
+        "fighting_style_defense",
+        "paladins_smite",
+        "channel_divinity",
+        "oath_of_the_ancients",
+        "natures_wrath",
+        "oath_spells_ancients",
+        "sentinel",
+        "extra_attack",
+        "faithful_steed",
+    ):
+        assert feature_id in paladin.feature_ids
+    assert unit_has_granted_action(paladin, "natures_wrath") is True
+    assert paladin.resource_pools == {
+        "lay_on_hands": 25,
+        "spell_slots_level_1": 4,
+        "spell_slots_level_2": 2,
+        "channel_divinity": 2,
+        "javelins": 5,
+    }
 
 
 def test_runtime_player_metadata_stays_out_of_live_api_payload() -> None:
@@ -414,6 +557,22 @@ def test_paladin_attack_action_uses_longsword_and_javelin_choices() -> None:
     assert tuple(sorted(attack_action.steps[0].allowed_weapon_ids)) == ("javelin", "longsword")
 
 
+def test_level5_paladin_attack_action_resolves_extra_attack_through_progression_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-level5-attack-action",
+            placements=build_trio_placements(),
+            player_preset_id="paladin_level5_sample_trio",
+        )
+    )
+    attack_action = build_player_attack_action(encounter.units["F1"])
+
+    assert attack_action.action_id == "attack"
+    assert len(attack_action.steps) == 2
+    assert tuple(sorted(attack_action.steps[0].allowed_weapon_ids)) == ("javelin", "longsword")
+    assert tuple(sorted(attack_action.steps[1].allowed_weapon_ids)) == ("javelin", "longsword")
+
+
 def test_player_catalog_reports_current_supported_sample_party() -> None:
     catalog = get_player_catalog()
 
@@ -432,6 +591,9 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "monk_level2_sample_build",
         "paladin_level1_sample_build",
         "paladin_level2_sample_build",
+        "paladin_level3_sample_build",
+        "paladin_level4_sample_build",
+        "paladin_level5_sample_build",
         "rogue_melee_sample_build",
         "rogue_ranged_sample_build",
         "rogue_melee_level2_sample_build",
@@ -461,6 +623,9 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "monk_level2_sample_trio",
         "paladin_level1_sample_trio",
         "paladin_level2_sample_trio",
+        "paladin_level3_sample_trio",
+        "paladin_level4_sample_trio",
+        "paladin_level5_sample_trio",
         "wizard_sample_trio",
         "martial_mixed_party",
     ]
@@ -468,7 +633,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "barbarian": 2,
         "fighter": 5,
         "monk": 2,
-        "paladin": 2,
+        "paladin": 5,
         "rogue": 5,
         "wizard": 1,
     }
@@ -479,16 +644,19 @@ def test_default_player_preset_loads_fighter_paladin_and_two_rogues() -> None:
 
     assert encounter.units["F1"].loadout_id == "fighter_level5_sample_build"
     assert encounter.units["F1"].level == 5
-    assert encounter.units["F2"].loadout_id == "paladin_level2_sample_build"
-    assert encounter.units["F2"].level == 2
+    assert encounter.units["F2"].loadout_id == "paladin_level5_sample_build"
+    assert encounter.units["F2"].level == 5
     assert encounter.units["F2"].ac == 21
-    assert encounter.units["F2"].resources.lay_on_hands_points == 10
+    assert encounter.units["F2"].resources.lay_on_hands_points == 25
+    assert encounter.units["F2"].resources.spell_slots_level_1 == 4
+    assert encounter.units["F2"].resources.spell_slots_level_2 == 2
+    assert encounter.units["F2"].resources.channel_divinity_uses == 2
     assert encounter.units["F3"].loadout_id == "rogue_ranged_level5_assassin_sample_build"
     assert encounter.units["F3"].level == 5
     assert encounter.units["F4"].loadout_id == "rogue_melee_level2_sample_build"
     assert encounter.units["F4"].level == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 127
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 154
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:

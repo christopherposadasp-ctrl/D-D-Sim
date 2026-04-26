@@ -10,6 +10,7 @@ from backend.engine.ai.decision import (
 from backend.engine.combat.engine import clear_turn_flags, execute_decision, resolve_attack_action
 from backend.engine.constants import ARCHER_GOBLIN_IDS, DEFAULT_POSITIONS, MELEE_GOBLIN_IDS
 from backend.engine.models.state import (
+    ConcentrationEffect,
     EncounterConfig,
     GridPosition,
     HiddenEffect,
@@ -610,14 +611,15 @@ def test_dumb_wizard_does_not_reposition_specifically_for_burning_hands() -> Non
     assert decision.action["spell_id"] == "fire_bolt"
 
 
-def test_paladin_opens_with_bless_on_self_fighter_and_ranged_rogue() -> None:
+def test_paladin_opens_with_level2_bless_on_full_mixed_party() -> None:
     encounter = create_encounter(EncounterConfig(seed="paladin-open-bless", placements=DEFAULT_POSITIONS))
 
     decision = choose_turn_decision(encounter, "F2")
 
     assert decision.action["kind"] == "cast_spell"
     assert decision.action["spell_id"] == "bless"
-    assert decision.action["target_ids"] == ["F2", "F1", "F3"]
+    assert decision.action["spell_level"] == 2
+    assert decision.action["target_ids"] == ["F2", "F1", "F3", "F4"]
 
 
 def test_paladin_trio_does_not_recast_redundant_bless() -> None:
@@ -653,6 +655,7 @@ def test_paladin_uses_lay_on_hands_for_downed_adjacent_ally() -> None:
 def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
     melee = create_encounter(EncounterConfig(seed="paladin-melee", placements=DEFAULT_POSITIONS))
     melee.units["F2"].resources.spell_slots_level_1 = 0
+    melee.units["F2"].resources.spell_slots_level_2 = 0
     melee.units["F2"].position = GridPosition(x=4, y=5)
     melee.units["G1"].position = GridPosition(x=5, y=5)
 
@@ -662,6 +665,7 @@ def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
 
     ranged = create_encounter(EncounterConfig(seed="paladin-ranged-fallback", placements=DEFAULT_POSITIONS))
     ranged.units["F2"].resources.spell_slots_level_1 = 0
+    ranged.units["F2"].resources.spell_slots_level_2 = 0
     ranged.units["F2"].effective_speed = 0
     ranged.units["G1"].position = GridPosition(x=5, y=8)
 
@@ -669,6 +673,69 @@ def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
 
     assert ranged_decision.action["kind"] == "attack"
     assert ranged_decision.action["weapon_id"] == "javelin"
+
+
+def test_paladin_does_not_select_aid_even_when_prepared_and_available() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-aid-not-ai", placements=DEFAULT_POSITIONS))
+    encounter.units["F2"].temporary_effects.append(
+        ConcentrationEffect(kind="concentration", source_id="F2", spell_id="bless", remaining_rounds=10)
+    )
+    encounter.units["F2"].position = GridPosition(x=4, y=5)
+    encounter.units["G1"].position = GridPosition(x=5, y=5)
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["weapon_id"] == "longsword"
+    assert decision.action.get("spell_id") != "aid"
+
+
+def test_paladin_uses_natures_wrath_when_four_enemies_can_be_caught() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-natures-wrath-ai",
+            placements=build_placements(
+                F1={"x": 1, "y": 3},
+                F2={"x": 1, "y": 1},
+                G1={"x": 6, "y": 1},
+                G2={"x": 7, "y": 1},
+                G3={"x": 8, "y": 1},
+                G4={"x": 6, "y": 2},
+            ),
+        )
+    )
+    encounter.units["F2"].resources.spell_slots_level_1 = 0
+    encounter.units["F2"].resources.spell_slots_level_2 = 0
+    defeat_other_enemies(encounter, "G1", "G2", "G3", "G4")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.path[-1].model_dump() != {"x": 1, "y": 1}
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "natures_wrath"
+    assert decision.action["target_ids"] == ["G1", "G2", "G3", "G4"]
+
+
+def test_paladin_does_not_use_natures_wrath_for_three_enemies() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-natures-wrath-ai-threshold",
+            placements=build_placements(
+                F2={"x": 4, "y": 1},
+                G1={"x": 6, "y": 1},
+                G2={"x": 7, "y": 1},
+                G3={"x": 8, "y": 1},
+            ),
+        )
+    )
+    encounter.units["F2"].resources.spell_slots_level_1 = 0
+    encounter.units["F2"].resources.spell_slots_level_2 = 0
+    defeat_other_enemies(encounter, "G1", "G2", "G3")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action.get("action_id") != "natures_wrath"
 
 
 def test_barbarian_delays_rage_on_opening_dash_from_default_layout() -> None:

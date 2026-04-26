@@ -5,11 +5,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class SpecialActionDefinition:
-    """Static metadata for non-standard monster actions.
+    """Static metadata for non-standard bespoke actions.
 
     Regular weapon attacks stay in the attack-sequence content path. This
-    registry exists for actions like Swallow that have bespoke preconditions
-    and resolvers but still need a stable data vocabulary.
+    registry exists for actions that have bespoke preconditions and resolvers
+    but still need a stable data vocabulary.
     """
 
     action_id: str
@@ -22,6 +22,11 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
         action_id="swallow",
         display_name="Swallow",
         description="Swallow a creature the monster already has grappled in its mouth.",
+    ),
+    "natures_wrath": SpecialActionDefinition(
+        action_id="natures_wrath",
+        display_name="Nature's Wrath",
+        description="Channel Divinity action that restrains nearby chosen enemies with spectral vines.",
     ),
 }
 

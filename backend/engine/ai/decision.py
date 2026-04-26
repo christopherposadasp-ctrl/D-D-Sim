@@ -9,7 +9,7 @@ from backend.content.enemies import (
     unit_has_reaction,
     unit_has_trait,
 )
-from backend.content.feature_definitions import unit_has_feature, unit_has_granted_bonus_action
+from backend.content.feature_definitions import unit_has_feature, unit_has_granted_action, unit_has_granted_bonus_action
 from backend.content.player_loadouts import get_player_primary_melee_weapon_id, get_player_primary_ranged_weapon_id
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.profiles import get_monster_ai_profile
@@ -39,6 +39,7 @@ from backend.engine.rules.combat_rules import (
     get_sneak_attack_d6_count,
     has_harried_effect,
     has_vex_effect,
+    is_natures_wrath_restrained,
     target_is_grappled_by_attacker,
     unit_is_concentrating_on,
     unit_has_reckless_attack_effect,
@@ -195,8 +196,12 @@ def is_grappled(unit: UnitState, state: EncounterState | None = None) -> bool:
     return bool(get_active_grappler_ids(state, unit.id))
 
 
+def is_restrained(unit: UnitState) -> bool:
+    return any(effect.kind == "restrained_by" for effect in unit.temporary_effects)
+
+
 def get_move_squares(unit: UnitState, state: EncounterState | None = None) -> int:
-    if is_grappled(unit, state):
+    if is_grappled(unit, state) or is_restrained(unit):
         return 0
     base_move_squares = unit.effective_speed // 5
     return max(0, base_move_squares - unit._turn_stand_up_cost_squares)
@@ -208,7 +213,7 @@ def get_total_move_squares(
     *,
     state: EncounterState | None = None,
 ) -> int:
-    if is_grappled(unit, state):
+    if is_grappled(unit, state) or is_restrained(unit):
         return 0
     base_move_squares = unit.effective_speed // 5
     total_budget = base_move_squares * (1 + extra_speed_multipliers)
@@ -283,8 +288,12 @@ def can_cast_combat_spell(unit: UnitState, spell_id: str) -> bool:
     spell = get_spell_definition(spell_id)
     if spell.level <= 0:
         return True
+    if spell_id == "bless" and unit.class_id == "paladin" and (unit.level or 0) >= 5 and unit.resources.spell_slots_level_2 > 0:
+        return True
     if spell.level == 1:
         return unit.resources.spell_slots_level_1 > 0
+    if spell.level == 2:
+        return unit.resources.spell_slots_level_2 > 0
     return False
 
 
@@ -2622,6 +2631,16 @@ def can_target_bless_from_current_position(state: EncounterState, actor: UnitSta
     )
 
 
+def choose_paladin_bless_spell_level(actor: UnitState) -> int:
+    if actor.class_id == "paladin" and (actor.level or 0) >= 5 and actor.resources.spell_slots_level_2 > 0:
+        return 2
+    return 1
+
+
+def get_paladin_bless_target_limit(actor: UnitState) -> int:
+    return 4 if choose_paladin_bless_spell_level(actor) == 2 else 3
+
+
 def choose_paladin_bless_targets(state: EncounterState, actor: UnitState) -> list[str]:
     preferred_units: list[UnitState] = []
     allies = [unit for unit in get_units_by_faction(state, actor.faction) if unit.current_hp > 0 and not unit.conditions.dead]
@@ -2642,7 +2661,7 @@ def choose_paladin_bless_targets(state: EncounterState, actor: UnitState) -> lis
         ally
         for ally in preferred_units
         if can_target_bless_from_current_position(state, actor, ally) and not is_blessed_by_active_source(state, ally)
-    ][:3]
+    ][: get_paladin_bless_target_limit(actor)]
     return [unit.id for unit in legal_targets]
 
 
@@ -2769,6 +2788,86 @@ def get_paladin_cure_target(state: EncounterState, actor: UnitState) -> UnitStat
     return sorted(candidates, key=lambda unit: (unit.current_hp, unit_sort_key(unit.id)))[0] if candidates else None
 
 
+def can_use_paladin_natures_wrath(actor: UnitState) -> bool:
+    return (
+        actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+        and actor.resources.channel_divinity_uses > 0
+        and unit_has_granted_action(actor, "natures_wrath")
+    )
+
+
+def get_natures_wrath_target_ids_from_position(
+    state: EncounterState,
+    actor: UnitState,
+    position: GridPosition,
+) -> list[str]:
+    actor_footprint = get_unit_footprint(actor)
+    enemy_faction = "goblins" if actor.faction == "fighters" else "fighters"
+    targets = [
+        unit
+        for unit in get_units_by_faction(state, enemy_faction)
+        if is_unit_conscious(unit)
+        and unit.position
+        and not is_natures_wrath_restrained(unit)
+        and get_min_chebyshev_distance_between_footprints(
+            position,
+            actor_footprint,
+            unit.position,
+            get_unit_footprint(unit),
+        )
+        <= 3
+    ]
+    return [unit.id for unit in sorted(targets, key=lambda unit: unit_sort_key(unit.id))]
+
+
+def get_total_distance_to_conscious_allies(state: EncounterState, actor: UnitState, position: GridPosition) -> int:
+    actor_footprint = get_unit_footprint(actor)
+    total = 0
+    for ally in get_units_by_faction(state, actor.faction):
+        if ally.id == actor.id or not is_unit_conscious(ally) or not ally.position:
+            continue
+        total += get_min_chebyshev_distance_between_footprints(
+            position,
+            actor_footprint,
+            ally.position,
+            get_unit_footprint(ally),
+        )
+    return total
+
+
+def choose_natures_wrath_plan(
+    state: EncounterState,
+    actor: UnitState,
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> tuple[ReachableSquare, list[str]] | None:
+    if not can_use_paladin_natures_wrath(actor):
+        return None
+
+    candidates: list[tuple[ReachableSquare, list[str]]] = []
+    for square in get_safe_reachable_squares(state, actor.id, move_squares, False, position_index):
+        target_ids = get_natures_wrath_target_ids_from_position(state, actor, square.position)
+        if len(target_ids) >= 4:
+            candidates.append((square, target_ids))
+
+    if not candidates:
+        return None
+
+    return sorted(
+        candidates,
+        key=lambda item: (
+            -len(item[1]),
+            get_total_distance_to_conscious_allies(state, actor, item[0].position),
+            len(get_adjacent_conscious_enemies_at_position(state, actor, item[0].position)),
+            item[0].distance,
+            item[0].position.x,
+            item[0].position.y,
+        ),
+    )[0]
+
+
 def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     move_squares = get_move_squares(actor, state)
     dash_squares = get_total_move_squares(actor, 1, state=state)
@@ -2809,6 +2908,7 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
             action={
                 "kind": "cast_spell",
                 "spell_id": "bless",
+                "spell_level": choose_paladin_bless_spell_level(actor),
                 "target_id": bless_targets[0],
                 "target_ids": bless_targets,
             }
@@ -2826,6 +2926,22 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
     cure_target = get_paladin_cure_target(state, actor)
     if cure_target:
         return TurnDecision(action={"kind": "cast_spell", "spell_id": "cure_wounds", "target_id": cure_target.id})
+
+    natures_wrath_plan = choose_natures_wrath_plan(state, actor, move_squares, position_index)
+    if natures_wrath_plan:
+        natures_wrath_square, natures_wrath_target_ids = natures_wrath_plan
+        return TurnDecision(
+            bonus_action=bonus_action,
+            pre_action_movement=(
+                MovementPlan(path=natures_wrath_square.path, mode="move") if natures_wrath_square.distance > 0 else None
+            ),
+            action={
+                "kind": "special_action",
+                "action_id": "natures_wrath",
+                "target_id": natures_wrath_target_ids[0],
+                "target_ids": natures_wrath_target_ids,
+            },
+        )
 
     conscious_enemies = sort_player_combat_targets(
         state,

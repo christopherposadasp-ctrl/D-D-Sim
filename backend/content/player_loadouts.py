@@ -71,6 +71,7 @@ rogue_level4_ability_mods = AbilityModifiers(str=0, dex=4, con=2, int=1, wis=1, 
 barbarian_ability_mods = AbilityModifiers(str=3, dex=1, con=3, int=-1, wis=0, cha=0)
 monk_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=0, wis=2, cha=-1)
 paladin_ability_mods = AbilityModifiers(str=3, dex=0, con=3, int=-1, wis=0, cha=2)
+paladin_level4_ability_mods = AbilityModifiers(str=4, dex=0, con=3, int=-1, wis=0, cha=2)
 wizard_ability_mods = AbilityModifiers(str=-1, dex=2, con=2, int=3, wis=1, cha=0)
 medium_footprint = Footprint(width=1, height=1)
 TRIO_PLAYER_IDS = ("F1", "F2", "F3")
@@ -253,6 +254,28 @@ fighter_level5_weapons: dict[str, WeaponProfile] = {
         deep=True,
     ),
     "javelin": fighter_level4_weapons["javelin"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+}
+
+paladin_level4_weapons: dict[str, WeaponProfile] = {
+    "longsword": player_weapons["longsword"].model_copy(
+        update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
+        deep=True,
+    ),
+    "javelin": player_weapons["javelin"].model_copy(
+        update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
+        deep=True,
+    ),
+}
+
+paladin_level5_weapons: dict[str, WeaponProfile] = {
+    "longsword": paladin_level4_weapons["longsword"].model_copy(
+        update={"attack_bonus": 7},
+        deep=True,
+    ),
+    "javelin": paladin_level4_weapons["javelin"].model_copy(
         update={"attack_bonus": 7},
         deep=True,
     ),
@@ -747,6 +770,87 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         default_ranged_weapon_id="javelin",
         prepared_combat_spell_ids=("bless", "cure_wounds"),
     ),
+    "paladin_level3_sample_build": PlayerLoadoutDefinition(
+        loadout_id="paladin_level3_sample_build",
+        display_name="Level 3 Paladin Sample Build",
+        class_id="paladin",
+        level=3,
+        template_name="Level 3 Paladin Sample Build",
+        behavior_profile="divine_guardian",
+        max_hp=31,
+        ac=21,
+        speed=30,
+        initiative_mod=0,
+        passive_perception=10,
+        ability_mods=paladin_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "longsword": player_weapons["longsword"],
+            "javelin": player_weapons["javelin"],
+        },
+        extra_feature_ids=("weapon_mastery_sap", "weapon_mastery_slow"),
+        extra_resource_pools={"javelins": 5},
+        role_tags=("healer",),
+        medicine_modifier=2,
+        default_melee_weapon_id="longsword",
+        default_ranged_weapon_id="javelin",
+        prepared_combat_spell_ids=("bless", "cure_wounds"),
+    ),
+    "paladin_level4_sample_build": PlayerLoadoutDefinition(
+        loadout_id="paladin_level4_sample_build",
+        display_name="Level 4 Paladin Sample Build",
+        class_id="paladin",
+        level=4,
+        template_name="Level 4 Paladin Sample Build",
+        behavior_profile="divine_guardian",
+        max_hp=40,
+        ac=21,
+        speed=30,
+        initiative_mod=0,
+        passive_perception=10,
+        ability_mods=paladin_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "longsword": paladin_level4_weapons["longsword"],
+            "javelin": paladin_level4_weapons["javelin"],
+        },
+        extra_feature_ids=("weapon_mastery_sap", "weapon_mastery_slow"),
+        extra_resource_pools={"javelins": 5},
+        role_tags=("healer",),
+        medicine_modifier=2,
+        default_melee_weapon_id="longsword",
+        default_ranged_weapon_id="javelin",
+        prepared_combat_spell_ids=("bless", "cure_wounds"),
+    ),
+    "paladin_level5_sample_build": PlayerLoadoutDefinition(
+        loadout_id="paladin_level5_sample_build",
+        display_name="Level 5 Paladin Sample Build",
+        class_id="paladin",
+        level=5,
+        template_name="Level 5 Paladin Sample Build",
+        behavior_profile="divine_guardian",
+        max_hp=49,
+        ac=21,
+        speed=30,
+        initiative_mod=0,
+        passive_perception=10,
+        ability_mods=paladin_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={
+            "longsword": paladin_level5_weapons["longsword"],
+            "javelin": paladin_level5_weapons["javelin"],
+        },
+        extra_feature_ids=("weapon_mastery_sap", "weapon_mastery_slow"),
+        extra_resource_pools={"javelins": 5},
+        role_tags=("healer",),
+        medicine_modifier=2,
+        default_melee_weapon_id="longsword",
+        default_ranged_weapon_id="javelin",
+        prepared_combat_spell_ids=("bless", "cure_wounds", "aid"),
+    ),
     "wizard_sample_build": PlayerLoadoutDefinition(
         loadout_id="wizard_sample_build",
         display_name="Level 1 Wizard Sample Build",
@@ -767,7 +871,7 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         medicine_modifier=1,
         default_melee_weapon_id="dagger",
         combat_cantrip_ids=("fire_bolt", "shocking_grasp"),
-        prepared_combat_spell_ids=("magic_missile", "shield", "burning_hands"),
+        prepared_combat_spell_ids=("magic_missile", "shield", "burning_hands", "mage_armor"),
     ),
 }
 
@@ -978,6 +1082,33 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "paladin_level3_sample_trio": PlayerPresetDefinition(
+        preset_id="paladin_level3_sample_trio",
+        display_name="Level 3 Paladin Trio",
+        description="Three level 3 Oath of the Ancients paladins with Nature's Wrath.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="paladin_level3_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
+    "paladin_level4_sample_trio": PlayerPresetDefinition(
+        preset_id="paladin_level4_sample_trio",
+        display_name="Level 4 Paladin Trio",
+        description="Three level 4 Oath of the Ancients paladins with Sentinel.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="paladin_level4_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
+    "paladin_level5_sample_trio": PlayerPresetDefinition(
+        preset_id="paladin_level5_sample_trio",
+        display_name="Level 5 Paladin Trio",
+        description="Three level 5 Oath of the Ancients paladins with Extra Attack, level 2 Bless, and Aid rules support.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="paladin_level5_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "wizard_sample_trio": PlayerPresetDefinition(
         preset_id="wizard_sample_trio",
         display_name="Level 1 Wizard Trio",
@@ -987,10 +1118,10 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 2 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
-            PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level2_sample_build"),
+            PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level5_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
             PlayerPresetUnit(unit_id="F4", loadout_id="rogue_melee_level2_sample_build"),
         ),
@@ -1031,6 +1162,9 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "monk_level2_sample_trio",
     "paladin_level1_sample_trio",
     "paladin_level2_sample_trio",
+    "paladin_level3_sample_trio",
+    "paladin_level4_sample_trio",
+    "paladin_level5_sample_trio",
     "wizard_sample_trio",
     "martial_mixed_party",
 )
@@ -1131,7 +1265,9 @@ def build_legacy_resource_state(resource_pools: dict[str, int]) -> ResourceState
         focus_points=resource_pools.get("focus_points", 0),
         uncanny_metabolism_uses=resource_pools.get("uncanny_metabolism", 0),
         spell_slots_level_1=resource_pools.get("spell_slots_level_1", 0),
+        spell_slots_level_2=resource_pools.get("spell_slots_level_2", 0),
         lay_on_hands_points=resource_pools.get("lay_on_hands", 0),
+        channel_divinity_uses=resource_pools.get("channel_divinity", 0),
     )
 
 

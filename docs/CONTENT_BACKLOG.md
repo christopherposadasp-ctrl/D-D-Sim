@@ -91,7 +91,7 @@ Status: `approved`
 | Barbarian | approved | resource/rage and durability pressure |
 | Monk | approved | mobility and action-economy stress |
 | Ranger | deferred | better after spell framework exists |
-| Paladin | deferred | spell-adjacent even before broader casting support |
+| Paladin | live separately to level 5 | spell-adjacent support tank using the shared spell/concentration slice |
 
 ### Framework Goal
 
@@ -111,10 +111,10 @@ Use V4.2 to establish the player-content framework:
 - Rogue is live to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk is live to level 2 in `V4.2-C`
 - Wizard is live to level 1 as a narrow combat-only slice with `fire_bolt`, `shocking_grasp`, `magic_missile`, `shield`, `burning_hands`, and tracked spell access counts
-- Paladin is live to level 2 as a plate-and-shield support tank with Lay on Hands, Bless, Cure Wounds, concentration support, and Divine Smite
+- Paladin is live to level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, concentration support, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
 - The current default mixed party is:
   - level 5 Battle Master fighter
-  - level 2 paladin
+  - level 5 Oath of the Ancients paladin
   - level 5 ranged Assassin rogue
   - level 2 melee rogue
 
@@ -139,7 +139,7 @@ The immediate project path is narrower than the broad V4 class roadmap. The goal
 | Fighter | Battle Master | live to level 5 | great-weapon striker baseline |
 | Ranged Rogue | Assassin | live to level 5 | keep ranged-first rogue identity |
 | Wizard | Evoker | after Rogue | combat spellcasting priority |
-| Paladin | Oath of the Ancients | live to level 2 | durable support/frontline role; level 5 path remains future work |
+| Paladin | Oath of the Ancients | live to level 5 | durable support/frontline role with Extra Attack and level 2 Bless |
 | Cleric | Life Domain | stretch | add only if the core four-character scope is complete |
 
 ### Validation Policy
@@ -220,9 +220,9 @@ Status: `deferred as a broad roadmap item`
 | V4.4-B | Wizard, Sorcerer, Cleric | approved |
 | V4.4-C | Bard, Druid, Warlock | approved |
 
-## V4.5 Half-Caster Classes Up To Level 2
+## V4.5 Half-Caster Classes
 
-Status: `deferred as a broad roadmap item`
+Status: `partially live; Ranger remains deferred`
 
 ### Class Scope
 

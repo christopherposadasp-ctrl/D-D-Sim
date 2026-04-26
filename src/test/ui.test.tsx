@@ -1342,7 +1342,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "id": "paladin",
       "displayName": "Paladin",
       "category": "half_caster",
-      "maxSupportedLevel": 2
+      "maxSupportedLevel": 5
     },
     {
       "id": "rogue",
@@ -1592,6 +1592,82 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         "weapon_mastery",
         "fighting_style_defense",
         "paladins_smite",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "javelin",
+        "longsword"
+      ]
+    },
+    {
+      "id": "paladin_level3_sample_build",
+      "displayName": "Level 3 Paladin Sample Build",
+      "classId": "paladin",
+      "level": 3,
+      "maxHp": 31,
+      "featureIds": [
+        "lay_on_hands",
+        "spellcasting",
+        "weapon_mastery",
+        "fighting_style_defense",
+        "paladins_smite",
+        "channel_divinity",
+        "oath_of_the_ancients",
+        "natures_wrath",
+        "oath_spells_ancients",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "javelin",
+        "longsword"
+      ]
+    },
+    {
+      "id": "paladin_level4_sample_build",
+      "displayName": "Level 4 Paladin Sample Build",
+      "classId": "paladin",
+      "level": 4,
+      "maxHp": 40,
+      "featureIds": [
+        "lay_on_hands",
+        "spellcasting",
+        "weapon_mastery",
+        "fighting_style_defense",
+        "paladins_smite",
+        "channel_divinity",
+        "oath_of_the_ancients",
+        "natures_wrath",
+        "oath_spells_ancients",
+        "sentinel",
+        "weapon_mastery_sap",
+        "weapon_mastery_slow"
+      ],
+      "weaponIds": [
+        "javelin",
+        "longsword"
+      ]
+    },
+    {
+      "id": "paladin_level5_sample_build",
+      "displayName": "Level 5 Paladin Sample Build",
+      "classId": "paladin",
+      "level": 5,
+      "maxHp": 49,
+      "featureIds": [
+        "lay_on_hands",
+        "spellcasting",
+        "weapon_mastery",
+        "fighting_style_defense",
+        "paladins_smite",
+        "channel_divinity",
+        "oath_of_the_ancients",
+        "natures_wrath",
+        "oath_spells_ancients",
+        "sentinel",
+        "extra_attack",
+        "faithful_steed",
         "weapon_mastery_sap",
         "weapon_mastery_slow"
       ],
@@ -2094,6 +2170,63 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       ]
     },
     {
+      "id": "paladin_level3_sample_trio",
+      "displayName": "Level 3 Paladin Trio",
+      "description": "Three level 3 Oath of the Ancients paladins with Nature's Wrath.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "paladin_level3_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "paladin_level3_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "paladin_level3_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "paladin_level4_sample_trio",
+      "displayName": "Level 4 Paladin Trio",
+      "description": "Three level 4 Oath of the Ancients paladins with Sentinel.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "paladin_level4_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "paladin_level4_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "paladin_level4_sample_build"
+        }
+      ]
+    },
+    {
+      "id": "paladin_level5_sample_trio",
+      "displayName": "Level 5 Paladin Trio",
+      "description": "Three level 5 Oath of the Ancients paladins with Extra Attack, level 2 Bless, and Aid rules support.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "paladin_level5_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "paladin_level5_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "paladin_level5_sample_build"
+        }
+      ]
+    },
+    {
       "id": "wizard_sample_trio",
       "displayName": "Level 1 Wizard Trio",
       "description": "Three level 1 wizards with direct damage, melee escape, Shield, and Burning Hands pressure.",
@@ -2115,7 +2248,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
     {
       "id": "martial_mixed_party",
       "displayName": "Mixed Martial Party",
-      "description": "One level 5 Battle Master fighter, one level 2 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
       "units": [
         {
           "unitId": "F1",
@@ -2123,7 +2256,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         },
         {
           "unitId": "F2",
-          "loadoutId": "paladin_level2_sample_build"
+          "loadoutId": "paladin_level5_sample_build"
         },
         {
           "unitId": "F3",
@@ -2171,6 +2304,9 @@ const ACTIVE_PLAYER_PRESET_IDS = [
   'monk_level2_sample_trio',
   'paladin_level1_sample_trio',
   'paladin_level2_sample_trio',
+  'paladin_level3_sample_trio',
+  'paladin_level4_sample_trio',
+  'paladin_level5_sample_trio',
   'wizard_sample_trio',
   'martial_mixed_party',
 ];
@@ -2241,7 +2377,9 @@ function buildUnit(
       focusPoints: 0,
       uncannyMetabolismUses: 0,
       spellSlotsLevel1: 0,
+      spellSlotsLevel2: 0,
       layOnHandsPoints: 0,
+      channelDivinityUses: 0,
     },
     position,
     temporaryEffects: [],
@@ -2259,7 +2397,7 @@ function buildEncounterState(
 ): EncounterState {
   const units: Record<string, UnitState> = {
     F1: buildUnit('F1', 'Level 2 Fighter Sample Build', 'fighters', 'fighter', { x: 1, y: 7 }, 21),
-    F2: buildUnit('F2', 'Level 2 Paladin Sample Build', 'fighters', 'paladin', { x: 1, y: 8 }, 22),
+    F2: buildUnit('F2', 'Level 4 Paladin Sample Build', 'fighters', 'paladin', { x: 1, y: 8 }, 40),
     F3: buildUnit('F3', 'Level 5 Ranged Assassin Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 9 }, 42),
     F4: buildUnit('F4', 'Level 2 Melee Rogue Sample Build', 'fighters', 'rogue', { x: 1, y: 10 }, 18),
     E1: buildUnit('E1', '2024 Goblin Raider', 'goblins', 'goblin_melee', { x: 14, y: 6 }, 10),
@@ -2270,11 +2408,13 @@ function buildEncounterState(
     E6: buildUnit('E6', '2024 Goblin Archer', 'goblins', 'goblin_archer', { x: 15, y: 11 }, 10),
   };
   units.F1.resources.actionSurgeUses = 1;
-  units.F2.ac = 14;
+  units.F2.ac = 21;
   units.F2.resources.secondWindUses = 0;
   units.F2.resources.javelins = 0;
-  units.F2.resources.rageUses = 2;
-  units.F2.resources.handaxes = 4;
+  units.F2.resources.spellSlotsLevel1 = 4;
+  units.F2.resources.spellSlotsLevel2 = 2;
+  units.F2.resources.layOnHandsPoints = 25;
+  units.F2.resources.channelDivinityUses = 2;
 
   const combatLog: CombatEvent[] = Array.from({ length: combatLogLength }, (_, index): CombatEvent => ({
     round: 1,
@@ -2714,7 +2854,7 @@ describe('App', () => {
     const mixedParty = TEST_PLAYER_CATALOG.playerPresets.find((preset) => preset.id === 'martial_mixed_party');
     expect(mixedParty?.units).toEqual([
       { unitId: 'F1', loadoutId: 'fighter_level5_sample_build' },
-      { unitId: 'F2', loadoutId: 'paladin_level2_sample_build' },
+      { unitId: 'F2', loadoutId: 'paladin_level5_sample_build' },
       { unitId: 'F3', loadoutId: 'rogue_ranged_level5_assassin_sample_build' },
       { unitId: 'F4', loadoutId: 'rogue_melee_level2_sample_build' },
     ]);

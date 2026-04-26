@@ -68,7 +68,9 @@ export interface ResourceState {
   focusPoints: number;
   uncannyMetabolismUses: number;
   spellSlotsLevel1: number;
+  spellSlotsLevel2: number;
   layOnHandsPoints: number;
+  channelDivinityUses: number;
 }
 
 export interface DiceSpec {
@@ -152,6 +154,13 @@ export interface ConcentrationEffect {
   remainingRounds: number;
 }
 
+export interface AidEffect {
+  kind: 'aid';
+  sourceId: string;
+  hpBonus: number;
+  remainingRounds: number;
+}
+
 export interface HiddenEffect {
   kind: 'hidden';
   sourceId?: string;
@@ -187,6 +196,9 @@ export interface RestrainedEffect {
   kind: 'restrained_by';
   sourceId: string;
   escapeDc: number;
+  saveAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+  saveEnds?: boolean;
+  remainingRounds?: number;
 }
 
 export interface BlindedEffect {
@@ -220,6 +232,12 @@ export interface VexEffect {
   expiresAtRound: number;
 }
 
+export interface HaltedEffect {
+  kind: 'halted';
+  sourceId: string;
+  expiresAtTurnEndOf: string;
+}
+
 export type TemporaryEffect =
   | SapEffect
   | SlowEffect
@@ -227,6 +245,7 @@ export type TemporaryEffect =
   | PoisonedEffect
   | BlessedEffect
   | ConcentrationEffect
+  | AidEffect
   | HiddenEffect
   | DodgingEffect
   | ShieldEffect
@@ -237,7 +256,8 @@ export type TemporaryEffect =
   | RageEffect
   | RecklessAttackEffect
   | SwallowedEffect
-  | VexEffect;
+  | VexEffect
+  | HaltedEffect;
 
 export interface UnitState {
   id: string;

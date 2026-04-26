@@ -337,7 +337,7 @@ Current implementation snapshot:
 - Fighter is live through level 5 as a Battle Master great-weapon striker with Great Weapon Master, Extra Attack, and Tactical Shift
 - Ranged Rogue is live through level 5 as an Assassin; melee Rogue, Barbarian, and Monk are live through level 2
 - Wizard is live at level 1 as a narrow combat-only spellcasting slice
-- Paladin is live at level 2 as a plate-and-shield support tank with Lay on Hands, Bless, Cure Wounds, concentration support, and Divine Smite
+- Paladin is live at level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, concentration support, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
 
 ## Backend Authority Status
 

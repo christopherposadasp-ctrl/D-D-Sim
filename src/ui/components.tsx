@@ -1075,7 +1075,11 @@ export function UnitStatePanel(props: { orderedUnits: UnitState[] }) {
                         unit.resources.superiorityDice > 0 ? `Superiority Dice ${unit.resources.superiorityDice}` : null,
                         unit.resources.focusPoints > 0 ? `Focus ${unit.resources.focusPoints}` : null,
                         unit.resources.spellSlotsLevel1 > 0 ? `1st-level Slots ${unit.resources.spellSlotsLevel1}` : null,
+                        unit.resources.spellSlotsLevel2 > 0 ? `2nd-level Slots ${unit.resources.spellSlotsLevel2}` : null,
                         unit.resources.layOnHandsPoints > 0 ? `Lay on Hands ${unit.resources.layOnHandsPoints}` : null,
+                        unit.resources.channelDivinityUses > 0
+                          ? `Channel Divinity ${unit.resources.channelDivinityUses}`
+                          : null,
                         unit.resources.uncannyMetabolismUses > 0
                           ? `Uncanny Metabolism ${unit.resources.uncannyMetabolismUses}`
                           : null
