@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("check-fast", "party-validation", "pc-tuning-sample", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "barbarian-audit-quick", "barbarian-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability", "pass3-clarity")]
+    [ValidateSet("check-fast", "daily-housekeeping", "party-validation", "pc-tuning-sample", "audit-quick", "audit-full", "audit-health", "fighter-audit-quick", "fighter-audit-full", "barbarian-audit-quick", "barbarian-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability", "pass3-clarity")]
     [string]$Task,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -96,6 +96,9 @@ try {
         "check-fast" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "ruff", "check", "backend", "tests", "scripts"))
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "pytest", "-q", "-m", "not slow", "tests\\golden", "tests\\rules", "tests\\integration"))
+        }
+        "daily-housekeeping" {
+            Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_daily_housekeeping.py") + $taskArgsOrEmpty))
         }
         "party-validation" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand (@(".\scripts\run_party_validation.py") + $taskArgsOrEmpty))

@@ -109,13 +109,20 @@ Use the PowerShell task runner for the standard checks:
 
 ```powershell
 .\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 daily-housekeeping
 .\scripts\dev.ps1 party-validation
 .\scripts\dev.ps1 pc-tuning-sample
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
+.\scripts\dev.ps1 fighter-audit-quick
+.\scripts\dev.ps1 fighter-audit-full
+.\scripts\dev.ps1 barbarian-audit-quick
+.\scripts\dev.ps1 barbarian-audit-full
 .\scripts\dev.ps1 rogue-audit-quick
+.\scripts\dev.ps1 rogue-audit-full
 .\scripts\dev.ps1 class-audit-slices
+.\scripts\dev.ps1 behavior-diagnostics
 .\scripts\dev.ps1 nightly-audit
 .\scripts\dev.ps1 pass2-stability
 .\scripts\dev.ps1 pass3-clarity
@@ -124,13 +131,20 @@ Use the PowerShell task runner for the standard checks:
 These map to:
 
 - `check-fast`: `ruff` plus the non-slow backend `pytest` suite
+- `daily-housekeeping`: conservative repo status, doc-drift, and safe commit recommendation report with no automatic staging or commits
 - `party-validation`: focused current-party validation for `martial_mixed_party` against `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`
 - `pc-tuning-sample`: event-level Paladin tuning sample for current-party `F2` across the standard validation scenarios
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile
 - `audit-health`: the code-health and benchmark audit
+- `fighter-audit-quick`: the dedicated Fighter audit quick profile
+- `fighter-audit-full`: the dedicated Fighter audit full profile
+- `barbarian-audit-quick`: the dedicated Barbarian audit quick profile
+- `barbarian-audit-full`: the dedicated Barbarian audit full profile
 - `rogue-audit-quick`: the dedicated level 2 ranged Rogue audit
+- `rogue-audit-full`: the dedicated Rogue audit full profile
 - `class-audit-slices`: timeout-safe segmented Fighter/Barbarian audit slices
+- `behavior-diagnostics`: smart-vs-dumb behavior investigation helper
 - `nightly-audit`: the nightly layered audit protocol
 - `pass2-stability`: the deterministic replay/batch and async stability gate
 - `pass3-clarity`: the clarity, docs, report, and audit-maintainability gate
@@ -177,6 +191,12 @@ Run focused party validation directly:
 
 ```powershell
 py -3.13 .\scripts\run_party_validation.py
+```
+
+Run conservative daily housekeeping directly:
+
+```powershell
+py -3.13 .\scripts\run_daily_housekeeping.py
 ```
 
 Run the focused Paladin PC tuning sample directly:

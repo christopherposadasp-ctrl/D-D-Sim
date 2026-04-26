@@ -15,7 +15,9 @@ Run these from the repo root through the PowerShell wrapper:
 
 ```powershell
 .\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 daily-housekeeping
 .\scripts\dev.ps1 party-validation
+.\scripts\dev.ps1 pc-tuning-sample
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
@@ -35,7 +37,9 @@ Run these from the repo root through the PowerShell wrapper:
 Direct equivalents:
 
 - `check-fast`: `py -3.13 -m ruff check backend tests scripts` and `py -3.13 -m pytest -q -m "not slow" tests\golden tests\rules tests\integration`
+- `daily-housekeeping`: `py -3.13 .\scripts\run_daily_housekeeping.py`
 - `party-validation`: `py -3.13 .\scripts\run_party_validation.py`
+- `pc-tuning-sample`: `py -3.13 .\scripts\run_pc_tuning_sample.py`
 - `audit-quick`: `py -3.13 .\scripts\run_scenario_audit.py`
 - `audit-full`: `py -3.13 .\scripts\run_scenario_audit.py --full`
 - `audit-health`: `py -3.13 .\scripts\run_code_health_audit.py --write-report`
@@ -53,6 +57,7 @@ Direct equivalents:
 
 ## Canonical Reports
 
+- Daily housekeeping: `reports/housekeeping/daily_housekeeping_latest.json` and `reports/housekeeping/daily_housekeeping_latest.md`
 - Focused party validation: `reports/party_validation/party_validation_latest.json` and `reports/party_validation/party_validation_latest.md`
 - Pass 1 readiness: `reports/pass1/pass1_readiness_2026-04-23.md`
 - Scenario audit: `reports/scenario_audit_latest.json`
@@ -79,6 +84,14 @@ For normal class, AI, and focused content work, run:
 ```
 
 The party-validation command uses the current `martial_mixed_party` and the focused scenario battery: `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`. It uses default parallel batch execution and writes the focused validation reports listed above.
+
+For daily admin review, run:
+
+```powershell
+.\scripts\dev.ps1 daily-housekeeping
+```
+
+This is report-only. It checks worktree state and doc drift, then recommends exact files and a commit message only when the changes are docs/admin/test-only and safe to propose.
 
 Run the broader audit commands when changing shared combat mechanics, expanding the scenario roster, or preparing a major checkpoint.
 
