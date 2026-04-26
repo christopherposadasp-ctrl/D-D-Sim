@@ -39,6 +39,7 @@ from backend.engine.models.state import (
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
+    apply_heroism_start_of_turn,
     attempt_hide,
     attempt_lay_on_hands,
     attempt_natures_wrath,
@@ -63,6 +64,9 @@ from backend.engine.rules.combat_rules import (
     resolve_bless,
     resolve_cast_spell,
     resolve_death_save,
+    resolve_multi_target_save_spell,
+    resolve_single_target_save_spell,
+    resolve_ray_of_sickness_poison_save,
     resolve_poisoned_end_of_turn_save,
     resolve_restrained_end_of_turn_save,
 )
@@ -1021,10 +1025,14 @@ def build_ongoing_damage_event(
 
 def apply_start_of_turn_ongoing_effects(state: EncounterState, actor_id: str) -> list[CombatEvent]:
     actor = state.units[actor_id]
-    if actor.combat_role != "giant_toad":
-        return []
-
     events: list[CombatEvent] = []
+    heroism_event = apply_heroism_start_of_turn(state, actor_id)
+    if heroism_event:
+        events.append(heroism_event)
+
+    if actor.combat_role != "giant_toad":
+        return events
+
     for swallowed_unit in get_units_swallowed_by(state, actor_id):
         if swallowed_unit.conditions.dead:
             continue
@@ -1681,6 +1689,47 @@ def resolve_cast_spell_action(
             target_ids = [action["target_id"]]
         return [resolve_aid(state, actor_id, [str(target_id) for target_id in target_ids])]
 
+    if spell.targeting_mode == "single_target_save":
+        return resolve_single_target_save_spell(
+            state,
+            actor_id,
+            action["target_id"],
+            action["spell_id"],
+            overrides,
+        )
+
+    if spell.targeting_mode == "multi_target_save":
+        target_ids = action.get("target_ids")
+        if not isinstance(target_ids, list):
+            target_ids = [action["target_id"]]
+        return resolve_multi_target_save_spell(
+            state,
+            actor_id,
+            [str(target_id) for target_id in target_ids],
+            action["spell_id"],
+            overrides,
+        )
+
+    if spell.on_hit_effect_kind == "poisoned_save":
+        spell_event = resolve_cast_spell(
+            state,
+            actor_id,
+            action["spell_id"],
+            action["target_id"],
+            overrides,
+        )
+        spell_events = build_attack_reaction_pre_events(state, spell_event) if spell_event.event_type == "attack" else []
+        if spell_event.event_type == "attack":
+            spell_events.extend(build_attack_reaction_phase_events(state, spell_event))
+        spell_events.append(spell_event)
+        if spell_event.event_type != "attack" or not bool(spell_event.resolved_totals.get("hit")):
+            return spell_events
+        poison_save_event = resolve_ray_of_sickness_poison_save(state, actor_id, spell_event, overrides)
+        if poison_save_event:
+            spell_events.append(poison_save_event)
+        spell_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, spell_event))
+        return spell_events
+
     spell_event = resolve_cast_spell(
         state,
         actor_id,
@@ -2135,6 +2184,11 @@ def resolve_bonus_action_events(
 
     if bonus_action["kind"] in {"bonus_unarmed_strike", "flurry_of_blows"}:
         return resolve_bonus_attack_action(state, actor_id, bonus_action)
+    if bonus_action["kind"] == "cast_spell":
+        spell = get_spell_definition(bonus_action["spell_id"])
+        if spell.timing != "bonus_action":
+            return [create_skip_event(state, actor_id, f"{spell.display_name} is not a bonus action spell.")]
+        return resolve_cast_spell_action(state, actor_id, bonus_action)
 
     bonus_event = resolve_bonus_action(state, actor_id, bonus_action)
     return [bonus_event] if bonus_event else []

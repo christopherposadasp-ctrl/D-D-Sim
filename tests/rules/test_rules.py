@@ -20,6 +20,7 @@ from backend.engine.combat.engine import (
     resolve_action_surge,
     resolve_attack_action,
     resolve_bonus_action,
+    resolve_bonus_action_events,
     resolve_bonus_attack_action,
     resolve_cast_spell_action,
     run_batch_parallel,
@@ -32,11 +33,13 @@ from backend.engine.models.state import (
     AidEffect,
     DamageCandidate,
     DamageComponentResult,
+    DivineFavorEffect,
     EncounterConfig,
     BlessedEffect,
     ConcentrationEffect,
     GrappledEffect,
     GridPosition,
+    HeroismEffect,
     HiddenEffect,
     NoReactionsEffect,
     PoisonedEffect,
@@ -52,6 +55,8 @@ from backend.engine.rules.combat_rules import (
     ResolveSavingThrowArgs,
     SavingThrowOverrides,
     apply_damage,
+    apply_healing_to_unit,
+    apply_heroism_start_of_turn,
     apply_great_weapon_fighting,
     attempt_hide,
     attempt_lay_on_hands,
@@ -1121,6 +1126,312 @@ def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert "No level 1 spell slots remain" in spell_events[0].text_summary
 
 
+def test_chromatic_orb_hits_with_selected_damage_type_and_spends_slot() -> None:
+    spell = get_spell_definition("chromatic_orb")
+    encounter = create_encounter(build_wizard_config("wizard-chromatic-orb"))
+    prepare_chromatic_orb_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chromatic_orb", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3, 4, 5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert spell.level == 1
+    assert spell.school == "evocation"
+    assert spell.range_feet == 90
+    assert spell.damage_dice[0].count == 3
+    assert spell.damage_dice[0].sides == 8
+    assert spell.selectable_damage_types == ("acid", "cold", "fire", "lightning", "poison", "thunder")
+    assert attack_event.resolved_totals["spellId"] == "chromatic_orb"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["selectedDamageType"] == "acid"
+    assert attack_event.resolved_totals["selectableDamageTypes"] == list(spell.selectable_damage_types)
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert attack_event.raw_rolls["attackRolls"] == [15]
+    assert attack_event.damage_details.damage_components[0].raw_rolls == [3, 4, 5]
+    assert attack_event.damage_details.damage_components[0].damage_type == "acid"
+    assert attack_event.damage_details.total_damage == 12
+    assert "Chromatic Orb" in attack_event.text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_chromatic_orb_selects_vulnerable_damage_type_when_available() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chromatic-orb-vulnerable"))
+    prepare_chromatic_orb_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    encounter.units["E1"].damage_vulnerabilities = ("fire",)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chromatic_orb", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3, 4, 5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["selectedDamageType"] == "fire"
+    assert attack_event.damage_details.damage_components[0].damage_type == "fire"
+    assert attack_event.damage_details.total_damage == 12
+    assert attack_event.damage_details.amplified_damage == 12
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+
+
+def test_chromatic_orb_miss_spends_slot_without_damage() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chromatic-orb-miss"))
+    prepare_chromatic_orb_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    hp_before = encounter.units["E1"].current_hp
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chromatic_orb", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[1], damage_rolls=[3, 4, 5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert attack_event.resolved_totals["selectedDamageType"] == "acid"
+    assert attack_event.damage_details.total_damage == 0
+    assert attack_event.damage_details.damage_components == []
+    assert encounter.units["E1"].current_hp == hp_before
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_chromatic_orb_requires_prepared_spell_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chromatic-orb-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chromatic_orb", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3, 4, 5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Chromatic Orb: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_chromatic_orb_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chromatic-orb-empty"))
+    prepare_chromatic_orb_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chromatic_orb", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3, 4, 5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 0
+
+
+def test_chromatic_orb_out_of_range_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chromatic-orb-range"))
+    prepare_chromatic_orb_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["E1"].position = GridPosition(x=19, y=0)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chromatic_orb", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3, 4, 5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Chromatic Orb: is not in range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_ray_of_sickness_hits_for_poison_damage_failed_save_poisons_and_spends_slot() -> None:
+    spell = get_spell_definition("ray_of_sickness")
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-sickness"))
+    prepare_ray_of_sickness_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    encounter.units["E1"].max_hp = 20
+    encounter.units["E1"].current_hp = 20
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_sickness", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2, 3], save_rolls=[1]),
+    )
+    assert [event.event_type for event in spell_events] == ["attack", "saving_throw"]
+    attack_event, save_event = spell_events
+
+    assert spell.level == 1
+    assert spell.school == "necromancy"
+    assert spell.range_feet == 60
+    assert spell.damage_dice[0].count == 2
+    assert spell.damage_dice[0].sides == 8
+    assert spell.damage_type == "poison"
+    assert spell.save_ability == "con"
+    assert attack_event.resolved_totals["spellId"] == "ray_of_sickness"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert attack_event.raw_rolls["attackRolls"] == [15]
+    assert attack_event.damage_details.total_damage == 5
+    assert attack_event.damage_details.damage_components[0].damage_type == "poison"
+    assert "Ray of Sickness" in attack_event.text_summary
+    assert save_event.resolved_totals["spellId"] == "ray_of_sickness"
+    assert save_event.resolved_totals["ability"] == "con"
+    assert save_event.resolved_totals["success"] is False
+    assert save_event.raw_rolls["savingThrowRolls"] == [1]
+    assert save_event.resolved_totals["poisonedApplied"] is True
+    assert save_event.resolved_totals["poisonedExpiresAtTurnEndOf"] == "F1"
+    assert save_event.resolved_totals["poisonedExpiresAtRound"] == encounter.round + 1
+    assert save_event.resolved_totals["poisonedDurationRounds"] == 1
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+    assert any(effect.kind == "poisoned" for effect in encounter.units["E1"].temporary_effects)
+
+    assert expire_turn_end_effects(encounter, "F1") == []
+    encounter.round += 1
+    expire_events = expire_turn_end_effects(encounter, "F1")
+
+    assert any(event.event_type == "phase_change" for event in expire_events)
+    assert all(effect.kind != "poisoned" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_ray_of_sickness_successful_con_save_deals_damage_without_poisoning() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-sickness-save"))
+    prepare_ray_of_sickness_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    encounter.units["E1"].max_hp = 20
+    encounter.units["E1"].current_hp = 20
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_sickness", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2, 3], save_rolls=[20]),
+    )
+    assert [event.event_type for event in spell_events] == ["attack", "saving_throw"]
+    attack_event, save_event = spell_events
+
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.damage_details.total_damage == 5
+    assert save_event.resolved_totals["spellId"] == "ray_of_sickness"
+    assert save_event.resolved_totals["success"] is True
+    assert save_event.resolved_totals["poisonedApplied"] is False
+    assert save_event.resolved_totals["poisonedSkipReason"] == "save_succeeded"
+    assert all(effect.kind != "poisoned" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_ray_of_sickness_miss_spends_slot_without_damage_or_poison_save() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-sickness-miss"))
+    prepare_ray_of_sickness_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    hp_before = encounter.units["E1"].current_hp
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_sickness", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[1], damage_rolls=[8, 8], save_rolls=[1]),
+    )
+    assert [event.event_type for event in spell_events] == ["attack"]
+    attack_event = spell_events[0]
+
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "savingThrowRolls" not in attack_event.raw_rolls
+    assert "poisonedApplied" not in attack_event.resolved_totals
+    assert attack_event.damage_details.total_damage == 0
+    assert encounter.units["E1"].current_hp == hp_before
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_ray_of_sickness_poison_immune_target_takes_hit_damage_without_poison_save() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-sickness-immune"))
+    prepare_ray_of_sickness_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    encounter.units["E1"].condition_immunities = ("poisoned",)
+    encounter.units["E1"].max_hp = 20
+    encounter.units["E1"].current_hp = 20
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_sickness", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2, 3], save_rolls=[1]),
+    )
+
+    assert [event.event_type for event in spell_events] == ["attack"]
+    assert spell_events[0].damage_details.total_damage == 5
+    assert all(effect.kind != "poisoned" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_ray_of_sickness_requires_prepared_spell_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-sickness-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_sickness", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2, 3], save_rolls=[1]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Ray of Sickness: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_ray_of_sickness_out_of_range_does_not_spend_slot_or_roll_save() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-sickness-range"))
+    prepare_ray_of_sickness_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["E1"].position = GridPosition(x=13, y=0)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_sickness", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[2, 3], save_rolls=[1]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Ray of Sickness: is not in range" in spell_events[0].text_summary
+    assert spell_events[0].raw_rolls == {}
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
 def test_mage_armor_raises_ac_spends_slot_and_logs_event() -> None:
     encounter = create_encounter(build_wizard_config("wizard-mage-armor"))
 
@@ -1183,6 +1494,41 @@ def test_mage_armor_is_self_only_and_does_not_spend_slot_on_invalid_target() -> 
 def prepare_false_life_test_wizard(encounter) -> None:
     if "false_life" not in encounter.units["F1"].prepared_combat_spell_ids:
         encounter.units["F1"].prepared_combat_spell_ids.append("false_life")
+
+
+def prepare_longstrider_test_wizard(encounter) -> None:
+    if "longstrider" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("longstrider")
+
+
+def prepare_ray_of_frost_test_wizard(encounter) -> None:
+    if "ray_of_frost" not in encounter.units["F1"].combat_cantrip_ids:
+        encounter.units["F1"].combat_cantrip_ids.append("ray_of_frost")
+
+
+def prepare_chill_touch_test_wizard(encounter) -> None:
+    if "chill_touch" not in encounter.units["F1"].combat_cantrip_ids:
+        encounter.units["F1"].combat_cantrip_ids.append("chill_touch")
+
+
+def prepare_poison_spray_test_wizard(encounter) -> None:
+    if "poison_spray" not in encounter.units["F1"].combat_cantrip_ids:
+        encounter.units["F1"].combat_cantrip_ids.append("poison_spray")
+
+
+def prepare_acid_splash_test_wizard(encounter) -> None:
+    if "acid_splash" not in encounter.units["F1"].combat_cantrip_ids:
+        encounter.units["F1"].combat_cantrip_ids.append("acid_splash")
+
+
+def prepare_chromatic_orb_test_wizard(encounter) -> None:
+    if "chromatic_orb" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("chromatic_orb")
+
+
+def prepare_ray_of_sickness_test_wizard(encounter) -> None:
+    if "ray_of_sickness" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("ray_of_sickness")
 
 
 def test_false_life_grants_temporary_hp_spends_slot_and_logs_event() -> None:
@@ -1274,6 +1620,139 @@ def test_false_life_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert encounter.units["F1"].temporary_hit_points == 0
 
 
+def test_longstrider_increases_speed_spends_slot_and_logs_event() -> None:
+    spell = get_spell_definition("longstrider")
+    encounter = create_encounter(build_wizard_config("wizard-longstrider"))
+    prepare_longstrider_test_wizard(encounter)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "longstrider", "target_id": "F1"},
+    )
+
+    assert spell.level == 1
+    assert spell.school == "transmutation"
+    assert spell.range_feet == 5
+    assert spell.speed_bonus == 10
+    assert len(spell_events) == 1
+    longstrider_event = spell_events[0]
+    assert longstrider_event.event_type == "phase_change"
+    assert longstrider_event.resolved_totals["spellId"] == "longstrider"
+    assert longstrider_event.resolved_totals["spellLevel"] == 1
+    assert longstrider_event.resolved_totals["speedBonus"] == 10
+    assert longstrider_event.resolved_totals["previousSpeedBonus"] == 0
+    assert longstrider_event.resolved_totals["newSpeedBonus"] == 10
+    assert longstrider_event.resolved_totals["previousEffectiveSpeed"] == 30
+    assert longstrider_event.resolved_totals["newEffectiveSpeed"] == 40
+    assert longstrider_event.resolved_totals["speedChanged"] is True
+    assert longstrider_event.resolved_totals["durationRounds"] == 600
+    assert longstrider_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "Longstrider" in longstrider_event.text_summary
+    assert encounter.units["F1"].longstrider_speed_bonus == 10
+    assert encounter.units["F1"].effective_speed == 40
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_longstrider_does_not_stack_existing_bonus() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-longstrider-no-stack"))
+    prepare_longstrider_test_wizard(encounter)
+    encounter.units["F1"].longstrider_speed_bonus = 10
+    encounter.units["F1"].effective_speed = 40
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "longstrider", "target_id": "F1"},
+    )
+    longstrider_event = spell_events[0]
+
+    assert longstrider_event.resolved_totals["previousSpeedBonus"] == 10
+    assert longstrider_event.resolved_totals["newSpeedBonus"] == 10
+    assert longstrider_event.resolved_totals["previousEffectiveSpeed"] == 40
+    assert longstrider_event.resolved_totals["newEffectiveSpeed"] == 40
+    assert longstrider_event.resolved_totals["speedChanged"] is False
+    assert encounter.units["F1"].longstrider_speed_bonus == 10
+    assert encounter.units["F1"].effective_speed == 40
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_longstrider_can_target_touch_range_ally() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-longstrider-ally"))
+    prepare_longstrider_test_wizard(encounter)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=6, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "longstrider", "target_id": "F2"},
+    )
+    longstrider_event = spell_events[0]
+
+    assert longstrider_event.event_type == "phase_change"
+    assert longstrider_event.resolved_totals["spellId"] == "longstrider"
+    assert encounter.units["F2"].longstrider_speed_bonus == 10
+    assert encounter.units["F2"].effective_speed == 40
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_longstrider_rejects_enemy_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-longstrider-enemy"))
+    prepare_longstrider_test_wizard(encounter)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "longstrider", "target_id": "E1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "target is not a living ally" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert encounter.units["E1"].longstrider_speed_bonus == 0
+
+
+def test_longstrider_requires_touch_range_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-longstrider-range"))
+    prepare_longstrider_test_wizard(encounter)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=8, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "longstrider", "target_id": "F2"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "target is not within touch range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert encounter.units["F2"].longstrider_speed_bonus == 0
+
+
+def test_longstrider_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-longstrider-empty"))
+    prepare_longstrider_test_wizard(encounter)
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "longstrider", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+    assert encounter.units["F1"].longstrider_speed_bonus == 0
+    assert encounter.units["F1"].effective_speed == 30
+
+
 def test_shocking_grasp_is_a_melee_spell_attack_and_applies_no_reactions() -> None:
     encounter = create_encounter(build_wizard_config("wizard-shocking-grasp-hit"))
     defeat_other_enemies(encounter, "E1")
@@ -1293,6 +1772,511 @@ def test_shocking_grasp_is_a_melee_spell_attack_and_applies_no_reactions() -> No
     assert attack_event.resolved_totals["hit"] is True
     assert attack_event.damage_details.total_damage == 5
     assert any(effect.kind == "no_reactions" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_ray_of_frost_deals_cold_damage_and_slows_on_hit() -> None:
+    spell = get_spell_definition("ray_of_frost")
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-frost"))
+    prepare_ray_of_frost_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_frost", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert spell.level == 0
+    assert spell.school == "evocation"
+    assert spell.damage_type == "cold"
+    assert spell.range_feet == 60
+    assert spell.speed_penalty == 10
+    assert attack_event.resolved_totals["spellId"] == "ray_of_frost"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["slowApplied"] is True
+    assert attack_event.resolved_totals["speedPenalty"] == 10
+    assert attack_event.resolved_totals["previousEffectiveSpeed"] == 30
+    assert attack_event.resolved_totals["newEffectiveSpeed"] == 20
+    assert attack_event.resolved_totals["slowExpiresAtTurnStartOf"] == "F1"
+    assert attack_event.damage_details.total_damage == 5
+    assert attack_event.damage_details.damage_components[0].damage_type == "cold"
+    assert "Ray of Frost" in attack_event.text_summary
+    assert any(effect.kind == "slow" and effect.source_id == "F1" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["E1"].effective_speed == 20
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_ray_of_frost_miss_does_not_slow_or_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-frost-miss"))
+    prepare_ray_of_frost_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_frost", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[2], damage_rolls=[5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "ray_of_frost"
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals.get("slowApplied") is None
+    assert all(effect.kind != "slow" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["E1"].effective_speed == 30
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_ray_of_frost_requires_known_cantrip_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-frost-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_frost", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Ray of Frost: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "slow" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_ray_of_frost_out_of_range_does_not_slow_or_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-frost-range"))
+    prepare_ray_of_frost_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["E1"].position = GridPosition(x=13, y=0)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_frost", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Ray of Frost: is not in range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "slow" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_ray_of_frost_slow_expires_at_caster_turn_start() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-ray-of-frost-expire"))
+    prepare_ray_of_frost_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "ray_of_frost", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+
+    expire_turn_effects(encounter, "F1")
+
+    assert all(effect.kind != "slow" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["E1"].effective_speed == 30
+
+
+def test_chill_touch_deals_necrotic_damage_blocks_healing_and_spends_no_slot() -> None:
+    spell = get_spell_definition("chill_touch")
+    encounter = create_encounter(build_wizard_config("wizard-chill-touch"))
+    prepare_chill_touch_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chill_touch", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert spell.level == 0
+    assert spell.school == "necromancy"
+    assert spell.damage_type == "necrotic"
+    assert spell.range_feet == 120
+    assert attack_event.resolved_totals["spellId"] == "chill_touch"
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["healingBlockedApplied"] is True
+    assert attack_event.resolved_totals["healingBlockedExpiresAtTurnStartOf"] == "F1"
+    assert attack_event.resolved_totals["undeadAttackDisadvantageModeled"] is False
+    assert attack_event.damage_details.total_damage == 5
+    assert attack_event.damage_details.damage_components[0].damage_type == "necrotic"
+    assert "Chill Touch" in attack_event.text_summary
+    assert any(effect.kind == "healing_blocked" and effect.source_id == "F1" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+    encounter.units["E1"].current_hp = max(1, encounter.units["E1"].current_hp - 2)
+    hp_before_healing = encounter.units["E1"].current_hp
+    healed, condition_deltas = apply_healing_to_unit(encounter.units["E1"], 5)
+
+    assert healed == 0
+    assert encounter.units["E1"].current_hp == hp_before_healing
+    assert condition_deltas == ["E1 cannot regain HP until the start of the caster's next turn."]
+
+
+def test_chill_touch_miss_does_not_block_healing_or_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chill-touch-miss"))
+    prepare_chill_touch_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chill_touch", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[2], damage_rolls=[5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "chill_touch"
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals.get("healingBlockedApplied") is None
+    assert all(effect.kind != "healing_blocked" for effect in encounter.units["E1"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_chill_touch_requires_known_cantrip_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chill-touch-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chill_touch", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Chill Touch: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "healing_blocked" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_chill_touch_out_of_range_does_not_block_healing_or_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chill-touch-range"))
+    prepare_chill_touch_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["E1"].position = GridPosition(x=25, y=0)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chill_touch", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Chill Touch: is not in range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "healing_blocked" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_chill_touch_healing_block_expires_at_caster_turn_start() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-chill-touch-expire"))
+    prepare_chill_touch_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "chill_touch", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[5]),
+    )
+
+    expire_turn_effects(encounter, "F1")
+
+    assert all(effect.kind != "healing_blocked" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_poison_spray_failed_con_save_deals_poison_damage_and_spends_no_slot() -> None:
+    spell = get_spell_definition("poison_spray")
+    encounter = create_encounter(build_wizard_config("wizard-poison-spray"))
+    prepare_poison_spray_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "poison_spray", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[9]),
+    )
+
+    assert spell.level == 0
+    assert spell.school == "necromancy"
+    assert spell.save_ability == "con"
+    assert spell.damage_type == "poison"
+    assert spell.range_feet == 30
+    assert [event.event_type for event in spell_events] == ["saving_throw", "attack"]
+    save_event, damage_event = spell_events
+    assert save_event.resolved_totals["ability"] == "con"
+    assert save_event.resolved_totals["success"] is False
+    assert damage_event.resolved_totals["spellId"] == "poison_spray"
+    assert damage_event.resolved_totals["saveAbility"] == "con"
+    assert damage_event.resolved_totals["saveSucceeded"] is False
+    assert damage_event.resolved_totals["fullDamage"] == 9
+    assert damage_event.resolved_totals["damageApplied"] == 9
+    assert damage_event.raw_rolls["damageRolls"] == [9]
+    assert damage_event.damage_details.total_damage == 9
+    assert damage_event.damage_details.damage_components[0].damage_type == "poison"
+    assert "Poison Spray" in damage_event.text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_poison_spray_successful_con_save_deals_no_damage_and_spends_no_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-poison-spray-save"))
+    prepare_poison_spray_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+    hp_before = encounter.units["E1"].current_hp
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "poison_spray", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[20], damage_rolls=[9]),
+    )
+    save_event, damage_event = spell_events
+
+    assert save_event.resolved_totals["success"] is True
+    assert damage_event.resolved_totals["saveSucceeded"] is True
+    assert damage_event.resolved_totals["fullDamage"] == 9
+    assert damage_event.resolved_totals["damageApplied"] == 0
+    assert damage_event.damage_details.total_damage == 0
+    assert encounter.units["E1"].current_hp == hp_before
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_poison_spray_requires_known_cantrip_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-poison-spray-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "poison_spray", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[9]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Poison Spray: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_poison_spray_out_of_range_does_not_roll_or_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-poison-spray-range"))
+    prepare_poison_spray_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["E1"].position = GridPosition(x=7, y=0)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "poison_spray", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[9]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Poison Spray: is not in range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_acid_splash_failed_dex_save_deals_acid_damage_and_spends_no_slot() -> None:
+    spell = get_spell_definition("acid_splash")
+    encounter = create_encounter(build_wizard_config("wizard-acid-splash"))
+    prepare_acid_splash_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=12, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "acid_splash", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[6]),
+    )
+
+    assert spell.level == 0
+    assert spell.school == "evocation"
+    assert spell.save_ability == "dex"
+    assert spell.damage_type == "acid"
+    assert spell.range_feet == 60
+    assert spell.max_targets == 2
+    assert [event.event_type for event in spell_events] == ["saving_throw", "attack"]
+    save_event, damage_event = spell_events
+    assert save_event.resolved_totals["ability"] == "dex"
+    assert save_event.resolved_totals["success"] is False
+    assert damage_event.resolved_totals["spellId"] == "acid_splash"
+    assert damage_event.resolved_totals["saveAbility"] == "dex"
+    assert damage_event.resolved_totals["saveSucceeded"] is False
+    assert damage_event.resolved_totals["fullDamage"] == 6
+    assert damage_event.resolved_totals["damageApplied"] == 6
+    assert damage_event.resolved_totals["targetCount"] == 1
+    assert damage_event.raw_rolls["damageRolls"] == [6]
+    assert damage_event.damage_details.total_damage == 6
+    assert damage_event.damage_details.damage_components[0].damage_type == "acid"
+    assert "Acid Splash" in damage_event.text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_acid_splash_successful_dex_save_deals_no_damage_and_spends_no_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-acid-splash-save"))
+    prepare_acid_splash_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=12, y=5)
+    hp_before = encounter.units["E1"].current_hp
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "acid_splash", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[20], damage_rolls=[6]),
+    )
+    save_event, damage_event = spell_events
+
+    assert save_event.resolved_totals["success"] is True
+    assert damage_event.resolved_totals["saveSucceeded"] is True
+    assert damage_event.resolved_totals["fullDamage"] == 6
+    assert damage_event.resolved_totals["damageApplied"] == 0
+    assert damage_event.damage_details.total_damage == 0
+    assert encounter.units["E1"].current_hp == hp_before
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_acid_splash_can_target_two_nearby_creatures() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-acid-splash-two-targets"))
+    prepare_acid_splash_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=11, y=5)
+    encounter.units["E2"].position = GridPosition(x=12, y=5)
+    e2_hp_before = encounter.units["E2"].current_hp
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "acid_splash",
+            "target_id": "E1",
+            "target_ids": ["E1", "E2"],
+        },
+        overrides=AttackRollOverrides(save_rolls=[1, 20], damage_rolls=[4]),
+    )
+
+    assert [event.event_type for event in spell_events] == [
+        "phase_change",
+        "saving_throw",
+        "attack",
+        "saving_throw",
+        "attack",
+    ]
+    phase_event = spell_events[0]
+    first_attack = spell_events[2]
+    second_attack = spell_events[4]
+    assert phase_event.resolved_totals["spellId"] == "acid_splash"
+    assert phase_event.resolved_totals["targetCount"] == 2
+    assert first_attack.target_ids == ["E1"]
+    assert first_attack.resolved_totals["damageApplied"] == 4
+    assert first_attack.raw_rolls["damageRolls"] == [4]
+    assert second_attack.target_ids == ["E2"]
+    assert second_attack.resolved_totals["damageApplied"] == 0
+    assert second_attack.raw_rolls["damageRolls"] == [4]
+    assert encounter.units["E2"].current_hp == e2_hp_before
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_acid_splash_rejects_non_nearby_second_target_without_spending_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-acid-splash-spread-targets"))
+    prepare_acid_splash_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=12, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "acid_splash",
+            "target_id": "E1",
+            "target_ids": ["E1", "E2"],
+        },
+        overrides=AttackRollOverrides(save_rolls=[1, 1], damage_rolls=[6]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Acid Splash: targets are not within 5 feet of each other" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_acid_splash_requires_known_cantrip_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-acid-splash-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "acid_splash", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[6]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Acid Splash: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_acid_splash_out_of_range_does_not_roll_or_spend_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-acid-splash-range"))
+    prepare_acid_splash_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["E1"].position = GridPosition(x=13, y=0)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "acid_splash", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[6]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Acid Splash: is not in range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
 
 
 def test_shocking_grasp_prevents_opportunity_attacks_until_target_turn_start() -> None:
@@ -1600,6 +2584,485 @@ def test_bless_concentration_persists_on_success_and_drops_on_failure() -> None:
     assert failure_result.concentration_ended is True
     assert all(effect.kind != "concentration" for effect in failure.units["F1"].temporary_effects)
     assert all(effect.kind != "blessed" for effect in failure.units["F2"].temporary_effects)
+
+
+def prepare_shield_of_faith_test_paladin(encounter) -> None:
+    if "shield_of_faith" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("shield_of_faith")
+
+
+def prepare_divine_favor_test_paladin(encounter) -> None:
+    if "divine_favor" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("divine_favor")
+
+
+def prepare_heroism_test_paladin(encounter) -> None:
+    if "heroism" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("heroism")
+
+
+def test_heroism_applies_concentration_effect_spends_slot_and_grants_start_turn_temp_hp() -> None:
+    spell = get_spell_definition("heroism")
+    encounter = create_encounter(build_paladin_config("paladin-heroism"))
+    prepare_heroism_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F2"},
+    )
+    heroism_event = spell_events[0]
+    start_event = apply_heroism_start_of_turn(encounter, "F2")
+
+    assert spell.level == 1
+    assert spell.school == "enchantment"
+    assert spell.timing == "action"
+    assert spell.range_feet == 5
+    assert spell.concentration is True
+    assert spell.duration_rounds == 10
+    assert heroism_event.event_type == "phase_change"
+    assert heroism_event.resolved_totals["spellId"] == "heroism"
+    assert heroism_event.resolved_totals["spellLevel"] == 1
+    assert heroism_event.resolved_totals["concentration"] is True
+    assert heroism_event.resolved_totals["temporaryHitPointAmount"] == encounter.units["F1"].ability_mods.cha
+    assert heroism_event.resolved_totals["startOfTurnUpkeep"] is True
+    assert heroism_event.resolved_totals["immediateTemporaryHitPointsApplied"] is False
+    assert heroism_event.resolved_totals["frightenedImmunityModeled"] is False
+    assert heroism_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "Heroism" in heroism_event.text_summary
+    assert any(effect.kind == "concentration" and effect.spell_id == "heroism" for effect in encounter.units["F1"].temporary_effects)
+    assert any(isinstance(effect, HeroismEffect) for effect in encounter.units["F2"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+    assert start_event is not None
+    assert start_event.resolved_totals["spellId"] == "heroism"
+    assert start_event.resolved_totals["trigger"] == "turn_start"
+    assert start_event.resolved_totals["sourceId"] == "F1"
+    assert start_event.resolved_totals["temporaryHitPointTotal"] == encounter.units["F1"].ability_mods.cha
+    assert start_event.resolved_totals["temporaryHitPointsGained"] == encounter.units["F1"].ability_mods.cha
+    assert start_event.resolved_totals["newTemporaryHitPoints"] == encounter.units["F1"].ability_mods.cha
+    assert start_event.resolved_totals["frightenedImmunityModeled"] is False
+    assert encounter.units["F2"].temporary_hit_points == encounter.units["F1"].ability_mods.cha
+
+
+def test_heroism_start_turn_upkeep_does_not_replace_higher_temporary_hp() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-no-replace"))
+    prepare_heroism_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F2"].temporary_hit_points = 7
+
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F2"},
+    )
+    start_event = apply_heroism_start_of_turn(encounter, "F2")
+
+    assert start_event is not None
+    assert start_event.resolved_totals["temporaryHitPointsGained"] == 0
+    assert start_event.resolved_totals["previousTemporaryHitPoints"] == 7
+    assert start_event.resolved_totals["newTemporaryHitPoints"] == 7
+    assert encounter.units["F2"].temporary_hit_points == 7
+
+
+def test_heroism_rejects_enemy_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-enemy"))
+    prepare_heroism_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "E1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "target is not a living ally" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "heroism" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_heroism_rejects_out_of_touch_range_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-range"))
+    prepare_heroism_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=7, y=4)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F2"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "target is not within touch range" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "heroism" for effect in encounter.units["F2"].temporary_effects)
+
+
+def test_heroism_requires_prepared_spell_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-unprepared"))
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Heroism: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "heroism" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_heroism_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-empty"))
+    prepare_heroism_test_paladin(encounter)
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+    assert all(effect.kind != "heroism" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_heroism_ends_when_concentration_fails_and_stops_upkeep() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-concentration"))
+    prepare_heroism_test_paladin(encounter)
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F2"},
+    )
+
+    damage_result = apply_damage(
+        encounter,
+        "F1",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[1],
+    )
+
+    assert damage_result.concentration_save_success is False
+    assert damage_result.concentration_ended is True
+    assert all(effect.kind != "concentration" for effect in encounter.units["F1"].temporary_effects)
+    assert all(effect.kind != "heroism" for effect in encounter.units["F2"].temporary_effects)
+    assert apply_heroism_start_of_turn(encounter, "F2") is None
+
+
+def test_shield_of_faith_adds_ac_bonus_spends_slot_and_logs_event() -> None:
+    spell = get_spell_definition("shield_of_faith")
+    encounter = create_encounter(build_paladin_config("paladin-shield-of-faith"))
+    prepare_shield_of_faith_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shield_of_faith", "target_id": "F2"},
+    )
+
+    assert spell.level == 1
+    assert spell.school == "abjuration"
+    assert spell.timing == "bonus_action"
+    assert spell.range_feet == 60
+    assert spell.ac_bonus == 2
+    assert len(spell_events) == 1
+    shield_event = spell_events[0]
+    assert shield_event.event_type == "phase_change"
+    assert shield_event.resolved_totals["spellId"] == "shield_of_faith"
+    assert shield_event.resolved_totals["spellLevel"] == 1
+    assert shield_event.resolved_totals["concentration"] is True
+    assert shield_event.resolved_totals["acBonus"] == 2
+    assert shield_event.resolved_totals["previousShieldOfFaithBonus"] == 0
+    assert shield_event.resolved_totals["newShieldOfFaithBonus"] == 2
+    assert shield_event.resolved_totals["previousEffectiveAc"] == encounter.units["F2"].ac
+    assert shield_event.resolved_totals["newEffectiveAc"] == encounter.units["F2"].ac + 2
+    assert shield_event.resolved_totals["durationRounds"] == 100
+    assert shield_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "Shield of Faith" in shield_event.text_summary
+    assert any(effect.kind == "concentration" and effect.spell_id == "shield_of_faith" for effect in encounter.units["F1"].temporary_effects)
+    assert any(effect.kind == "shield_of_faith" and effect.ac_bonus == 2 for effect in encounter.units["F2"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_shield_of_faith_bonus_affects_attack_target_ac() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-shield-of-faith-ac"))
+    prepare_shield_of_faith_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].position = GridPosition(x=6, y=4)
+    resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shield_of_faith", "target_id": "F2"},
+    )
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F2",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[17], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["targetAc"] == encounter.units["F2"].ac + 2
+    assert attack_event.resolved_totals["shieldAcBonus"] == 2
+    assert attack_event.resolved_totals["hit"] is False
+
+
+def test_shield_of_faith_rejects_enemy_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-shield-of-faith-enemy"))
+    prepare_shield_of_faith_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shield_of_faith", "target_id": "E1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "target is not a living ally" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "shield_of_faith" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_shield_of_faith_rejects_out_of_range_target_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-shield-of-faith-range"))
+    prepare_shield_of_faith_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=0, y=0)
+    encounter.units["F2"].position = GridPosition(x=13, y=0)
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shield_of_faith", "target_id": "F2"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "target is not within 60 feet" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "shield_of_faith" for effect in encounter.units["F2"].temporary_effects)
+
+
+def test_shield_of_faith_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-shield-of-faith-empty"))
+    prepare_shield_of_faith_test_paladin(encounter)
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shield_of_faith", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+    assert all(effect.kind != "shield_of_faith" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_shield_of_faith_ends_when_concentration_fails() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-shield-of-faith-concentration"))
+    prepare_shield_of_faith_test_paladin(encounter)
+    resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shield_of_faith", "target_id": "F2"},
+    )
+
+    damage_result = apply_damage(
+        encounter,
+        "F1",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[1],
+    )
+
+    assert damage_result.concentration_save_success is False
+    assert damage_result.concentration_ended is True
+    assert all(effect.kind != "concentration" for effect in encounter.units["F1"].temporary_effects)
+    assert all(effect.kind != "shield_of_faith" for effect in encounter.units["F2"].temporary_effects)
+
+
+def test_divine_favor_adds_radiant_weapon_damage_spends_slot_and_logs_event() -> None:
+    spell = get_spell_definition("divine_favor")
+    encounter = create_encounter(build_paladin_config("paladin-divine-favor"))
+    prepare_divine_favor_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].current_hp = 30
+    defeat_other_enemies(encounter, "E1")
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "divine_favor", "target_id": "F1"},
+    )
+    favor_event = spell_events[0]
+
+    assert spell.level == 1
+    assert spell.school == "evocation"
+    assert spell.timing == "bonus_action"
+    assert spell.concentration is True
+    assert spell.duration_rounds == 10
+    assert spell.damage_type == "radiant"
+    assert spell.damage_dice[0].count == 1
+    assert spell.damage_dice[0].sides == 4
+    assert favor_event.event_type == "phase_change"
+    assert favor_event.resolved_totals["spellId"] == "divine_favor"
+    assert favor_event.resolved_totals["spellLevel"] == 1
+    assert favor_event.resolved_totals["concentration"] is True
+    assert favor_event.resolved_totals["damageDieCount"] == 1
+    assert favor_event.resolved_totals["damageDieSides"] == 4
+    assert favor_event.resolved_totals["damageType"] == "radiant"
+    assert favor_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
+    assert "Divine Favor" in favor_event.text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+    assert any(effect.kind == "concentration" and effect.spell_id == "divine_favor" for effect in encounter.units["F1"].temporary_effects)
+    assert any(isinstance(effect, DivineFavorEffect) for effect in encounter.units["F1"].temporary_effects)
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[3], divine_favor_damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["divineFavorSpellId"] == "divine_favor"
+    assert attack_event.resolved_totals["divineFavorApplied"] is True
+    assert attack_event.resolved_totals["divineFavorDamage"] == 4
+    assert attack_event.resolved_totals["divineFavorDamageType"] == "radiant"
+    assert attack_event.raw_rolls["divineFavorRolls"] == [4]
+    assert any(component.damage_type == "radiant" and component.total_damage == 4 for component in attack_event.damage_details.damage_components)
+    assert attack_event.resolved_totals.get("divineSmiteApplied") is None
+
+
+def test_divine_favor_does_not_apply_on_missed_weapon_attack() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-divine-favor-miss"))
+    prepare_divine_favor_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    defeat_other_enemies(encounter, "E1")
+    resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "divine_favor", "target_id": "F1"},
+    )
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[1], damage_rolls=[3], divine_favor_damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals.get("divineFavorApplied") is None
+    assert "divineFavorRolls" not in attack_event.raw_rolls
+
+
+def test_divine_favor_is_self_only_and_does_not_spend_slot_on_invalid_target() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-divine-favor-self-only"))
+    prepare_divine_favor_test_paladin(encounter)
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "divine_favor", "target_id": "F2"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "can only target self" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "divine_favor" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_divine_favor_requires_prepared_spell_and_does_not_spend_slot() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-divine-favor-unprepared"))
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "divine_favor", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Divine Favor: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "divine_favor" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_divine_favor_fails_cleanly_when_no_level1_slots_remain() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-divine-favor-empty"))
+    prepare_divine_favor_test_paladin(encounter)
+    encounter.units["F1"].resources.spell_slots_level_1 = 0
+
+    spell_events = resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "divine_favor", "target_id": "F1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 1 spell slots remain" in spell_events[0].text_summary
+    assert all(effect.kind != "divine_favor" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_divine_favor_ends_when_concentration_fails() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-divine-favor-concentration"))
+    prepare_divine_favor_test_paladin(encounter)
+    resolve_bonus_action_events(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "divine_favor", "target_id": "F1"},
+    )
+
+    damage_result = apply_damage(
+        encounter,
+        "F1",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[1],
+    )
+
+    assert damage_result.concentration_save_success is False
+    assert damage_result.concentration_ended is True
+    assert all(effect.kind != "concentration" for effect in encounter.units["F1"].temporary_effects)
+    assert all(effect.kind != "divine_favor" for effect in encounter.units["F1"].temporary_effects)
 
 
 def test_cure_wounds_heals_two_d8_plus_charisma_and_spends_slot() -> None:

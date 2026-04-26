@@ -209,11 +209,19 @@ class NoReactionsEffect(CamelModel):
     expires_at_turn_start_of: str
 
 
+class HealingBlockedEffect(CamelModel):
+    kind: Literal["healing_blocked"]
+    source_id: str
+    expires_at_turn_start_of: str
+
+
 class PoisonedEffect(CamelModel):
     kind: Literal["poisoned"]
     source_id: str
     save_dc: int
     remaining_rounds: int
+    expires_at_turn_end_of: str | None = None
+    expires_at_round: int | None = None
 
 
 class BlessedEffect(CamelModel):
@@ -252,6 +260,27 @@ class ShieldEffect(CamelModel):
     source_id: str
     expires_at_turn_start_of: str
     ac_bonus: int
+
+
+class ShieldOfFaithEffect(CamelModel):
+    kind: Literal["shield_of_faith"]
+    source_id: str
+    ac_bonus: int
+
+
+class HeroismEffect(CamelModel):
+    kind: Literal["heroism"]
+    source_id: str
+    temporary_hit_points: int
+    frightened_immunity_modeled: bool = False
+
+
+class DivineFavorEffect(CamelModel):
+    kind: Literal["divine_favor"]
+    source_id: str
+    damage_die_count: int
+    damage_die_sides: int
+    damage_type: str
 
 
 class InvisibleEffect(CamelModel):
@@ -324,6 +353,7 @@ TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
     | NoReactionsEffect
+    | HealingBlockedEffect
     | PoisonedEffect
     | BlessedEffect
     | ConcentrationEffect
@@ -331,6 +361,9 @@ TemporaryEffect: TypeAlias = (
     | HiddenEffect
     | DodgingEffect
     | ShieldEffect
+    | ShieldOfFaithEffect
+    | HeroismEffect
+    | DivineFavorEffect
     | InvisibleEffect
     | GrappledEffect
     | RestrainedEffect
@@ -377,6 +410,7 @@ class UnitState(CamelModel):
     damage_vulnerabilities: tuple[str, ...] = Field(default=(), exclude=True)
     condition_immunities: tuple[str, ...] = Field(default=(), exclude=True)
     creature_tags: tuple[str, ...] = Field(default=(), exclude=True)
+    longstrider_speed_bonus: int = Field(default=0, exclude=True)
     # These player-build fields are runtime-only for now. They are kept out of
     # the live API payload until the UI is ready to select classes/loadouts
     # directly, but the engine can already use them internally.
