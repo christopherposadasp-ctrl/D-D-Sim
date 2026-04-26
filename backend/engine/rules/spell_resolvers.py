@@ -22,61 +22,54 @@ from backend.engine.models.state import (
     WeaponProfile,
     WeaponRange,
 )
-_COMBAT_RULE_IMPORT_NAMES = (
-    "AttackRollOverrides",
-    "DamageApplicationResult",
-    "ResolveSavingThrowArgs",
-    "SavingThrowOverrides",
-    "apply_damage",
-    "apply_healing_to_unit",
-    "attach_damage_result_event_fields",
-    "build_final_damage_components",
-    "build_skip_event",
-    "can_trigger_attack_reaction",
-    "choose_burning_hands_targeting",
-    "choose_redirect_attack_ally",
-    "consume_harried_effect",
-    "consume_sap_effects",
-    "consume_vex_effect",
-    "end_concentration",
-    "end_hidden",
-    "event_base",
-    "get_ability_modifier",
-    "get_active_divine_favor_effect",
-    "get_active_heroism_effect",
-    "get_attack_mode",
-    "get_saving_throw_mode",
-    "get_shield_ac_bonus",
-    "get_shield_of_faith_ac_bonus",
-    "get_unit_spell_save_dc",
-    "has_harried_effect",
-    "has_vex_effect",
-    "maybe_apply_shield_reaction",
-    "pull_die",
-    "recalculate_effective_speed_for_unit",
-    "resolve_saving_throw",
-    "resolve_selectable_damage_weapon",
-    "roll_bless_bonus",
-    "roll_damage_candidate",
-    "unit_has_shield_effect",
-    "unit_is_poisoned",
-    "units_are_touch_reachable",
-    "units_are_within_spell_range",
+from backend.engine.rules.combat_rules import (
+    apply_damage,
+    can_trigger_attack_reaction,
+    choose_burning_hands_targeting,
+    choose_redirect_attack_ally,
+    consume_harried_effect,
+    consume_sap_effects,
+    consume_vex_effect,
+    end_concentration,
+    end_hidden,
+    get_active_divine_favor_effect,
+    get_active_heroism_effect,
+    get_attack_mode,
+    get_saving_throw_mode,
+    get_shield_ac_bonus,
+    get_shield_of_faith_ac_bonus,
+    has_harried_effect,
+    has_vex_effect,
+    maybe_apply_shield_reaction,
+    pull_die,
+    recalculate_effective_speed_for_unit,
+    resolve_saving_throw,
+    resolve_selectable_damage_weapon,
+    roll_bless_bonus,
+    roll_damage_candidate,
+    unit_has_shield_effect,
+    unit_is_poisoned,
+    units_are_touch_reachable,
+    units_are_within_spell_range,
 )
-_COMBAT_RULES_IMPORTS_READY = False
-
-
-def _ensure_combat_rules_imports() -> None:
-    global _COMBAT_RULES_IMPORTS_READY
-    if _COMBAT_RULES_IMPORTS_READY:
-        return
-
-    from backend.engine.rules import combat_rules
-
-    globals().update({name: getattr(combat_rules, name) for name in _COMBAT_RULE_IMPORT_NAMES})
-    _COMBAT_RULES_IMPORTS_READY = True
-
-
+from backend.engine.rules.combat_support import (
+    AttackRollOverrides,
+    DamageApplicationResult,
+    ResolveSavingThrowArgs,
+    SavingThrowOverrides,
+    apply_healing_to_unit,
+    attach_damage_result_event_fields,
+    build_final_damage_components,
+    build_skip_event,
+    event_base,
+    get_ability_modifier,
+    get_remaining_spell_slots,
+    get_spell_save_dc,
+    get_spellcasting_ability,
+    resolve_spell_ability,
+    spend_spell_slot,
+    unit_has_combat_spell,
+)
 from backend.engine.rules.spatial import (
     get_attack_context,
     get_min_chebyshev_distance_between_footprints,
@@ -84,27 +77,7 @@ from backend.engine.rules.spatial import (
 )
 
 
-def unit_has_combat_spell(unit: UnitState, spell_id: str) -> bool:
-    _ensure_combat_rules_imports()
-    return spell_id in unit.combat_cantrip_ids or spell_id in unit.prepared_combat_spell_ids
-
-
-def get_spellcasting_ability(unit: UnitState) -> str:
-    _ensure_combat_rules_imports()
-    if unit.class_id == "paladin":
-        return "cha"
-    return "int"
-
-
-def resolve_spell_ability(unit: UnitState, ability: str | None) -> str:
-    _ensure_combat_rules_imports()
-    if ability == "spellcasting" or ability is None:
-        return get_spellcasting_ability(unit)
-    return ability
-
-
 def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProfile:
-    _ensure_combat_rules_imports()
     spell = get_spell_definition(spell_id)
     spell_attack_bonus = get_proficiency_bonus(attacker.level or 1) + get_ability_modifier(
         attacker,
@@ -126,13 +99,7 @@ def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProf
     )
 
 
-def get_spell_save_dc(caster: UnitState, spell_id: str) -> int:
-    _ensure_combat_rules_imports()
-    spell = get_spell_definition(spell_id)
-    return get_unit_spell_save_dc(caster, resolve_spell_ability(caster, spell.attack_ability))
-
 def build_spell_skip_event(state: EncounterState, actor_id: str, spell_id: str, reason: str) -> CombatEvent:
-    _ensure_combat_rules_imports()
     spell = get_spell_definition(spell_id)
     return build_skip_event(state, actor_id, f"{spell.display_name}: {reason}")
 
@@ -144,7 +111,6 @@ def resolve_ranged_spell_attack(
     spell_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> CombatEvent:
-    _ensure_combat_rules_imports()
     attacker = state.units[attacker_id]
     target = state.units[target_id]
     spell = get_spell_definition(spell_id)
@@ -469,7 +435,6 @@ def resolve_ray_of_sickness_poison_save(
     attack_event: CombatEvent,
     overrides: AttackRollOverrides | None = None,
 ) -> CombatEvent | None:
-    _ensure_combat_rules_imports()
     if attack_event.event_type != "attack" or not bool(attack_event.resolved_totals.get("hit")):
         return None
     if not attack_event.target_ids:
@@ -536,7 +501,6 @@ def resolve_magic_missile(
     target_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> CombatEvent:
-    _ensure_combat_rules_imports()
     attacker = state.units[attacker_id]
     spell = get_spell_definition("magic_missile")
     weapon = build_spell_attack_profile(attacker, "magic_missile")
@@ -647,7 +611,6 @@ def build_burning_hands_damage_component(
     applied_damage: int,
     damage_type: str,
 ) -> list[DamageComponentResult]:
-    _ensure_combat_rules_imports()
     return [
         DamageComponentResult(
             damage_type=damage_type,
@@ -665,7 +628,6 @@ def build_spell_save_damage_component(
     applied_damage: int,
     damage_type: str,
 ) -> list[DamageComponentResult]:
-    _ensure_combat_rules_imports()
     return [
         DamageComponentResult(
             damage_type=damage_type,
@@ -679,7 +641,6 @@ def build_spell_save_damage_component(
 
 
 def build_no_damage_result() -> DamageApplicationResult:
-    _ensure_combat_rules_imports()
     return DamageApplicationResult(
         hp_delta=0,
         condition_deltas=[],
@@ -698,12 +659,10 @@ def resolve_single_target_save_spell(
     spell_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
-    _ensure_combat_rules_imports()
     return resolve_multi_target_save_spell(state, attacker_id, [target_id], spell_id, overrides)
 
 
 def targets_are_within_spell_cluster(state: EncounterState, target_ids: list[str], range_feet: int) -> bool:
-    _ensure_combat_rules_imports()
     if len(target_ids) <= 1:
         return True
 
@@ -735,7 +694,6 @@ def resolve_multi_target_save_spell(
     spell_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
-    _ensure_combat_rules_imports()
     attacker = state.units[attacker_id]
     spell = get_spell_definition(spell_id)
     weapon = build_spell_attack_profile(attacker, spell_id)
@@ -908,7 +866,6 @@ def resolve_burning_hands(
     target_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
-    _ensure_combat_rules_imports()
     attacker = state.units[attacker_id]
     spell = get_spell_definition("burning_hands")
 
@@ -1035,26 +992,14 @@ def resolve_burning_hands(
 
 
 def choose_bless_spell_level(actor: UnitState) -> int:
-    _ensure_combat_rules_imports()
     if actor.class_id == "paladin" and (actor.level or 0) >= 5 and actor.resources.spell_slots_level_2 > 0:
         return 2
     return 1
 
 
 def get_bless_max_targets_for_spell_level(spell_level: int) -> int:
-    _ensure_combat_rules_imports()
     spell = get_spell_definition("bless")
     return spell.max_targets + max(0, spell_level - spell.level)
-
-
-def spend_spell_slot(unit: UnitState, spell_level: int) -> bool:
-    _ensure_combat_rules_imports()
-    return unit.resources.spend_pool(f"spell_slots_level_{spell_level}", 1)
-
-
-def get_remaining_spell_slots(unit: UnitState, spell_level: int) -> int:
-    _ensure_combat_rules_imports()
-    return unit.resources.get_pool(f"spell_slots_level_{spell_level}")
 
 
 def get_legal_bless_target_ids(
@@ -1064,7 +1009,6 @@ def get_legal_bless_target_ids(
     *,
     spell_level: int | None = None,
 ) -> list[str]:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     spell = get_spell_definition("bless")
     target_limit = get_bless_max_targets_for_spell_level(spell_level or choose_bless_spell_level(actor))
@@ -1096,7 +1040,6 @@ def resolve_bless(
     *,
     spell_level: int | None = None,
 ) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     spell = get_spell_definition("bless")
     cast_level = spell_level or choose_bless_spell_level(actor)
@@ -1166,7 +1109,6 @@ def resolve_cure_wounds(
     target_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("cure_wounds")
@@ -1217,7 +1159,6 @@ def resolve_cure_wounds(
 
 
 def get_legal_aid_target_ids(state: EncounterState, actor_id: str, target_ids: list[str]) -> list[str]:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     spell = get_spell_definition("aid")
     legal_target_ids: list[str] = []
@@ -1242,12 +1183,10 @@ def get_legal_aid_target_ids(state: EncounterState, actor_id: str, target_ids: l
 
 
 def get_active_aid_bonus(unit: UnitState) -> int:
-    _ensure_combat_rules_imports()
     return max((effect.hp_bonus for effect in unit.temporary_effects if effect.kind == "aid"), default=0)
 
 
 def resolve_aid(state: EncounterState, actor_id: str, target_ids: list[str]) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     spell = get_spell_definition("aid")
 
@@ -1312,7 +1251,6 @@ def resolve_aid(state: EncounterState, actor_id: str, target_ids: list[str]) -> 
 
 
 def resolve_mage_armor(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("mage_armor")
@@ -1367,7 +1305,6 @@ def resolve_false_life(
     target_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("false_life")
@@ -1422,7 +1359,6 @@ def resolve_false_life(
 
 
 def resolve_longstrider(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("longstrider")
@@ -1475,7 +1411,6 @@ def resolve_longstrider(state: EncounterState, actor_id: str, target_id: str) ->
 
 
 def resolve_shield_of_faith(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("shield_of_faith")
@@ -1547,7 +1482,6 @@ def resolve_shield_of_faith(state: EncounterState, actor_id: str, target_id: str
 
 
 def apply_heroism_start_of_turn(state: EncounterState, actor_id: str) -> CombatEvent | None:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     effect = get_active_heroism_effect(state, actor)
     if not effect or actor.conditions.dead:
@@ -1584,7 +1518,6 @@ def apply_heroism_start_of_turn(state: EncounterState, actor_id: str) -> CombatE
 
 
 def resolve_heroism(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("heroism")
@@ -1660,7 +1593,6 @@ def resolve_heroism(state: EncounterState, actor_id: str, target_id: str) -> Com
 
 
 def resolve_divine_favor(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     target = state.units.get(target_id)
     spell = get_spell_definition("divine_favor")
@@ -1739,7 +1671,6 @@ def resolve_cast_spell(
     target_id: str,
     overrides: AttackRollOverrides | None = None,
 ) -> CombatEvent:
-    _ensure_combat_rules_imports()
     actor = state.units[actor_id]
     spell = get_spell_definition(spell_id)
 

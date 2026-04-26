@@ -41,6 +41,8 @@ Class work usually starts in these files:
 - `backend/engine/ai/decision.py`
 - `backend/engine/combat/engine.py`
 - `backend/engine/rules/combat_rules.py`
+- `backend/engine/rules/combat_support.py`
+- `backend/engine/rules/spell_resolvers.py`
 - `backend/engine/rules/spatial.py`
 - `backend/engine/models/state.py`
 - `backend/engine/services/catalog.py`
@@ -72,6 +74,7 @@ Not every class needs all of them. Start with the minimum set and expand only wh
 - Keep action sequencing inside the normal turn executor where possible.
 - Reuse attack-mode, movement-budget, cover, and effect-expiration pipelines instead of bypassing them.
 - Add centralized cleanup helpers when a new effect can break from multiple causes.
+- Put spell-specific runtime behavior in `backend/engine/rules/spell_resolvers.py`; keep generic combat primitives in `combat_rules.py` or shared support helpers in `combat_support.py`.
 
 ## AI Checklist
 

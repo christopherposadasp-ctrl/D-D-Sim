@@ -27,7 +27,6 @@ from backend.engine.models.state import (
     AttackId,
     AttackMode,
     AttackRiderType,
-    AidEffect,
     BlessedEffect,
     CombatEvent,
     ConcentrationEffect,
@@ -38,29 +37,52 @@ from backend.engine.models.state import (
     DodgingEffect,
     EncounterState,
     GrappledEffect,
-    HealingBlockedEffect,
-    HeroismEffect,
     GridPosition,
     HaltedEffect,
     HarriedEffect,
+    HeroismEffect,
     HiddenEffect,
     MasteryType,
     MovementDetails,
-    NoReactionsEffect,
     PoisonedEffect,
     RageEffect,
     RecklessAttackEffect,
     RestrainedEffect,
     SapEffect,
     ShieldEffect,
-    ShieldOfFaithEffect,
     SlowEffect,
     TemporaryEffect,
     UnitState,
     VexEffect,
     WeaponDamageComponent,
     WeaponProfile,
-    WeaponRange,
+)
+from backend.engine.rules.combat_support import (
+    AttackRollOverrides,
+    DamageApplicationResult,
+    ResolveSavingThrowArgs,
+    SavingThrowOverrides,
+    apply_healing_to_unit,
+    attach_damage_result_event_fields,
+    build_final_damage_components,
+    build_skip_event,
+    event_base,
+    get_ability_modifier,
+    get_unit_spell_save_dc,
+    spend_spell_slot,
+    unit_has_combat_spell,
+)
+from backend.engine.rules.combat_support import (
+    get_remaining_spell_slots as get_remaining_spell_slots,
+)
+from backend.engine.rules.combat_support import (
+    get_spell_save_dc as get_spell_save_dc,
+)
+from backend.engine.rules.combat_support import (
+    get_spellcasting_ability as get_spellcasting_ability,
+)
+from backend.engine.rules.combat_support import (
+    resolve_spell_ability as resolve_spell_ability,
 )
 from backend.engine.rules.spatial import (
     build_position_index,
@@ -75,57 +97,6 @@ from backend.engine.rules.spatial import (
 )
 from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 from backend.engine.utils.rng import roll_die
-
-
-class AttackRollOverrides:
-    def __init__(
-        self,
-        *,
-        attack_rolls: list[int] | None = None,
-        damage_rolls: list[int] | None = None,
-        save_rolls: list[int] | None = None,
-        savage_damage_rolls: list[int] | None = None,
-        advantage_damage_rolls: list[int] | None = None,
-        superiority_rolls: list[int] | None = None,
-        smite_damage_rolls: list[int] | None = None,
-        divine_favor_damage_rolls: list[int] | None = None,
-        concentration_rolls: list[int] | None = None,
-    ) -> None:
-        self.attack_rolls = attack_rolls or []
-        self.damage_rolls = damage_rolls or []
-        self.save_rolls = save_rolls or []
-        self.savage_damage_rolls = savage_damage_rolls or []
-        self.advantage_damage_rolls = advantage_damage_rolls or []
-        self.superiority_rolls = superiority_rolls or []
-        self.smite_damage_rolls = smite_damage_rolls or []
-        self.divine_favor_damage_rolls = divine_favor_damage_rolls or []
-        self.concentration_rolls = concentration_rolls or []
-
-
-@dataclass
-class DamageApplicationResult:
-    hp_delta: int
-    condition_deltas: list[str]
-    resisted_damage: int
-    amplified_damage: int
-    temporary_hp_absorbed: int
-    final_damage_to_hp: int
-    final_total_damage: int
-    undead_fortitude_triggered: bool = False
-    undead_fortitude_success: bool | None = None
-    undead_fortitude_dc: int | None = None
-    undead_fortitude_bypass_reason: str | None = None
-    damage_prevented: int = 0
-    damage_mitigation_source: str | None = None
-    concentration_save_rolls: list[int] | None = None
-    concentration_save_total: int | None = None
-    concentration_save_dc: int | None = None
-    concentration_save_success: bool | None = None
-    concentration_spell_id: str | None = None
-    concentration_ended: bool = False
-    concentration_bless_rolls: list[int] | None = None
-    concentration_bless_bonus: int = 0
-    concentration_bless_source_id: str | None = None
 
 
 class ResolveAttackArgs:
@@ -157,40 +128,6 @@ class ResolveAttackArgs:
         self.precision_max_miss_margin = precision_max_miss_margin
         self.great_weapon_master_eligible = great_weapon_master_eligible
         self.cunning_strike_id = cunning_strike_id
-
-
-class SavingThrowOverrides:
-    def __init__(
-        self,
-        *,
-        save_rolls: list[int] | None = None,
-    ) -> None:
-        self.save_rolls = save_rolls or []
-
-
-class ResolveSavingThrowArgs:
-    def __init__(
-        self,
-        *,
-        actor_id: str,
-        ability: str,
-        dc: int,
-        reason: str,
-        advantage_sources: list[str] | None = None,
-        disadvantage_sources: list[str] | None = None,
-        overrides: SavingThrowOverrides | None = None,
-    ) -> None:
-        self.actor_id = actor_id
-        self.ability = ability
-        self.dc = dc
-        self.reason = reason
-        self.advantage_sources = advantage_sources or []
-        self.disadvantage_sources = disadvantage_sources or []
-        self.overrides = overrides
-
-
-def event_base(state: EncounterState, actor_id: str) -> dict[str, int | str]:
-    return {"round": state.round, "actor_id": actor_id}
 
 
 def get_active_rage_effect(unit: UnitState) -> RageEffect | None:
@@ -296,28 +233,6 @@ def pull_die(state: EncounterState, sides: int, override: int | None = None) -> 
     value, next_state = roll_die(state.rng_state, sides)
     state.rng_state = next_state
     return value
-
-
-def get_ability_modifier(unit: UnitState, ability: str) -> int:
-    ability_map = {
-        "str": unit.ability_mods.str,
-        "dex": unit.ability_mods.dex,
-        "con": unit.ability_mods.con,
-        "int": unit.ability_mods.int,
-        "wis": unit.ability_mods.wis,
-        "cha": unit.ability_mods.cha,
-    }
-    try:
-        return ability_map[ability]
-    except KeyError as error:
-        raise ValueError(f"Unsupported ability '{ability}' for a saving throw.") from error
-
-
-def get_unit_spell_save_dc(caster: UnitState, ability: str | None = None) -> int:
-    return 8 + get_proficiency_bonus(caster.level or 1) + get_ability_modifier(
-        caster,
-        resolve_spell_ability(caster, ability),
-    )
 
 
 def unit_has_no_reactions_effect(unit: UnitState) -> bool:
@@ -1458,30 +1373,6 @@ def units_are_within_spell_range(state: EncounterState, actor_id: str, target_id
     )
 
 
-def apply_healing_to_unit(target: UnitState, healing_total: int) -> tuple[int, list[str]]:
-    if target.conditions.dead or healing_total <= 0:
-        return 0, []
-    if any(effect.kind == "healing_blocked" for effect in target.temporary_effects):
-        return 0, [f"{target.id} cannot regain HP until the start of the caster's next turn."]
-
-    healed = min(target.max_hp - target.current_hp, healing_total)
-    if healed <= 0:
-        return 0, []
-
-    was_downed = target.current_hp == 0
-    target.current_hp += healed
-    condition_deltas: list[str] = []
-    if was_downed:
-        target.conditions.unconscious = False
-        target.conditions.prone = False
-        target.stable = False
-        target.death_save_failures = 0
-        target.death_save_successes = 0
-        condition_deltas.append(f"{target.id} returns to consciousness.")
-
-    return healed, condition_deltas
-
-
 def attempt_second_wind(state: EncounterState, actor_id: str, override_roll: int | None = None) -> CombatEvent | None:
     actor = state.units[actor_id]
     if not unit_has_feature(actor, "second_wind") or actor.resources.second_wind_uses <= 0 or actor.current_hp <= 0:
@@ -2059,26 +1950,6 @@ def resolve_concentration_after_damage(
         )
     )
     return data, condition_deltas
-
-
-def attach_damage_result_event_fields(
-    raw_rolls: dict[str, object],
-    resolved_totals: dict[str, object],
-    damage_result: DamageApplicationResult,
-) -> None:
-    if damage_result.concentration_save_rolls:
-        raw_rolls["concentrationSaveRolls"] = damage_result.concentration_save_rolls
-    if damage_result.concentration_bless_rolls:
-        raw_rolls["concentrationBlessRolls"] = damage_result.concentration_bless_rolls
-    if damage_result.concentration_spell_id:
-        resolved_totals["concentrationSpellId"] = damage_result.concentration_spell_id
-        resolved_totals["concentrationSaveDc"] = damage_result.concentration_save_dc
-        resolved_totals["concentrationSaveTotal"] = damage_result.concentration_save_total
-        resolved_totals["concentrationSaveSuccess"] = damage_result.concentration_save_success
-        resolved_totals["concentrationEnded"] = damage_result.concentration_ended
-        if damage_result.concentration_bless_bonus:
-            resolved_totals["concentrationBlessBonus"] = damage_result.concentration_bless_bonus
-            resolved_totals["concentrationBlessSourceId"] = damage_result.concentration_bless_source_id
 
 
 def apply_damage(
@@ -2811,48 +2682,8 @@ def get_attack_mode(
     return "normal", advantage_sources, disadvantage_sources
 
 
-def build_skip_event(state: EncounterState, actor_id: str, reason: str) -> CombatEvent:
-    return CombatEvent(
-        **event_base(state, actor_id),
-        target_ids=[],
-        event_type="skip",
-        raw_rolls={},
-        resolved_totals={"reason": reason},
-        movement_details=None,
-        damage_details=None,
-        condition_deltas=[],
-        text_summary=f"{actor_id} skips its turn: {reason}",
-    )
-
-
 def create_skip_event(state: EncounterState, actor_id: str, reason: str) -> CombatEvent:
     return build_skip_event(state, actor_id, reason)
-
-
-def build_final_damage_components(
-    chosen_candidate: DamageCandidate | None,
-    advantage_bonus_candidate: DamageCandidate | None,
-    critical_multiplier: int,
-) -> list[DamageComponentResult]:
-    components: list[DamageComponentResult] = []
-
-    for candidate in [chosen_candidate, advantage_bonus_candidate]:
-        if not candidate:
-            continue
-
-        for component in candidate.components:
-            components.append(
-                DamageComponentResult(
-                    damage_type=component.damage_type,
-                    raw_rolls=list(component.raw_rolls),
-                    adjusted_rolls=list(component.adjusted_rolls),
-                    subtotal=component.subtotal,
-                    flat_modifier=component.flat_modifier,
-                    total_damage=(component.subtotal * critical_multiplier) + component.flat_modifier,
-                )
-            )
-
-    return components
 
 
 def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[CombatEvent, bool]:
@@ -2897,10 +2728,13 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     superiority_dice_remaining: int | None = None
     precision_maneuver_applied = False
 
-    if maneuver_intent == "riposte" and can_use_battle_master_maneuver(attacker, "riposte"):
-        if spend_superiority_die(attacker):
-            maneuver_id = "riposte"
-            superiority_dice_remaining = attacker.resources.superiority_dice
+    if (
+        maneuver_intent == "riposte"
+        and can_use_battle_master_maneuver(attacker, "riposte")
+        and spend_superiority_die(attacker)
+    ):
+        maneuver_id = "riposte"
+        superiority_dice_remaining = attacker.resources.superiority_dice
 
     vex_available = has_vex_effect(attacker, args.target_id)
     harried_available = has_harried_effect(target)
@@ -2941,31 +2775,33 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
     target_ac = target.ac + attack_context.cover_ac_bonus + get_shield_ac_bonus(target)
     hit = natural_twenty or (not natural_one and attack_total >= target_ac)
 
-    if can_attempt_precision_attack(
-        attacker,
-        maneuver_intent=maneuver_intent,
-        max_miss_margin=args.precision_max_miss_margin,
-        hit=hit,
-        natural_one=natural_one,
-        attack_total=attack_total,
-        target_ac=target_ac,
+    if (
+        can_attempt_precision_attack(
+            attacker,
+            maneuver_intent=maneuver_intent,
+            max_miss_margin=args.precision_max_miss_margin,
+            hit=hit,
+            natural_one=natural_one,
+            attack_total=attack_total,
+            target_ac=target_ac,
+        )
+        and spend_superiority_die(attacker)
     ):
-        if spend_superiority_die(attacker):
-            if maneuver_id == "riposte":
-                precision_maneuver_applied = True
-            else:
-                maneuver_id = "precision_attack"
-            superiority_dice_remaining = attacker.resources.superiority_dice
-            precision_roll = pull_die(
-                state,
-                get_superiority_die_sides(attacker),
-                overrides.superiority_rolls.pop(0) if overrides.superiority_rolls else None,
-            )
-            superiority_dice_rolls.append(precision_roll)
-            attack_total += precision_roll
-            hit = natural_twenty or (not natural_one and attack_total >= target_ac)
-            maneuver_notes = f"{args.attacker_id} uses Precision Attack, adding {precision_roll} to the attack roll."
-            maneuver_condition_deltas.append(maneuver_notes)
+        if maneuver_id == "riposte":
+            precision_maneuver_applied = True
+        else:
+            maneuver_id = "precision_attack"
+        superiority_dice_remaining = attacker.resources.superiority_dice
+        precision_roll = pull_die(
+            state,
+            get_superiority_die_sides(attacker),
+            overrides.superiority_rolls.pop(0) if overrides.superiority_rolls else None,
+        )
+        superiority_dice_rolls.append(precision_roll)
+        attack_total += precision_roll
+        hit = natural_twenty or (not natural_one and attack_total >= target_ac)
+        maneuver_notes = f"{args.attacker_id} uses Precision Attack, adding {precision_roll} to the attack roll."
+        maneuver_condition_deltas.append(maneuver_notes)
 
     if hit:
         defense_reaction_data = maybe_apply_shield_reaction(
@@ -3202,17 +3038,20 @@ def resolve_attack(state: EncounterState, args: ResolveAttackArgs) -> tuple[Comb
                     )
                     condition_deltas.append(f"{args.attacker_id} applies Assassinate for +{assassinate_damage_bonus} damage.")
 
-        if maneuver_id is None and can_attempt_trip_attack(
-            attacker,
-            target,
-            weapon,
-            maneuver_intent=maneuver_intent,
-            hit=hit,
-            is_opportunity_attack=args.is_opportunity_attack,
+        if (
+            maneuver_id is None
+            and can_attempt_trip_attack(
+                attacker,
+                target,
+                weapon,
+                maneuver_intent=maneuver_intent,
+                hit=hit,
+                is_opportunity_attack=args.is_opportunity_attack,
+            )
+            and spend_superiority_die(attacker)
         ):
-            if spend_superiority_die(attacker):
-                maneuver_id = "trip_attack"
-                superiority_dice_remaining = attacker.resources.superiority_dice
+            maneuver_id = "trip_attack"
+            superiority_dice_remaining = attacker.resources.superiority_dice
 
         if maneuver_id in {"trip_attack", "riposte"}:
             superiority_roll, superiority_component = roll_superiority_damage_component(
@@ -3663,32 +3502,36 @@ def maybe_commit_reckless_attack(
         ),
     )
 
-# Spell mechanics live in spell_resolvers. Re-export these names so existing
-# imports from combat_rules keep working while new spells have one focused home.
-from backend.engine.rules.spell_resolvers import (
-    apply_heroism_start_of_turn,
-    build_spell_attack_profile,
-    build_spell_skip_event,
-    get_remaining_spell_slots,
-    get_spell_save_dc,
-    get_spellcasting_ability,
-    resolve_aid,
-    resolve_bless,
-    resolve_burning_hands,
-    resolve_cast_spell,
-    resolve_cure_wounds,
-    resolve_divine_favor,
-    resolve_false_life,
-    resolve_heroism,
-    resolve_longstrider,
-    resolve_mage_armor,
-    resolve_magic_missile,
-    resolve_multi_target_save_spell,
-    resolve_ranged_spell_attack,
-    resolve_ray_of_sickness_poison_save,
-    resolve_shield_of_faith,
-    resolve_single_target_save_spell,
-    resolve_spell_ability,
-    spend_spell_slot,
-    unit_has_combat_spell,
-)
+# Spell mechanics live in spell_resolvers. Resolve these lazily so legacy
+# imports from combat_rules still work without creating an import cycle.
+_SPELL_RESOLVER_EXPORTS = {
+    "apply_heroism_start_of_turn",
+    "build_spell_attack_profile",
+    "build_spell_skip_event",
+    "resolve_aid",
+    "resolve_bless",
+    "resolve_burning_hands",
+    "resolve_cast_spell",
+    "resolve_cure_wounds",
+    "resolve_divine_favor",
+    "resolve_false_life",
+    "resolve_heroism",
+    "resolve_longstrider",
+    "resolve_mage_armor",
+    "resolve_magic_missile",
+    "resolve_multi_target_save_spell",
+    "resolve_ranged_spell_attack",
+    "resolve_ray_of_sickness_poison_save",
+    "resolve_shield_of_faith",
+    "resolve_single_target_save_spell",
+}
+
+
+def __getattr__(name: str) -> object:
+    if name in _SPELL_RESOLVER_EXPORTS:
+        from backend.engine.rules import spell_resolvers
+
+        value = getattr(spell_resolvers, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

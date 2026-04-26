@@ -83,6 +83,10 @@ backend/
     combat/
     models/
     rules/
+      combat_rules.py
+      combat_support.py
+      spell_resolvers.py
+      spatial.py
     services/
     utils/
 src/
@@ -161,7 +165,9 @@ Current implementation note:
 - action resolution and temporary-effect handling currently live mainly in:
   - `backend/engine/combat/engine.py`
   - `backend/engine/rules/combat_rules.py`
-- splitting those further is optional future cleanup, not a requirement for new class work
+- spell-specific runtime mechanics live in `backend/engine/rules/spell_resolvers.py`
+- shared rules DTOs and small neutral helpers live in `backend/engine/rules/combat_support.py`
+- new spell work should follow [Spell Development](SPELL_DEVELOPMENT.md)
 
 ### `backend/engine/ai`
 
