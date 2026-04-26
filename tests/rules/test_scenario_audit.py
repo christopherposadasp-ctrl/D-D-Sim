@@ -121,7 +121,14 @@ def test_build_report_payload_lists_only_active_scenarios() -> None:
 
 
 def test_has_swallow_action_detects_logged_toad_swallow() -> None:
-    result = run_encounter(EncounterConfig(seed="swallow-smart-059", enemy_preset_id="giant_toad_solo"))
+    result = run_encounter(
+        EncounterConfig(
+            seed="swallow-monster_benchmark_duo-002",
+            enemy_preset_id="giant_toad_solo",
+            player_preset_id="monster_benchmark_duo",
+            player_behavior="balanced",
+        )
+    )
 
     assert has_swallow_action(result) is True
 
