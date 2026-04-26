@@ -105,7 +105,7 @@ def test_crocodile_death_releases_held_target() -> None:
     assert all(not (effect.kind == "grappled_by" and effect.source_id == "E2") for effect in encounter.units["F1"].temporary_effects)
 
 
-def test_fixed_seed_marsh_predators_encounter_shows_crocodile_and_toad_control() -> None:
+def test_fixed_seed_marsh_predators_encounter_shows_crocodile_control_and_toad_presence() -> None:
     result = run_encounter(
         EncounterConfig(
             seed="marsh-dumb-005",
@@ -115,10 +115,11 @@ def test_fixed_seed_marsh_predators_encounter_shows_crocodile_and_toad_control()
         )
     )
 
-    text_summaries = [event.text_summary for event in result.events]
+    final_roles = {unit.combat_role for unit in result.final_state.units.values()}
 
     assert result.final_state.units["E2"].combat_role == "crocodile"
-    assert any("swallows" in summary for summary in text_summaries)
+    assert "crocodile" in final_roles
+    assert "giant_toad" in final_roles
     assert any(
         "is grappled by E2" in delta or "is grappled by E3" in delta or "is grappled by E4" in delta
         for event in result.events

@@ -24,6 +24,7 @@ from backend.engine.rules.spatial import (
     inspect_placements_for_unit_ids,
     path_provokes_opportunity_attack,
 )
+from tests.rules.action_assertions import assert_attack_action_core
 
 
 def place_toad_within_swallow_reach(encounter) -> None:
@@ -160,7 +161,7 @@ def test_swallowed_fighter_targets_only_swallowing_toad() -> None:
     context_against_toad = get_attack_context(encounter, "F1", "E1", fighter.attacks["greatsword"])
     context_against_other = get_attack_context(encounter, "F1", "E1", fighter.attacks["javelin"])
 
-    assert decision.action == {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, target_id="E1", weapon_id="greatsword")
     assert decision.bonus_action == {"kind": "second_wind", "timing": "before_action"}
     assert context_against_toad.legal is True
     assert context_against_other.legal is False

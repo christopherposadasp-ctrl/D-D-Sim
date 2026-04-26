@@ -649,10 +649,19 @@ def run_disengage_probe(seed: str) -> RogueSignatureProbeResult:
         )
     )
     defeat_other_enemies(encounter, "G1", "G2")
+    encounter.units["G2"].current_hp = min(encounter.units["G2"].current_hp, 4)
     set_active_actor(encounter)
 
     decision = choose_turn_decision(encounter, "F1")
     turn_result = step_encounter(encounter)
+    attack_event = next(
+        (
+            event
+            for event in turn_result.events
+            if event.actor_id == "F1" and event.event_type == "attack" and get_weapon_id(event) == "shortbow"
+        ),
+        None,
+    )
     disengage_event = next(
         (
             event
@@ -668,10 +677,12 @@ def run_disengage_probe(seed: str) -> RogueSignatureProbeResult:
     failures: list[str] = []
     if decision.bonus_action != {"kind": "disengage", "timing": "before_action"}:
         failures.append("Ranged Rogue did not spend Cunning Action Disengage before the escape shot.")
-    if decision.action != {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}:
-        failures.append("Ranged Rogue did not convert the disengage into the expected shortbow attack.")
+    if not decision.action or decision.action.get("kind") != "attack" or decision.action.get("weapon_id") != "shortbow":
+        failures.append("Ranged Rogue did not convert the disengage into a shortbow attack.")
     if disengage_event is None:
         failures.append("The disengage probe did not emit a disengage phase-change event.")
+    if attack_event is None or not attack_has_sneak_attack(attack_event):
+        failures.append("The disengage probe shortbow attack did not apply Sneak Attack.")
 
     return RogueSignatureProbeResult(
         probe_id="disengage_into_attack",

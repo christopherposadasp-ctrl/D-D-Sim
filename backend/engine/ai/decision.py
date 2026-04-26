@@ -27,8 +27,8 @@ from backend.engine.models.state import (
 )
 from backend.engine.rules.combat_rules import (
     build_spell_attack_profile,
-    can_apply_sneak_attack,
     can_apply_assassinate_advantage,
+    can_apply_sneak_attack,
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
     choose_selectable_damage_type,
@@ -41,9 +41,9 @@ from backend.engine.rules.combat_rules import (
     has_vex_effect,
     is_natures_wrath_restrained,
     target_is_grappled_by_attacker,
-    unit_is_concentrating_on,
     unit_has_reckless_attack_effect,
     unit_is_bloodied,
+    unit_is_concentrating_on,
     unit_is_dodging,
 )
 from backend.engine.rules.spatial import (
@@ -68,7 +68,6 @@ from backend.engine.rules.spatial import (
     path_provokes_opportunity_attack,
 )
 from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions, unit_sort_key
-
 
 SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN = 2
 SMART_PRECISION_ATTACK_PRESSURE_MAX_MISS_MARGIN = 4

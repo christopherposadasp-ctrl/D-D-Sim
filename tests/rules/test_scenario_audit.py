@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from backend.engine import run_encounter
 from backend.content.scenario_definitions import get_scenario_definition
+from backend.engine import run_encounter
 from backend.engine.models.state import EncounterConfig
 from backend.engine.services.scenario_audit import (
     ScenarioAuditConfig,

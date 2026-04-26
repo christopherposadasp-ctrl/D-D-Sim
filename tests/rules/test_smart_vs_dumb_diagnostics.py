@@ -11,6 +11,7 @@ from scripts.investigate_smart_vs_dumb import (
     format_markdown,
     summarize_pair_results,
 )
+from tests.rules.action_assertions import assert_attack_action_core
 
 
 def test_diagnostic_configs_pair_smart_and_dumb_on_the_same_seed() -> None:
@@ -58,7 +59,7 @@ def test_capture_turn_decision_evidence_records_target_and_square_metrics_for_fi
 
     assert evidence is not None
     assert evidence["decision"]["action"]["kind"] == "dash"
-    assert evidence["decision"]["surgedAction"] == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert_attack_action_core(evidence["decision"]["surgedAction"], target_id="G1", weapon_id="greatsword")
     assert evidence["chosenTargetId"] == "G1"
     assert evidence["topTargetAlternatives"][0]["targetId"] == "G1"
     assert evidence["topTargetAlternatives"][0]["killBand"] in {"none", "probable_finish", "sure_finish"}
