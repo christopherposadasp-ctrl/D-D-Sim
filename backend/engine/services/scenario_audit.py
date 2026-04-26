@@ -213,6 +213,15 @@ def has_swallow_action(result: RunEncounterResult) -> bool:
     return False
 
 
+def has_griffon_opening_landing(result: RunEncounterResult) -> bool:
+    for event in iter_events(result, "move"):
+        if not actor_has_role(result, event.actor_id, "griffon"):
+            continue
+        if event.resolved_totals.get("movementMode") == "landing":
+            return True
+    return False
+
+
 def has_target_role_resolved_total(result: RunEncounterResult, target_roles: set[str], key: str) -> bool:
     for event in iter_events(result, "attack"):
         if not event.target_ids:
@@ -275,6 +284,15 @@ def build_signature_checks() -> dict[str, list[SignatureCheck]]:
             lambda result: has_attack_rider(result, {"crocodile"}, "grapple_on_hit"),
         ),
         "toad_swallow": SignatureCheck("toadSwallow", has_swallow_action),
+        "griffon_opening_landing": SignatureCheck("griffonOpeningLanding", has_griffon_opening_landing),
+        "griffon_grapple": SignatureCheck(
+            "griffonGrapple",
+            lambda result: has_attack_rider(result, {"griffon"}, "grapple_on_hit"),
+        ),
+        "centaur_multiattack": SignatureCheck(
+            "centaurMultiattack",
+            lambda result: has_role_multiattack(result, {"centaur_trooper"}),
+        ),
         "hobgoblin_longsword_attack": SignatureCheck(
             "hobgoblinLongswordAttack",
             lambda result: any_attack_with_weapon(result, {"hobgoblin_melee"}, "longsword"),
@@ -319,9 +337,17 @@ def build_signature_checks() -> dict[str, list[SignatureCheck]]:
             "banditCaptainMultiattack",
             lambda result: has_role_multiattack(result, {"bandit_captain"}),
         ),
+        "elite_line_holder_multiattack": SignatureCheck(
+            "eliteLineHolderMultiattack",
+            lambda result: has_role_multiattack(result, {"knight", "warrior_veteran", "guard_captain"}),
+        ),
         "parry_reaction": SignatureCheck(
             "parryReaction",
-            lambda result: has_phase_reaction(result, "parry", {"bandit_captain", "noble", "guard_captain"}),
+            lambda result: has_phase_reaction(
+                result,
+                "parry",
+                {"bandit_captain", "noble", "guard_captain", "knight", "warrior_veteran"},
+            ),
         ),
     }
 

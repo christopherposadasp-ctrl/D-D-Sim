@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.engine import run_encounter
+from backend.content.scenario_definitions import get_scenario_definition
 from backend.engine.models.state import EncounterConfig
 from backend.engine.services.scenario_audit import (
     ScenarioAuditConfig,
@@ -123,3 +124,77 @@ def test_has_swallow_action_detects_logged_toad_swallow() -> None:
     result = run_encounter(EncounterConfig(seed="swallow-smart-059", enemy_preset_id="giant_toad_solo"))
 
     assert has_swallow_action(result) is True
+
+
+def test_reaction_bastion_scenario_definition_is_staged_with_expected_expectations() -> None:
+    definition = get_scenario_definition("reaction_bastion")
+
+    assert definition.display_name == "Reaction Bastion"
+    assert definition.enemy_preset_id == "reaction_bastion"
+    assert definition.audit_expectation_ids == (
+        "elite_line_holder_multiattack",
+        "parry_reaction",
+        "scout_multiattack",
+    )
+
+
+def test_audit_scenario_supports_staged_reaction_bastion() -> None:
+    row = audit_scenario(
+        "reaction_bastion",
+        ScenarioAuditConfig(
+            smart_smoke_runs=1,
+            dumb_smoke_runs=1,
+            mechanic_runs=1,
+            health_batch_size=1,
+            seed_prefix="test-reaction-bastion-audit",
+        ),
+    )
+
+    payload = row.to_report_dict()
+
+    assert row.scenario_id == "reaction_bastion"
+    assert row.unit_count == 11
+    assert payload["scenarioId"] == "reaction_bastion"
+    assert set(payload["signatureBreakdown"]) == {
+        "eliteLineHolderMultiattack",
+        "parryReaction",
+        "scoutMultiattack",
+    }
+
+
+def test_skyhunter_pincer_scenario_definition_is_staged_with_expected_expectations() -> None:
+    definition = get_scenario_definition("skyhunter_pincer")
+
+    assert definition.display_name == "Skyhunter Pincer"
+    assert definition.enemy_preset_id == "skyhunter_pincer"
+    assert definition.audit_expectation_ids == (
+        "griffon_opening_landing",
+        "griffon_grapple",
+        "centaur_multiattack",
+        "scout_multiattack",
+    )
+
+
+def test_audit_scenario_supports_staged_skyhunter_pincer() -> None:
+    row = audit_scenario(
+        "skyhunter_pincer",
+        ScenarioAuditConfig(
+            smart_smoke_runs=1,
+            dumb_smoke_runs=1,
+            mechanic_runs=1,
+            health_batch_size=1,
+            seed_prefix="test-skyhunter-pincer-audit",
+        ),
+    )
+
+    payload = row.to_report_dict()
+
+    assert row.scenario_id == "skyhunter_pincer"
+    assert row.unit_count == 11
+    assert payload["scenarioId"] == "skyhunter_pincer"
+    assert set(payload["signatureBreakdown"]) == {
+        "griffonOpeningLanding",
+        "griffonGrapple",
+        "centaurMultiattack",
+        "scoutMultiattack",
+    }

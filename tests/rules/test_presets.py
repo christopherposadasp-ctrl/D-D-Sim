@@ -117,6 +117,26 @@ def test_captains_crossfire_builds_leader_screen() -> None:
     assert encounter.units["E4"].combat_role == "noble"
 
 
+def test_reaction_bastion_builds_elite_reaction_line() -> None:
+    encounter = create_encounter(EncounterConfig(seed="reaction-bastion", enemy_preset_id="reaction_bastion"))
+
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "F1", "F2", "F3", "F4"]
+    assert encounter.units["E1"].combat_role == "knight"
+    assert encounter.units["E3"].combat_role == "warrior_veteran"
+    assert encounter.units["E5"].combat_role == "guard_captain"
+    assert encounter.units["E6"].combat_role == "bandit_archer"
+
+
+def test_skyhunter_pincer_builds_air_pincer_screen() -> None:
+    encounter = create_encounter(EncounterConfig(seed="skyhunter-pincer", enemy_preset_id="skyhunter_pincer"))
+
+    assert sorted(encounter.units) == ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "F1", "F2", "F3", "F4"]
+    assert encounter.units["E1"].combat_role == "griffon"
+    assert encounter.units["E2"].combat_role == "centaur_trooper"
+    assert encounter.units["E4"].combat_role == "scout"
+    assert encounter.units["E6"].combat_role == "guard_captain"
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(
@@ -234,6 +254,36 @@ def test_captains_crossfire_preset_runs_in_combined_batch_mode() -> None:
         EncounterConfig(
             seed="captains-crossfire-combined-batch",
             enemy_preset_id="captains_crossfire",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_reaction_bastion_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="reaction-bastion-combined-batch",
+            enemy_preset_id="reaction_bastion",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_skyhunter_pincer_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="skyhunter-pincer-combined-batch",
+            enemy_preset_id="skyhunter_pincer",
             batch_size=1,
             player_behavior="balanced",
             monster_behavior="combined",

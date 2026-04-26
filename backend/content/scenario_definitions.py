@@ -94,6 +94,20 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         enemy_preset_id="captains_crossfire",
         audit_expectation_ids=("bandit_captain_multiattack", "parry_reaction"),
     ),
+    "reaction_bastion": ScenarioDefinition(
+        scenario_id="reaction_bastion",
+        display_name="Reaction Bastion",
+        description=ENEMY_PRESETS["reaction_bastion"].description,
+        enemy_preset_id="reaction_bastion",
+        audit_expectation_ids=("elite_line_holder_multiattack", "parry_reaction", "scout_multiattack"),
+    ),
+    "skyhunter_pincer": ScenarioDefinition(
+        scenario_id="skyhunter_pincer",
+        display_name="Skyhunter Pincer",
+        description=ENEMY_PRESETS["skyhunter_pincer"].description,
+        enemy_preset_id="skyhunter_pincer",
+        audit_expectation_ids=("griffon_opening_landing", "griffon_grapple", "centaur_multiattack", "scout_multiattack"),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS
