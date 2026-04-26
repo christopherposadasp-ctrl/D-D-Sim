@@ -120,6 +120,7 @@ weasel_ability_mods = AbilityModifiers(str=-4, dex=3, con=-1, int=-4, wis=1, cha
 badger_ability_mods = AbilityModifiers(str=0, dex=0, con=3, int=-4, wis=1, cha=-3)
 crab_ability_mods = AbilityModifiers(str=-2, dex=0, con=1, int=-5, wis=-1, cha=-4)
 baboon_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-3, wis=1, cha=-2)
+grimlock_ability_mods = AbilityModifiers(str=3, dex=1, con=1, int=-1, wis=-1, cha=-2)
 hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3)
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
@@ -1244,6 +1245,48 @@ MONSTER_DEFINITIONS.update(
             action_ids=("melee_attack",),
             trait_ids=("pack_tactics",),
             attack_actions=(melee_attack_action("bite", "Bite"),),
+            default_melee_attack_action_id="melee_attack",
+        ),
+        "grimlock": MonsterDefinition(
+            base_creature_id="grimlock",
+            variant_id="grimlock",
+            display_name="Grimlock",
+            combat_role="grimlock",
+            ai_profile_id="melee_brute",
+            max_hp=11,
+            ac=11,
+            speed=30,
+            initiative_mod=1,
+            passive_perception=13,
+            ability_mods=grimlock_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "bone_cudgel": WeaponProfile(
+                    id="bone_cudgel",
+                    display_name="Bone Cudgel",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_modifier=0,
+                    damage_type=None,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="bludgeoning",
+                            damage_dice=[DiceSpec(count=1, sides=6)],
+                            damage_modifier=3,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="psychic",
+                            damage_dice=[DiceSpec(count=1, sides=4)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                )
+            },
+            tags=("aberration", "grimlock", "melee"),
+            action_ids=("melee_attack",),
+            attack_actions=(melee_attack_action("bone_cudgel", "Bone Cudgel"),),
             default_melee_attack_action_id="melee_attack",
         ),
         "hyena": MonsterDefinition(
@@ -3314,6 +3357,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "badger",
     "crab",
     "baboon",
+    "grimlock",
     "hyena",
     "jackal",
     "goblin_minion",

@@ -322,6 +322,36 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="baboon_benchmark",
         benchmark_count=15,
     ),
+    "grimlock": MonsterExpectation(
+        ai_profile_id="melee_brute",
+        max_hp=11,
+        ac=11,
+        speed=30,
+        initiative_mod=1,
+        passive_perception=13,
+        size_category="medium",
+        footprint=(1, 1),
+        ability_mods={"str": 3, "dex": 1, "con": 1, "int": -1, "wis": -1, "cha": -2},
+        trait_ids=(),
+        attacks={
+            "bone_cudgel": AttackExpectation(
+                kind="melee",
+                attack_bonus=5,
+                ability_modifier=3,
+                damage_modifier=0,
+                damage_type=None,
+                damage_components=(
+                    DamageComponentExpectation("bludgeoning", ((1, 6),), 3),
+                    DamageComponentExpectation("psychic", ((1, 4),), 0),
+                ),
+            )
+        },
+        opening_weapon_id="bone_cudgel",
+        melee_fallback_weapon_id="bone_cudgel",
+        special_mechanics=(),
+        benchmark_preset_id="grimlock_benchmark",
+        benchmark_count=9,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,
