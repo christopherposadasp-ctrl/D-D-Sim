@@ -190,6 +190,32 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="deer_benchmark",
         benchmark_count=15,
     ),
+    "cat": MonsterExpectation(
+        ai_profile_id="melee_brute",
+        max_hp=2,
+        ac=12,
+        speed=40,
+        initiative_mod=2,
+        passive_perception=13,
+        size_category="tiny",
+        footprint=(1, 1),
+        ability_mods={"str": -4, "dex": 2, "con": 0, "int": -4, "wis": 1, "cha": -2},
+        trait_ids=("jumper",),
+        attacks={
+            "scratch": AttackExpectation(
+                kind="melee",
+                attack_bonus=4,
+                ability_modifier=2,
+                damage_modifier=1,
+                damage_type="slashing",
+            )
+        },
+        opening_weapon_id="scratch",
+        melee_fallback_weapon_id="scratch",
+        special_mechanics=(),
+        benchmark_preset_id="cat_benchmark",
+        benchmark_count=15,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,

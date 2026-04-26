@@ -55,6 +55,11 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
         display_name="Agile",
         description="This creature avoids opportunity attacks when moving away; opportunity immunity is not modeled yet.",
     ),
+    "jumper": MonsterTraitDefinition(
+        trait_id="jumper",
+        display_name="Jumper",
+        description="This creature uses Dexterity for jump distance; tactical jumping is not modeled by the live simulator.",
+    ),
     "bloodied_frenzy": MonsterTraitDefinition(
         trait_id="bloodied_frenzy",
         display_name="Bloodied Frenzy",
