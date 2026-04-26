@@ -26,7 +26,7 @@ It exists to keep class work:
 - Barbarian and Monk are live through level 2.
 - Wizard is live at level 1 as a narrow combat spellcasting slice.
 - Paladin is live at level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel.
-- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter, level 5 Oath of the Ancients Paladin, level 5 ranged Assassin Rogue, and level 2 melee Rogue.
+- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter, level 5 Oath of the Ancients Paladin, level 5 ranged Assassin Rogue, and level 1 Wizard.
 
 ## Primary Backend Files
 

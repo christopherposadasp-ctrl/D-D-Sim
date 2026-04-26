@@ -2248,7 +2248,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
     {
       "id": "martial_mixed_party",
       "displayName": "Mixed Martial Party",
-      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 1 wizard.",
       "units": [
         {
           "unitId": "F1",
@@ -2264,7 +2264,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         },
         {
           "unitId": "F4",
-          "loadoutId": "rogue_melee_level2_sample_build"
+          "loadoutId": "wizard_sample_build"
         }
       ]
     }
@@ -2856,7 +2856,7 @@ describe('App', () => {
       { unitId: 'F1', loadoutId: 'fighter_level5_sample_build' },
       { unitId: 'F2', loadoutId: 'paladin_level5_sample_build' },
       { unitId: 'F3', loadoutId: 'rogue_ranged_level5_assassin_sample_build' },
-      { unitId: 'F4', loadoutId: 'rogue_melee_level2_sample_build' },
+      { unitId: 'F4', loadoutId: 'wizard_sample_build' },
     ]);
   });
 

@@ -116,7 +116,7 @@ Use V4.2 to establish the player-content framework:
   - level 5 Battle Master fighter
   - level 5 Oath of the Ancients paladin
   - level 5 ranged Assassin rogue
-  - level 2 melee rogue
+  - level 1 wizard
 
 ### V4.2 Phase Targets
 

@@ -36,7 +36,7 @@ Current default player preset:
 - level 5 Battle Master fighter
 - level 5 Oath of the Ancients paladin
 - level 5 ranged Assassin rogue
-- level 2 melee rogue
+- level 1 wizard
 
 Active enemy presets:
 

@@ -639,7 +639,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
     }
 
 
-def test_default_player_preset_loads_fighter_paladin_and_two_rogues() -> None:
+def test_default_player_preset_loads_fighter_paladin_rogue_and_wizard() -> None:
     encounter = create_encounter(EncounterConfig(seed="default-mixed-party", enemy_preset_id="goblin_screen"))
 
     assert encounter.units["F1"].loadout_id == "fighter_level5_sample_build"
@@ -653,10 +653,11 @@ def test_default_player_preset_loads_fighter_paladin_and_two_rogues() -> None:
     assert encounter.units["F2"].resources.channel_divinity_uses == 2
     assert encounter.units["F3"].loadout_id == "rogue_ranged_level5_assassin_sample_build"
     assert encounter.units["F3"].level == 5
-    assert encounter.units["F4"].loadout_id == "rogue_melee_level2_sample_build"
-    assert encounter.units["F4"].level == 2
+    assert encounter.units["F4"].loadout_id == "wizard_sample_build"
+    assert encounter.units["F4"].level == 1
+    assert encounter.units["F4"].class_id == "wizard"
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 154
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 144
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:

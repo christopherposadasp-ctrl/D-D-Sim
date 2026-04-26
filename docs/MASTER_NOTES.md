@@ -102,7 +102,7 @@ It should be updated whenever one of these changes:
   - one level 5 Battle Master fighter
   - one level 5 Oath of the Ancients paladin
   - one level 5 ranged Assassin rogue
-  - one level 2 melee rogue
+  - one level 1 wizard
 - These new player-build fields are intentionally kept out of the live run/batch API payload for now so the current UI contract remains stable during the framework transition
 - A backend-owned player catalog endpoint now exists at `GET /api/catalog/classes`
 - Scenario audit expectations now resolve through a scenario-definition registry instead of being fully hardcoded inside the audit service

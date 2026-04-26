@@ -1118,12 +1118,12 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 melee rogue.",
+        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 1 wizard.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
             PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level5_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
-            PlayerPresetUnit(unit_id="F4", loadout_id="rogue_melee_level2_sample_build"),
+            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_sample_build"),
         ),
     ),
 }

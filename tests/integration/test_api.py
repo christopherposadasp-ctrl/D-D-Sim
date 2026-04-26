@@ -27,14 +27,25 @@ ACTIVE_SCENARIO_IDS = [
 ACTIVE_PLAYER_PRESET_IDS = [
     "fighter_sample_trio",
     "fighter_level2_sample_trio",
+    "fighter_level3_sample_trio",
+    "fighter_level4_sample_trio",
+    "fighter_level5_sample_trio",
     "rogue_ranged_trio",
     "rogue_melee_trio",
     "rogue_level2_ranged_trio",
     "rogue_level2_melee_trio",
+    "rogue_level3_ranged_assassin_trio",
+    "rogue_level4_ranged_assassin_trio",
+    "rogue_level5_ranged_assassin_trio",
     "barbarian_sample_trio",
     "barbarian_level2_sample_trio",
     "monk_sample_trio",
     "monk_level2_sample_trio",
+    "paladin_level1_sample_trio",
+    "paladin_level2_sample_trio",
+    "paladin_level3_sample_trio",
+    "paladin_level4_sample_trio",
+    "paladin_level5_sample_trio",
     "wizard_sample_trio",
     "martial_mixed_party",
 ]
@@ -50,10 +61,10 @@ CURRENT_MARSH_PREDATORS_UNITS = [
 ]
 
 CURRENT_MARTIAL_MIXED_PARTY_UNITS = [
-    {"unitId": "F1", "loadoutId": "fighter_level2_sample_build"},
-    {"unitId": "F2", "loadoutId": "barbarian_level2_sample_build"},
-    {"unitId": "F3", "loadoutId": "rogue_ranged_level2_sample_build"},
-    {"unitId": "F4", "loadoutId": "rogue_melee_level2_sample_build"},
+    {"unitId": "F1", "loadoutId": "fighter_level5_sample_build"},
+    {"unitId": "F2", "loadoutId": "paladin_level5_sample_build"},
+    {"unitId": "F3", "loadoutId": "rogue_ranged_level5_assassin_sample_build"},
+    {"unitId": "F4", "loadoutId": "wizard_sample_build"},
 ]
 
 
@@ -145,7 +156,7 @@ def test_player_catalog_exposes_frozen_active_player_surface() -> None:
     assert "wizard" in classes_by_id
     assert classes_by_id["wizard"]["maxSupportedLevel"] == 1
     assert [preset["id"] for preset in payload["playerPresets"]] == ACTIVE_PLAYER_PRESET_IDS
-    assert len(payload["playerPresets"]) == 12
+    assert len(payload["playerPresets"]) == 23
 
     presets_by_id = {preset["id"]: preset for preset in payload["playerPresets"]}
     assert presets_by_id["martial_mixed_party"]["units"] == CURRENT_MARTIAL_MIXED_PARTY_UNITS
