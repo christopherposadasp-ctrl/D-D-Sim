@@ -19,8 +19,10 @@ from backend.engine.models.state import EncounterConfig, RunEncounterResult
 from scripts.audit_common import collect_git_context, write_json_report, write_text_report
 from scripts.run_party_validation import DEFAULT_SCENARIO_IDS
 
-PROFILE_CHOICES = ("paladin", "rogue", "fighter")
-PROFILE_DEFAULT_UNIT_IDS = {"paladin": "F2", "rogue": "F3", "fighter": "F1"}
+PROFILE_CHOICES = ("paladin", "rogue", "fighter", "wizard")
+PROFILE_DEFAULT_UNIT_IDS = {"paladin": "F2", "rogue": "F3", "fighter": "F1", "wizard": "F4"}
+PARTY_PROFILE_ORDER = ("fighter", "paladin", "rogue", "wizard")
+PARTY_PROFILE_UNIT_IDS = {"fighter": "F1", "paladin": "F2", "rogue": "F3", "wizard": "F4"}
 DEFAULT_PROFILE = "paladin"
 DEFAULT_UNIT_ID = PROFILE_DEFAULT_UNIT_IDS[DEFAULT_PROFILE]
 DEFAULT_RUNS_PER_SCENARIO = 60
@@ -38,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--unit",
         default=None,
-        help="Unit id to analyze. Defaults to F2 for Paladin and F3 for Rogue.",
+        help="Unit id to analyze. Defaults to the current-party unit for the selected profile.",
     )
     parser.add_argument("--player-preset", default=DEFAULT_PLAYER_PRESET_ID, help="Player preset id to validate.")
     parser.add_argument(
@@ -98,6 +100,12 @@ def resolve_profile_player_behavior(profile: str, player_behavior: str | None) -
     return FIGHTER_DEFAULT_PLAYER_BEHAVIOR if profile == "fighter" else DEFAULT_PLAYER_BEHAVIOR
 
 
+def ordered_party_profiles(selected_profile: str) -> tuple[str, ...]:
+    if selected_profile not in PARTY_PROFILE_ORDER:
+        raise ValueError(f"Unsupported PC tuning profile `{selected_profile}`.")
+    return tuple(profile for profile in PARTY_PROFILE_ORDER if profile != selected_profile) + (selected_profile,)
+
+
 def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
     return {
         "profile": profile,
@@ -125,6 +133,61 @@ def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
         "cureWoundsTotalHealing": 0,
         "cureWoundsHeals": [],
         "cureWoundsDownedPickups": 0,
+        "endingWizardHp": [],
+        "wizardDownAtEnd": 0,
+        "wizardEvents": 0,
+        "wizardTurns": 0,
+        "wizardDeathSaves": 0,
+        "wizardSkipTurns": 0,
+        "wizardIncomingAttackHits": 0,
+        "wizardIncomingDamageToHp": 0,
+        "wizardDamagingHitsTaken": 0,
+        "wizardAttacks": 0,
+        "wizardHits": 0,
+        "wizardCrits": 0,
+        "wizardDamageToHp": 0,
+        "wizardSpellCasts": Counter(),
+        "wizardSpellDamage": Counter(),
+        "wizardSpellSlotsSpent": 0,
+        "wizardSpellSlotsSpentBySpell": Counter(),
+        "wizardCantripDamage": 0,
+        "wizardSlottedSpellDamage": 0,
+        "wizardAttackModeCounts": Counter(),
+        "wizardAdvantageSourceCounts": Counter(),
+        "wizardDisadvantageSourceCounts": Counter(),
+        "fireBoltCasts": 0,
+        "fireBoltHits": 0,
+        "fireBoltDamage": 0,
+        "shockingGraspCasts": 0,
+        "shockingGraspHits": 0,
+        "shockingGraspDamage": 0,
+        "shockingGraspNoReactionApplications": 0,
+        "shockingGraspRetreats": 0,
+        "magicMissileCasts": 0,
+        "magicMissileDamage": 0,
+        "magicMissileKillSecures": 0,
+        "magicMissileOverkillDamage": 0,
+        "magicMissileBlockedByShield": 0,
+        "burningHandsCasts": 0,
+        "burningHandsTargetDamageEvents": 0,
+        "burningHandsDamage": 0,
+        "burningHandsEnemyTargets": [],
+        "burningHandsAllyTargets": [],
+        "burningHandsLowValueCasts": 0,
+        "burningHandsFriendlyFireCasts": 0,
+        "burningHandsSaveSuccesses": 0,
+        "burningHandsSaveFailures": 0,
+        "shieldCasts": 0,
+        "shieldPreventedHits": 0,
+        "shieldFailedToStopHits": 0,
+        "shieldMagicMissileBlocks": 0,
+        "mageArmorCasts": 0,
+        "mageArmorAcChanged": 0,
+        "daggerFallbackAttacks": 0,
+        "daggerFallbackHits": 0,
+        "daggerFallbackDamage": 0,
+        "wizardMovementEvents": 0,
+        "wizardMovementSquares": 0,
         "endingRogueHp": [],
         "rogueDownAtEnd": 0,
         "rogueEvents": 0,
@@ -296,6 +359,185 @@ def get_event_damage_to_hp(event: Any) -> int:
     if not event.damage_details:
         return 0
     return int(event.damage_details.final_damage_to_hp or 0)
+
+
+def record_wizard_spell_slot_spend(metrics: dict[str, Any], spell_id: str, resolved_totals: dict[str, Any]) -> None:
+    spell_level = int(resolved_totals.get("spellLevel") or 0)
+    if spell_level <= 0:
+        return
+    add_metric(metrics, "wizardSpellSlotsSpent")
+    metrics["wizardSpellSlotsSpentBySpell"][spell_id] += 1
+
+
+def record_wizard_attack(metrics: dict[str, Any], event: Any) -> None:
+    resolved_totals = event.resolved_totals or {}
+    raw_rolls = event.raw_rolls or {}
+    damage_details = event.damage_details
+    spell_id = str(resolved_totals.get("spellId") or "")
+    weapon_id = damage_details.weapon_id if damage_details else "unknown"
+    damage_to_hp = get_event_damage_to_hp(event)
+    hit = resolved_totals.get("hit") is True
+    attack_mode = str(resolved_totals.get("attackMode") or "normal")
+
+    add_metric(metrics, "wizardAttacks")
+    metrics["wizardAttackModeCounts"][attack_mode] += 1
+    metrics["wizardAdvantageSourceCounts"].update(list(raw_rolls.get("advantageSources") or []))
+    metrics["wizardDisadvantageSourceCounts"].update(list(raw_rolls.get("disadvantageSources") or []))
+    if hit:
+        add_metric(metrics, "wizardHits")
+    if resolved_totals.get("critical") is True:
+        add_metric(metrics, "wizardCrits")
+
+    add_metric(metrics, "wizardDamageToHp", damage_to_hp)
+    if spell_id:
+        metrics["wizardSpellDamage"][spell_id] += damage_to_hp
+        if int(resolved_totals.get("spellLevel") or 0) <= 0:
+            add_metric(metrics, "wizardCantripDamage", damage_to_hp)
+        else:
+            add_metric(metrics, "wizardSlottedSpellDamage", damage_to_hp)
+    elif weapon_id == "dagger":
+        add_metric(metrics, "daggerFallbackAttacks")
+        add_metric(metrics, "daggerFallbackDamage", damage_to_hp)
+        if hit:
+            add_metric(metrics, "daggerFallbackHits")
+
+    if spell_id == "fire_bolt":
+        add_metric(metrics, "fireBoltCasts")
+        add_metric(metrics, "fireBoltDamage", damage_to_hp)
+        if hit:
+            add_metric(metrics, "fireBoltHits")
+    elif spell_id == "shocking_grasp":
+        add_metric(metrics, "shockingGraspCasts")
+        add_metric(metrics, "shockingGraspDamage", damage_to_hp)
+        if hit:
+            add_metric(metrics, "shockingGraspHits")
+        if any("cannot take reactions" in delta.lower() for delta in event.condition_deltas):
+            add_metric(metrics, "shockingGraspNoReactionApplications")
+    elif spell_id == "magic_missile":
+        add_metric(metrics, "magicMissileCasts")
+        add_metric(metrics, "magicMissileDamage", damage_to_hp)
+        if resolved_totals.get("targetDroppedToZero") is True:
+            add_metric(metrics, "magicMissileKillSecures")
+        total_damage = int(damage_details.total_damage or 0) if damage_details else 0
+        add_metric(metrics, "magicMissileOverkillDamage", max(0, total_damage - damage_to_hp))
+        if resolved_totals.get("blockedByShield") is True:
+            add_metric(metrics, "magicMissileBlockedByShield")
+    elif spell_id == "burning_hands":
+        add_metric(metrics, "burningHandsTargetDamageEvents")
+        add_metric(metrics, "burningHandsDamage", damage_to_hp)
+        if resolved_totals.get("saveSucceeded") is True:
+            add_metric(metrics, "burningHandsSaveSuccesses")
+        else:
+            add_metric(metrics, "burningHandsSaveFailures")
+
+
+def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_id: str) -> None:
+    final_state = result.final_state
+    wizard = final_state.units[unit_id]
+    metrics["runs"] += 1
+    metrics["wins"][final_state.winner] += 1
+    metrics["rounds"].append(final_state.round)
+    ending_level_1_slots = wizard.resources.spell_slots_level_1
+    ending_level_2_slots = wizard.resources.spell_slots_level_2
+    metrics["endingSpellSlots"].append(ending_level_1_slots + ending_level_2_slots)
+    metrics["endingSpellSlotsLevel1"].append(ending_level_1_slots)
+    metrics["endingSpellSlotsLevel2"].append(ending_level_2_slots)
+    metrics["endingWizardHp"].append(max(0, wizard.current_hp))
+    if wizard.current_hp <= 0 or wizard.conditions.dead or wizard.conditions.unconscious:
+        add_metric(metrics, "wizardDownAtEnd")
+
+    pending_shocking_grasp_retreat = False
+
+    for frame in result.replay_frames[1:]:
+        for event in frame.events:
+            resolved_totals = event.resolved_totals or {}
+            spell_id = resolved_totals.get("spellId")
+            is_actor = event.actor_id == unit_id
+            targets_wizard = unit_id in event.target_ids and event.actor_id != unit_id
+
+            if is_actor:
+                add_metric(metrics, "wizardEvents")
+
+            if is_actor and event.event_type == "turn_start":
+                add_metric(metrics, "wizardTurns")
+                pending_shocking_grasp_retreat = False
+                continue
+
+            if is_actor and event.event_type == "death_save":
+                add_metric(metrics, "wizardDeathSaves")
+                continue
+
+            if is_actor and event.event_type == "skip":
+                add_metric(metrics, "wizardSkipTurns")
+                continue
+
+            if is_actor and event.event_type == "movement":
+                add_metric(metrics, "wizardMovementEvents")
+                if event.movement_details and event.movement_details.distance:
+                    add_metric(metrics, "wizardMovementSquares", int(event.movement_details.distance))
+                if pending_shocking_grasp_retreat:
+                    add_metric(metrics, "shockingGraspRetreats")
+                    pending_shocking_grasp_retreat = False
+                continue
+
+            if is_actor and spell_id == "burning_hands" and event.event_type == "phase_change":
+                spell_id_text = str(spell_id)
+                metrics["wizardSpellCasts"][spell_id_text] += 1
+                record_wizard_spell_slot_spend(metrics, spell_id_text, resolved_totals)
+                add_metric(metrics, "burningHandsCasts")
+                enemy_targets = int(resolved_totals.get("enemyTargetCount") or 0)
+                ally_targets = int(resolved_totals.get("allyTargetCount") or 0)
+                metrics["burningHandsEnemyTargets"].append(enemy_targets)
+                metrics["burningHandsAllyTargets"].append(ally_targets)
+                if enemy_targets < 2:
+                    add_metric(metrics, "burningHandsLowValueCasts")
+                if ally_targets > 0:
+                    add_metric(metrics, "burningHandsFriendlyFireCasts")
+                continue
+
+            if is_actor and resolved_totals.get("reaction") == "shield" and event.event_type == "phase_change":
+                spell_id_text = "shield"
+                metrics["wizardSpellCasts"][spell_id_text] += 1
+                add_metric(metrics, "wizardSpellSlotsSpent")
+                metrics["wizardSpellSlotsSpentBySpell"][spell_id_text] += 1
+                add_metric(metrics, "shieldCasts")
+                continue
+
+            if is_actor and spell_id == "mage_armor" and event.event_type == "phase_change":
+                spell_id_text = str(spell_id)
+                metrics["wizardSpellCasts"][spell_id_text] += 1
+                record_wizard_spell_slot_spend(metrics, spell_id_text, resolved_totals)
+                add_metric(metrics, "mageArmorCasts")
+                if resolved_totals.get("acChanged") is True:
+                    add_metric(metrics, "mageArmorAcChanged")
+                continue
+
+            if is_actor and event.event_type == "attack":
+                if spell_id and spell_id != "burning_hands":
+                    metrics["wizardSpellCasts"][str(spell_id)] += 1
+                    record_wizard_spell_slot_spend(metrics, str(spell_id), resolved_totals)
+                record_wizard_attack(metrics, event)
+                if spell_id == "shocking_grasp" and resolved_totals.get("hit") is True:
+                    pending_shocking_grasp_retreat = True
+                continue
+
+            if targets_wizard and event.event_type == "attack" and resolved_totals.get("hit") is True:
+                add_metric(metrics, "wizardIncomingAttackHits")
+                incoming_damage = get_event_damage_to_hp(event)
+                add_metric(metrics, "wizardIncomingDamageToHp", incoming_damage)
+                if incoming_damage > 0:
+                    add_metric(metrics, "wizardDamagingHitsTaken")
+
+            if (
+                resolved_totals.get("defenseReaction") == "shield"
+                and resolved_totals.get("defenseReactionActorId") == unit_id
+            ):
+                if resolved_totals.get("hit") is True:
+                    add_metric(metrics, "shieldFailedToStopHits")
+                else:
+                    add_metric(metrics, "shieldPreventedHits")
+            if resolved_totals.get("blockedByShield") is True and targets_wizard:
+                add_metric(metrics, "shieldMagicMissileBlocks")
 
 
 def record_rogue_attack(metrics: dict[str, Any], event: Any) -> None:
@@ -585,6 +827,31 @@ def record_fighter_run(metrics: dict[str, Any], result: RunEncounterResult, unit
             record_fighter_attack(metrics, event, source, trip_prone_targets)
 
 
+def record_profile_run(profile: str, metrics: dict[str, Any], result: RunEncounterResult, unit_id: str) -> None:
+    if profile == "fighter":
+        record_fighter_run(metrics, result, unit_id)
+        return
+    if profile == "paladin":
+        record_paladin_run(metrics, result, unit_id)
+        return
+    if profile == "rogue":
+        record_rogue_run(metrics, result, unit_id)
+        return
+    if profile == "wizard":
+        record_wizard_run(metrics, result, unit_id)
+        return
+    raise ValueError(f"Unsupported PC tuning profile `{profile}`.")
+
+
+def get_profile_recording_skip_reason(result: RunEncounterResult, profile: str, unit_id: str) -> str | None:
+    unit = result.final_state.units.get(unit_id)
+    if not unit:
+        return f"Unit `{unit_id}` is not present in final encounter state."
+    if unit.class_id != profile:
+        return f"Unit `{unit_id}` is `{unit.class_id}`, not `{profile}`."
+    return None
+
+
 def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     runs = int(metrics["runs"])
     ending_slots = list(metrics["endingSpellSlots"])
@@ -595,6 +862,15 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     natures_wrath_restrained = list(metrics["naturesWrathRestrained"])
     lay_on_hands_heals = list(metrics["layOnHandsHeals"])
     cure_wounds_heals = list(metrics["cureWoundsHeals"])
+    ending_wizard_hp = list(metrics["endingWizardHp"])
+    burning_hands_enemy_targets = list(metrics["burningHandsEnemyTargets"])
+    burning_hands_ally_targets = list(metrics["burningHandsAllyTargets"])
+    wizard_attacks = int(metrics["wizardAttacks"])
+    wizard_hits = int(metrics["wizardHits"])
+    shield_casts = int(metrics["shieldCasts"])
+    burning_hands_casts = int(metrics["burningHandsCasts"])
+    shocking_grasp_hits = int(metrics["shockingGraspHits"])
+    spell_slots_spent = int(metrics["wizardSpellSlotsSpent"])
     ending_rogue_hp = list(metrics["endingRogueHp"])
     rogue_attacks = int(metrics["rogueAttacks"])
     rogue_hits = int(metrics["rogueHits"])
@@ -659,6 +935,105 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         "cureWoundsDownedPickups": metrics["cureWoundsDownedPickups"],
         "cureWoundsHealDistribution": distribution(cure_wounds_heals),
     }
+    summary.update(
+        {
+            "endingWizardHpDistribution": distribution(ending_wizard_hp),
+            "averageEndingWizardHp": average(ending_wizard_hp),
+            "wizardDownAtEnd": metrics["wizardDownAtEnd"],
+            "wizardDownAtEndRate": percent(metrics["wizardDownAtEnd"], runs),
+            "wizardEvents": metrics["wizardEvents"],
+            "wizardTurns": metrics["wizardTurns"],
+            "wizardDeathSaves": metrics["wizardDeathSaves"],
+            "wizardSkipTurns": metrics["wizardSkipTurns"],
+            "wizardIncomingAttackHits": metrics["wizardIncomingAttackHits"],
+            "wizardIncomingDamageToHp": metrics["wizardIncomingDamageToHp"],
+            "wizardDamagingHitsTaken": metrics["wizardDamagingHitsTaken"],
+            "wizardAttacks": wizard_attacks,
+            "wizardHits": wizard_hits,
+            "wizardHitRate": percent(wizard_hits, wizard_attacks),
+            "wizardCrits": metrics["wizardCrits"],
+            "wizardDamageToHp": metrics["wizardDamageToHp"],
+            "averageWizardDamagePerRun": round(float(metrics["wizardDamageToHp"]) / runs, 2) if runs else 0.0,
+            "averageWizardDamagePerAttack": round(float(metrics["wizardDamageToHp"]) / wizard_attacks, 2)
+            if wizard_attacks
+            else 0.0,
+            "wizardSpellCasts": dict(sorted(metrics["wizardSpellCasts"].items())),
+            "wizardSpellDamage": dict(sorted(metrics["wizardSpellDamage"].items())),
+            "wizardSpellSlotsSpent": metrics["wizardSpellSlotsSpent"],
+            "wizardSpellSlotsSpentPerRun": round(float(spell_slots_spent) / runs, 2) if runs else 0.0,
+            "wizardSpellSlotsSpentBySpell": dict(sorted(metrics["wizardSpellSlotsSpentBySpell"].items())),
+            "wizardCantripDamage": metrics["wizardCantripDamage"],
+            "wizardSlottedSpellDamage": metrics["wizardSlottedSpellDamage"],
+            "wizardDamagePerSlotSpent": round(float(metrics["wizardSlottedSpellDamage"]) / spell_slots_spent, 2)
+            if spell_slots_spent
+            else 0.0,
+            "wizardAttackModeCounts": dict(sorted(metrics["wizardAttackModeCounts"].items())),
+            "wizardAdvantageSourceCounts": dict(sorted(metrics["wizardAdvantageSourceCounts"].items())),
+            "wizardDisadvantageSourceCounts": dict(sorted(metrics["wizardDisadvantageSourceCounts"].items())),
+            "fireBoltCasts": metrics["fireBoltCasts"],
+            "fireBoltHits": metrics["fireBoltHits"],
+            "fireBoltHitRate": percent(metrics["fireBoltHits"], metrics["fireBoltCasts"]),
+            "fireBoltDamage": metrics["fireBoltDamage"],
+            "shockingGraspCasts": metrics["shockingGraspCasts"],
+            "shockingGraspHits": shocking_grasp_hits,
+            "shockingGraspHitRate": percent(shocking_grasp_hits, metrics["shockingGraspCasts"]),
+            "shockingGraspDamage": metrics["shockingGraspDamage"],
+            "shockingGraspNoReactionApplications": metrics["shockingGraspNoReactionApplications"],
+            "shockingGraspRetreats": metrics["shockingGraspRetreats"],
+            "shockingGraspRetreatRate": percent(metrics["shockingGraspRetreats"], shocking_grasp_hits),
+            "magicMissileCasts": metrics["magicMissileCasts"],
+            "magicMissileDamage": metrics["magicMissileDamage"],
+            "magicMissileAverageDamage": round(
+                float(metrics["magicMissileDamage"]) / metrics["magicMissileCasts"],
+                2,
+            )
+            if metrics["magicMissileCasts"]
+            else 0.0,
+            "magicMissileKillSecures": metrics["magicMissileKillSecures"],
+            "magicMissileKillSecureRate": percent(metrics["magicMissileKillSecures"], metrics["magicMissileCasts"]),
+            "magicMissileOverkillDamage": metrics["magicMissileOverkillDamage"],
+            "magicMissileBlockedByShield": metrics["magicMissileBlockedByShield"],
+            "burningHandsCasts": burning_hands_casts,
+            "burningHandsTargetDamageEvents": metrics["burningHandsTargetDamageEvents"],
+            "burningHandsDamage": metrics["burningHandsDamage"],
+            "burningHandsAverageDamagePerCast": round(
+                float(metrics["burningHandsDamage"]) / burning_hands_casts,
+                2,
+            )
+            if burning_hands_casts
+            else 0.0,
+            "burningHandsAverageEnemyTargets": average(burning_hands_enemy_targets),
+            "burningHandsAverageAllyTargets": average(burning_hands_ally_targets),
+            "burningHandsEnemyTargetDistribution": distribution(burning_hands_enemy_targets),
+            "burningHandsAllyTargetDistribution": distribution(burning_hands_ally_targets),
+            "burningHandsLowValueCasts": metrics["burningHandsLowValueCasts"],
+            "burningHandsLowValueCastRate": percent(metrics["burningHandsLowValueCasts"], burning_hands_casts),
+            "burningHandsFriendlyFireCasts": metrics["burningHandsFriendlyFireCasts"],
+            "burningHandsFriendlyFireRate": percent(metrics["burningHandsFriendlyFireCasts"], burning_hands_casts),
+            "burningHandsSaveSuccesses": metrics["burningHandsSaveSuccesses"],
+            "burningHandsSaveFailures": metrics["burningHandsSaveFailures"],
+            "burningHandsFailedSaveRate": percent(
+                metrics["burningHandsSaveFailures"],
+                metrics["burningHandsSaveSuccesses"] + metrics["burningHandsSaveFailures"],
+            ),
+            "shieldCasts": shield_casts,
+            "shieldPreventedHits": metrics["shieldPreventedHits"],
+            "shieldFailedToStopHits": metrics["shieldFailedToStopHits"],
+            "shieldPreventedHitRate": percent(metrics["shieldPreventedHits"], shield_casts),
+            "shieldMagicMissileBlocks": metrics["shieldMagicMissileBlocks"],
+            "mageArmorCasts": metrics["mageArmorCasts"],
+            "mageArmorAcChanged": metrics["mageArmorAcChanged"],
+            "daggerFallbackAttacks": metrics["daggerFallbackAttacks"],
+            "daggerFallbackHits": metrics["daggerFallbackHits"],
+            "daggerFallbackHitRate": percent(metrics["daggerFallbackHits"], metrics["daggerFallbackAttacks"]),
+            "daggerFallbackDamage": metrics["daggerFallbackDamage"],
+            "wizardMovementEvents": metrics["wizardMovementEvents"],
+            "wizardMovementSquares": metrics["wizardMovementSquares"],
+            "averageWizardMovementSquaresPerRun": round(float(metrics["wizardMovementSquares"]) / runs, 2)
+            if runs
+            else 0.0,
+        }
+    )
     summary.update(
         {
             "endingRogueHpDistribution": distribution(ending_rogue_hp),
@@ -935,6 +1310,48 @@ def run_fighter_sample(
     return summarize_metrics(overall_metrics), scenario_rows
 
 
+def run_wizard_sample(
+    *,
+    unit_id: str,
+    player_preset_id: str,
+    scenario_ids: tuple[str, ...],
+    runs_per_scenario: int,
+    player_behavior: str,
+    monster_behavior: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    overall_metrics = new_metrics("wizard")
+    scenario_rows: list[dict[str, Any]] = []
+
+    for scenario_id in scenario_ids:
+        scenario_metrics = new_metrics("wizard")
+        print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s)")
+        for run_index in range(runs_per_scenario):
+            seed = f"pc-tuning-{unit_id}-{scenario_id}-{run_index:03d}"
+            result = run_encounter(
+                EncounterConfig(
+                    seed=seed,
+                    enemy_preset_id=scenario_id,
+                    player_preset_id=player_preset_id,
+                    player_behavior=player_behavior,
+                    monster_behavior=monster_behavior,
+                )
+            )
+            unit = result.final_state.units.get(unit_id)
+            if not unit:
+                raise ValueError(f"Unit `{unit_id}` is not present in final encounter state.")
+            if unit.class_id != "wizard":
+                raise ValueError(f"Wizard tuning profile requires a wizard unit; `{unit_id}` is `{unit.class_id}`.")
+
+            record_wizard_run(overall_metrics, result, unit_id)
+            record_wizard_run(scenario_metrics, result, unit_id)
+
+        scenario_summary = summarize_metrics(scenario_metrics)
+        scenario_summary["scenarioId"] = scenario_id
+        scenario_rows.append(scenario_summary)
+
+    return summarize_metrics(overall_metrics), scenario_rows
+
+
 def run_profile_sample(
     *,
     profile: str,
@@ -972,7 +1389,94 @@ def run_profile_sample(
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
         )
+    if profile == "wizard":
+        return run_wizard_sample(
+            unit_id=unit_id,
+            player_preset_id=player_preset_id,
+            scenario_ids=scenario_ids,
+            runs_per_scenario=runs_per_scenario,
+            player_behavior=player_behavior,
+            monster_behavior=monster_behavior,
+        )
     raise ValueError(f"Unsupported PC tuning profile `{profile}`.")
+
+
+def build_party_breakdown_payload(
+    *,
+    profile_unit_ids: dict[str, str],
+    overall_metrics_by_profile: dict[str, dict[str, Any]],
+    scenario_rows_by_profile: dict[str, list[dict[str, Any]]],
+    missing_reasons: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    party_breakdown: dict[str, dict[str, Any]] = {}
+    for profile in PARTY_PROFILE_ORDER:
+        missing_reason = missing_reasons.get(profile)
+        party_breakdown[profile] = {
+            "unitId": profile_unit_ids[profile],
+            "missing": bool(missing_reason),
+            "reason": missing_reason,
+            "overall": summarize_metrics(overall_metrics_by_profile[profile]),
+            "scenarios": scenario_rows_by_profile[profile],
+        }
+    return party_breakdown
+
+
+def run_party_profile_sample(
+    *,
+    selected_profile: str,
+    selected_unit_id: str,
+    player_preset_id: str,
+    scenario_ids: tuple[str, ...],
+    runs_per_scenario: int,
+    player_behavior: str,
+    monster_behavior: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    profile_unit_ids = dict(PARTY_PROFILE_UNIT_IDS)
+    profile_unit_ids[selected_profile] = selected_unit_id
+    overall_metrics_by_profile = {profile: new_metrics(profile) for profile in PARTY_PROFILE_ORDER}
+    scenario_rows_by_profile: dict[str, list[dict[str, Any]]] = {profile: [] for profile in PARTY_PROFILE_ORDER}
+    missing_reasons: dict[str, str] = {}
+
+    for scenario_id in scenario_ids:
+        scenario_metrics_by_profile = {profile: new_metrics(profile) for profile in PARTY_PROFILE_ORDER}
+        print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s), player={player_behavior}")
+        for run_index in range(runs_per_scenario):
+            seed = f"pc-tuning-party-{player_behavior}-{scenario_id}-{run_index:03d}"
+            result = run_encounter(
+                EncounterConfig(
+                    seed=seed,
+                    enemy_preset_id=scenario_id,
+                    player_preset_id=player_preset_id,
+                    player_behavior=player_behavior,
+                    monster_behavior=monster_behavior,
+                )
+            )
+
+            for profile in PARTY_PROFILE_ORDER:
+                unit_id = profile_unit_ids[profile]
+                skip_reason = get_profile_recording_skip_reason(result, profile, unit_id)
+                if skip_reason:
+                    missing_reasons.setdefault(profile, skip_reason)
+                    continue
+                record_profile_run(profile, overall_metrics_by_profile[profile], result, unit_id)
+                record_profile_run(profile, scenario_metrics_by_profile[profile], result, unit_id)
+
+        for profile in PARTY_PROFILE_ORDER:
+            scenario_summary = summarize_metrics(scenario_metrics_by_profile[profile])
+            scenario_summary["scenarioId"] = scenario_id
+            if profile in missing_reasons:
+                scenario_summary["missing"] = True
+                scenario_summary["reason"] = missing_reasons[profile]
+            scenario_rows_by_profile[profile].append(scenario_summary)
+
+    party_breakdown = build_party_breakdown_payload(
+        profile_unit_ids=profile_unit_ids,
+        overall_metrics_by_profile=overall_metrics_by_profile,
+        scenario_rows_by_profile=scenario_rows_by_profile,
+        missing_reasons=missing_reasons,
+    )
+    selected_breakdown = party_breakdown[selected_profile]
+    return selected_breakdown["overall"], selected_breakdown["scenarios"], party_breakdown
 
 
 def delta(left: dict[str, Any], right: dict[str, Any], key: str) -> float:
@@ -1004,15 +1508,20 @@ def run_fighter_behavior_comparison(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, float]]:
     behavior_summaries: dict[str, dict[str, Any]] = {}
     for player_behavior in ("smart", "dumb"):
-        overall, scenarios = run_fighter_sample(
-            unit_id=unit_id,
+        overall, scenarios, party_breakdown = run_party_profile_sample(
+            selected_profile="fighter",
+            selected_unit_id=unit_id,
             player_preset_id=player_preset_id,
             scenario_ids=scenario_ids,
             runs_per_scenario=runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
         )
-        behavior_summaries[player_behavior] = {"overall": overall, "scenarios": scenarios}
+        behavior_summaries[player_behavior] = {
+            "overall": overall,
+            "scenarios": scenarios,
+            "partyBreakdown": party_breakdown,
+        }
 
     return behavior_summaries, build_fighter_behavior_delta(
         behavior_summaries["smart"]["overall"],
@@ -1032,6 +1541,7 @@ def build_report_payload(
     elapsed_seconds: float,
     overall: dict[str, Any],
     scenarios: list[dict[str, Any]],
+    party_breakdown: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "profile": profile,
@@ -1046,6 +1556,7 @@ def build_report_payload(
         "generatedContext": collect_git_context(REPO_ROOT),
         "overall": overall,
         "scenarios": scenarios,
+        "partyBreakdown": party_breakdown or {},
     }
 
 
@@ -1122,6 +1633,59 @@ def format_rogue_console_summary(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_wizard_console_summary(payload: dict[str, Any]) -> str:
+    overall = payload["overall"]
+    lines = [
+        "PC tuning sample:",
+        f"- profile: {payload['profile']}",
+        f"- unitId: {payload['unitId']}",
+        f"- totalRuns: {payload['totalRuns']}",
+        f"- playerBehavior: {payload['playerBehavior']}",
+        f"- monsterBehavior: {payload['monsterBehavior']}",
+        (
+            f"- overall: players {overall['playerWinRate']}%, enemies {overall['enemyWinRate']}%, "
+            f"avg rounds {overall['averageRounds']}, Wizard down {overall['wizardDownAtEndRate']}%"
+        ),
+        (
+            f"- damage: {overall['wizardDamageToHp']} HP total, "
+            f"avg/run {overall['averageWizardDamagePerRun']}, "
+            f"cantrip {overall['wizardCantripDamage']}, slotted {overall['wizardSlottedSpellDamage']}, "
+            f"damage/slot {overall['wizardDamagePerSlotSpent']}"
+        ),
+        (
+            f"- spells: Fire Bolt {overall['fireBoltHits']}/{overall['fireBoltCasts']} hit(s), "
+            f"Magic Missile {overall['magicMissileCasts']} cast(s), "
+            f"Burning Hands {overall['burningHandsCasts']} cast(s), "
+            f"Shocking Grasp {overall['shockingGraspCasts']} cast(s), "
+            f"Shield {overall['shieldCasts']} cast(s)"
+        ),
+        (
+            f"- quality: unused slots {overall['runsWithUnusedSpellSlots']}/{overall['runs']}, "
+            f"Magic Missile kills {overall['magicMissileKillSecures']}, "
+            f"Burning Hands avg enemies {overall['burningHandsAverageEnemyTargets']}, "
+            f"friendly-fire casts {overall['burningHandsFriendlyFireCasts']}, "
+            f"Shield prevented {overall['shieldPreventedHits']} hit(s)"
+        ),
+        (
+            f"- fallback/survival: dagger {overall['daggerFallbackAttacks']} attack(s), "
+            f"incoming hits {overall['wizardIncomingAttackHits']}, "
+            f"incoming damage {overall['wizardIncomingDamageToHp']}, "
+            f"avg ending HP {overall['averageEndingWizardHp']}"
+        ),
+    ]
+    for row in payload["scenarios"]:
+        lines.append(
+            f"- {row['scenarioId']}: players {row['playerWinRate']}%, "
+            f"damage/run {row['averageWizardDamagePerRun']}, "
+            f"slots spent {row['wizardSpellSlotsSpent']}, "
+            f"Shield {row['shieldCasts']}, "
+            f"Burning Hands {row['burningHandsCasts']} "
+            f"(avg enemies {row['burningHandsAverageEnemyTargets']}, allies {row['burningHandsAverageAllyTargets']}), "
+            f"down {row['wizardDownAtEndRate']}%"
+        )
+    return "\n".join(lines)
+
+
 def format_fighter_behavior_line(label: str, overall: dict[str, Any]) -> str:
     return (
         f"- {label}: players {overall['playerWinRate']}%, "
@@ -1183,6 +1747,63 @@ def format_fighter_console_summary(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
+    unit_id = entry.get("unitId", PARTY_PROFILE_UNIT_IDS.get(profile, "?"))
+    if not entry or entry.get("missing"):
+        return f"- {profile} ({unit_id}): missing - {entry.get('reason') or 'not recorded'}"
+
+    overall = entry["overall"]
+    if profile == "fighter":
+        return (
+            f"- fighter ({unit_id}): dmg/run {overall['averageFighterDamagePerRun']}, "
+            f"attacks/run {overall['fighterAttacksPerRun']}, hit {overall['fighterHitRate']}%, "
+            f"SD spent/run {overall['superiorityDiceSpentPerRun']}, "
+            f"ending SD {overall['averageEndingSuperiorityDice']}, "
+            f"Surge {overall['actionSurgeUses']}, Second Wind {overall['secondWindUses']}"
+        )
+    if profile == "paladin":
+        return (
+            f"- paladin ({unit_id}): Bless {overall['blessCasts']}, "
+            f"LoH {overall['layOnHandsUses']} ({overall['layOnHandsDownedPickups']} pickups), "
+            f"Cure {overall['cureWoundsUses']}, Smite {overall['divineSmites']}, "
+            f"Nature {overall['naturesWrathUses']}, Sentinel {overall['sentinelGuardianTriggers']}, "
+            f"ending slots {overall['averageEndingSpellSlots']}, ending LoH {overall['averageEndingLayOnHands']}"
+        )
+    if profile == "rogue":
+        return (
+            f"- rogue ({unit_id}): dmg/run {overall['averageRogueDamagePerRun']}, "
+            f"attacks {overall['rogueAttacks']}, hit {overall['rogueHitRate']}%, "
+            f"Sneak {overall['sneakAttackApplications']}, Steady {overall['steadyAimUses']}, "
+            f"Hide {overall['hideSuccesses']}/{overall['hideAttempts']}, "
+            f"Sharpshooter {overall['sharpshooterApplications']}, Uncanny {overall['uncannyDodgeUses']}"
+        )
+    if profile == "wizard":
+        return (
+            f"- wizard ({unit_id}): dmg/run {overall['averageWizardDamagePerRun']}, "
+            f"slots spent {overall['wizardSpellSlotsSpent']}, unused-slot runs {overall['runsWithUnusedSpellSlots']}, "
+            f"Fire Bolt {overall['fireBoltCasts']}, Magic Missile {overall['magicMissileCasts']}, "
+            f"Burning Hands {overall['burningHandsCasts']}, Shield {overall['shieldCasts']}, "
+            f"down {overall['wizardDownAtEndRate']}%"
+        )
+    return f"- {profile} ({unit_id}): unsupported compact summary"
+
+
+def format_compact_party_console_lines(
+    party_breakdown: dict[str, dict[str, Any]],
+    selected_profile: str,
+    *,
+    include_selected: bool = False,
+) -> list[str]:
+    if not party_breakdown:
+        return []
+    lines: list[str] = []
+    for profile in ordered_party_profiles(selected_profile):
+        if profile == selected_profile and not include_selected:
+            continue
+        lines.append(format_compact_party_line(profile, party_breakdown.get(profile, {})))
+    return lines
+
+
 def format_fighter_comparison_console_summary(payload: dict[str, Any]) -> str:
     smart = payload["behaviorSummaries"]["smart"]["overall"]
     dumb = payload["behaviorSummaries"]["dumb"]["overall"]
@@ -1194,6 +1815,18 @@ def format_fighter_comparison_console_summary(payload: dict[str, Any]) -> str:
         f"- totalRuns: {payload['totalRuns']}",
         "- playerBehavior: both",
         f"- monsterBehavior: {payload['monsterBehavior']}",
+        "- smart party breakdown:",
+        *format_compact_party_console_lines(
+            payload["behaviorSummaries"]["smart"].get("partyBreakdown", {}),
+            "fighter",
+            include_selected=True,
+        ),
+        "- dumb party breakdown:",
+        *format_compact_party_console_lines(
+            payload["behaviorSummaries"]["dumb"].get("partyBreakdown", {}),
+            "fighter",
+            include_selected=True,
+        ),
         format_fighter_behavior_line("smart", smart),
         format_fighter_behavior_line("dumb", dumb),
         (
@@ -1209,13 +1842,15 @@ def format_fighter_comparison_console_summary(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_console_summary(payload: dict[str, Any]) -> str:
+def format_selected_console_summary(payload: dict[str, Any]) -> str:
     if payload["profile"] == "fighter" and payload.get("playerBehavior") == "both":
         return format_fighter_comparison_console_summary(payload)
     if payload["profile"] == "fighter":
         return format_fighter_console_summary(payload)
     if payload["profile"] == "rogue":
         return format_rogue_console_summary(payload)
+    if payload["profile"] == "wizard":
+        return format_wizard_console_summary(payload)
 
     overall = payload["overall"]
     lines = [
@@ -1256,6 +1891,30 @@ def format_console_summary(payload: dict[str, Any]) -> str:
             f"Nature {row['naturesWrathUses']}, Sentinel {row['sentinelGuardianTriggers']}"
         )
     return "\n".join(lines)
+
+
+def format_console_summary(payload: dict[str, Any]) -> str:
+    if payload["profile"] == "fighter" and payload.get("playerBehavior") == "both":
+        return format_fighter_comparison_console_summary(payload)
+
+    party_lines = format_compact_party_console_lines(payload.get("partyBreakdown", {}), payload["profile"])
+    selected_summary = format_selected_console_summary(payload)
+    if not party_lines:
+        return selected_summary
+
+    header = [
+        "PC tuning sample:",
+        f"- profile: {payload['profile']}",
+        f"- unitId: {payload['unitId']}",
+        f"- totalRuns: {payload['totalRuns']}",
+        f"- playerBehavior: {payload['playerBehavior']}",
+        f"- monsterBehavior: {payload['monsterBehavior']}",
+        "- party breakdown:",
+        *party_lines,
+        "",
+        "Selected profile detail:",
+    ]
+    return "\n".join(header + [selected_summary])
 
 
 def format_rogue_markdown_report(payload: dict[str, Any]) -> str:
@@ -1314,6 +1973,89 @@ def format_rogue_markdown_report(payload: dict[str, Any]) -> str:
             f"{row['steadyAimUses']} | {row['hideSuccesses']}/{row['hideAttempts']} | "
             f"{row['sharpshooterApplications']} | {row['uncannyDodgeUses']} | "
             f"{row['averageRogueDamagePerRun']} |"
+        )
+    return "\n".join(lines)
+
+
+def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
+    overall = payload["overall"]
+    lines = [
+        "# PC Tuning Sample",
+        "",
+        f"- profile: `{payload['profile']}`",
+        f"- unitId: `{payload['unitId']}`",
+        f"- playerPresetId: `{payload['playerPresetId']}`",
+        f"- scenarioIds: {', '.join(f'`{scenario_id}`' for scenario_id in payload['scenarioIds'])}",
+        f"- runsPerScenario: `{payload['runsPerScenario']}`",
+        f"- totalRuns: `{payload['totalRuns']}`",
+        f"- playerBehavior: `{payload['playerBehavior']}`",
+        f"- monsterBehavior: `{payload['monsterBehavior']}`",
+        f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
+        "",
+        "## Overall",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| Player win rate | {overall['playerWinRate']}% |",
+        f"| Average rounds | {overall['averageRounds']} |",
+        f"| Wizard down-at-end rate | {overall['wizardDownAtEndRate']}% |",
+        f"| Average ending Wizard HP | {overall['averageEndingWizardHp']} |",
+        f"| Wizard damage to HP | {overall['wizardDamageToHp']} |",
+        f"| Average Wizard damage per run | {overall['averageWizardDamagePerRun']} |",
+        f"| Cantrip damage | {overall['wizardCantripDamage']} |",
+        f"| Slotted spell damage | {overall['wizardSlottedSpellDamage']} |",
+        f"| Spell slots spent | {overall['wizardSpellSlotsSpent']} |",
+        f"| Damage per slot spent | {overall['wizardDamagePerSlotSpent']} |",
+        f"| Runs with unused spell slots | {overall['runsWithUnusedSpellSlots']} |",
+        f"| Fire Bolt hits/casts | {overall['fireBoltHits']} / {overall['fireBoltCasts']} |",
+        f"| Magic Missile casts | {overall['magicMissileCasts']} |",
+        f"| Magic Missile kill secures | {overall['magicMissileKillSecures']} |",
+        f"| Magic Missile overkill damage | {overall['magicMissileOverkillDamage']} |",
+        f"| Burning Hands casts | {overall['burningHandsCasts']} |",
+        f"| Burning Hands average enemy targets | {overall['burningHandsAverageEnemyTargets']} |",
+        f"| Burning Hands average ally targets | {overall['burningHandsAverageAllyTargets']} |",
+        f"| Burning Hands friendly-fire casts | {overall['burningHandsFriendlyFireCasts']} |",
+        f"| Burning Hands low-value casts | {overall['burningHandsLowValueCasts']} |",
+        f"| Shocking Grasp casts | {overall['shockingGraspCasts']} |",
+        f"| Shocking Grasp retreats | {overall['shockingGraspRetreats']} |",
+        f"| Shield casts | {overall['shieldCasts']} |",
+        f"| Shield prevented hits | {overall['shieldPreventedHits']} |",
+        f"| Shield failed to stop hits | {overall['shieldFailedToStopHits']} |",
+        f"| Mage Armor casts | {overall['mageArmorCasts']} |",
+        f"| Dagger fallback attacks | {overall['daggerFallbackAttacks']} |",
+        f"| Incoming attack hits | {overall['wizardIncomingAttackHits']} |",
+        f"| Incoming damage to HP | {overall['wizardIncomingDamageToHp']} |",
+        "",
+        "## Spell Mix",
+        "",
+        "| Spell | Casts | Damage | Slots Spent |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    spell_casts = overall["wizardSpellCasts"]
+    spell_damage = overall["wizardSpellDamage"]
+    spell_slots = overall["wizardSpellSlotsSpentBySpell"]
+    for spell_id in sorted(set(spell_casts) | set(spell_damage) | set(spell_slots)):
+        lines.append(
+            f"| `{spell_id}` | {spell_casts.get(spell_id, 0)} | "
+            f"{spell_damage.get(spell_id, 0)} | {spell_slots.get(spell_id, 0)} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Scenarios",
+            "",
+            "| Scenario | Win Rate | Avg Rounds | Damage/Run | Slots Spent | Unused Slots | Shield | Magic Missile | Burning Hands | BH Enemies | BH Allies | Down Rate |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in payload["scenarios"]:
+        lines.append(
+            f"| `{row['scenarioId']}` | {row['playerWinRate']}% | {row['averageRounds']} | "
+            f"{row['averageWizardDamagePerRun']} | {row['wizardSpellSlotsSpent']} | "
+            f"{row['runsWithUnusedSpellSlots']} | {row['shieldCasts']} | {row['magicMissileCasts']} | "
+            f"{row['burningHandsCasts']} | {row['burningHandsAverageEnemyTargets']} | "
+            f"{row['burningHandsAverageAllyTargets']} | {row['wizardDownAtEndRate']}% |"
         )
     return "\n".join(lines)
 
@@ -1404,6 +2146,13 @@ def format_fighter_comparison_markdown_report(payload: dict[str, Any]) -> str:
     for key, value in payload["behaviorDelta"].items():
         lines.append(f"| {key} | {value} |")
     for behavior in ("smart", "dumb"):
+        party_markdown = format_party_breakdown_markdown(
+            payload["behaviorSummaries"][behavior].get("partyBreakdown", {}),
+            "fighter",
+            heading=f"## {behavior.title()} Party Breakdown",
+        )
+        if party_markdown:
+            lines.extend(["", party_markdown])
         lines.extend(["", f"# {behavior.title()} Fighter", ""])
         append_fighter_markdown_sections(
             lines,
@@ -1413,13 +2162,37 @@ def format_fighter_comparison_markdown_report(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_markdown_report(payload: dict[str, Any]) -> str:
+def format_party_breakdown_markdown(
+    party_breakdown: dict[str, dict[str, Any]],
+    selected_profile: str,
+    *,
+    heading: str = "## Party Breakdown",
+) -> str:
+    if not party_breakdown:
+        return ""
+    lines = [
+        heading,
+        "",
+        "| Class | Unit | Compact Summary |",
+        "| --- | --- | --- |",
+    ]
+    for profile in ordered_party_profiles(selected_profile):
+        entry = party_breakdown.get(profile, {})
+        compact = format_compact_party_line(profile, entry)
+        unit_id = entry.get("unitId", PARTY_PROFILE_UNIT_IDS.get(profile, "?"))
+        lines.append(f"| {profile} | `{unit_id}` | {compact.removeprefix('- ')} |")
+    return "\n".join(lines)
+
+
+def format_selected_markdown_report(payload: dict[str, Any]) -> str:
     if payload["profile"] == "fighter" and payload.get("playerBehavior") == "both":
         return format_fighter_comparison_markdown_report(payload)
     if payload["profile"] == "fighter":
         return format_fighter_markdown_report(payload)
     if payload["profile"] == "rogue":
         return format_rogue_markdown_report(payload)
+    if payload["profile"] == "wizard":
+        return format_wizard_markdown_report(payload)
 
     overall = payload["overall"]
     lines = [
@@ -1474,6 +2247,17 @@ def format_markdown_report(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_markdown_report(payload: dict[str, Any]) -> str:
+    selected_report = format_selected_markdown_report(payload)
+    if payload["profile"] == "fighter" and payload.get("playerBehavior") == "both":
+        return selected_report
+
+    party_markdown = format_party_breakdown_markdown(payload.get("partyBreakdown", {}), payload["profile"])
+    if not party_markdown:
+        return selected_report
+    return f"{party_markdown}\n\n{selected_report}"
+
+
 def main() -> None:
     args = parse_args()
     unit_id = resolve_profile_unit_id(args.profile, args.unit)
@@ -1507,9 +2291,9 @@ def main() -> None:
             behavior_delta=behavior_delta,
         )
     else:
-        overall, scenarios = run_profile_sample(
-            profile=args.profile,
-            unit_id=unit_id,
+        overall, scenarios, party_breakdown = run_party_profile_sample(
+            selected_profile=args.profile,
+            selected_unit_id=unit_id,
             player_preset_id=args.player_preset,
             scenario_ids=scenario_ids,
             runs_per_scenario=args.runs_per_scenario,
@@ -1528,6 +2312,7 @@ def main() -> None:
             elapsed_seconds=elapsed,
             overall=overall,
             scenarios=scenarios,
+            party_breakdown=party_breakdown,
         )
     write_json_report(args.json_path, payload)
     write_text_report(args.markdown_path, format_markdown_report(payload))

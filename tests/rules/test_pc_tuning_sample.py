@@ -4,11 +4,19 @@ from scripts import run_pc_tuning_sample
 
 
 def test_pc_tuning_sample_defaults_to_paladin_standard_battery() -> None:
-    assert run_pc_tuning_sample.PROFILE_CHOICES == ("paladin", "rogue", "fighter")
+    assert run_pc_tuning_sample.PROFILE_CHOICES == ("paladin", "rogue", "fighter", "wizard")
     assert run_pc_tuning_sample.DEFAULT_PROFILE == "paladin"
     assert run_pc_tuning_sample.DEFAULT_UNIT_ID == "F2"
     assert run_pc_tuning_sample.PROFILE_DEFAULT_UNIT_IDS["rogue"] == "F3"
     assert run_pc_tuning_sample.PROFILE_DEFAULT_UNIT_IDS["fighter"] == "F1"
+    assert run_pc_tuning_sample.PROFILE_DEFAULT_UNIT_IDS["wizard"] == "F4"
+    assert run_pc_tuning_sample.PARTY_PROFILE_ORDER == ("fighter", "paladin", "rogue", "wizard")
+    assert run_pc_tuning_sample.PARTY_PROFILE_UNIT_IDS == {
+        "fighter": "F1",
+        "paladin": "F2",
+        "rogue": "F3",
+        "wizard": "F4",
+    }
     assert run_pc_tuning_sample.DEFAULT_RUNS_PER_SCENARIO == 60
     assert run_pc_tuning_sample.DEFAULT_PLAYER_BEHAVIOR == "smart"
     assert run_pc_tuning_sample.FIGHTER_DEFAULT_PLAYER_BEHAVIOR == "both"
@@ -67,15 +75,22 @@ def test_pc_tuning_sample_resolves_profile_default_units() -> None:
     assert run_pc_tuning_sample.resolve_profile_unit_id("paladin", None) == "F2"
     assert run_pc_tuning_sample.resolve_profile_unit_id("rogue", None) == "F3"
     assert run_pc_tuning_sample.resolve_profile_unit_id("fighter", None) == "F1"
+    assert run_pc_tuning_sample.resolve_profile_unit_id("wizard", None) == "F4"
     assert run_pc_tuning_sample.resolve_profile_unit_id("rogue", "F4") == "F4"
 
 
 def test_pc_tuning_sample_resolves_default_behavior_by_profile() -> None:
     assert run_pc_tuning_sample.resolve_profile_player_behavior("paladin", None) == "smart"
     assert run_pc_tuning_sample.resolve_profile_player_behavior("rogue", None) == "smart"
+    assert run_pc_tuning_sample.resolve_profile_player_behavior("wizard", None) == "smart"
     assert run_pc_tuning_sample.resolve_profile_player_behavior("fighter", None) == "both"
     assert run_pc_tuning_sample.resolve_profile_player_behavior("fighter", "smart") == "smart"
     assert run_pc_tuning_sample.resolve_profile_player_behavior("fighter", "dumb") == "dumb"
+
+
+def test_pc_tuning_sample_orders_selected_profile_last() -> None:
+    assert run_pc_tuning_sample.ordered_party_profiles("wizard") == ("fighter", "paladin", "rogue", "wizard")
+    assert run_pc_tuning_sample.ordered_party_profiles("fighter") == ("paladin", "rogue", "wizard", "fighter")
 
 
 def test_pc_tuning_sample_summary_tracks_rogue_damage_reliability_and_defense() -> None:
@@ -137,6 +152,94 @@ def test_pc_tuning_sample_summary_tracks_rogue_damage_reliability_and_defense() 
     assert summary["uncannyDodgeUseRatePerIncomingHit"] == 50.0
     assert summary["averageUncannyDodgeDamagePrevented"] == 4
     assert summary["averageMovementSquaresPerRun"] == 2.5
+
+
+def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> None:
+    metrics = run_pc_tuning_sample.new_metrics("wizard")
+    metrics["runs"] = 2
+    metrics["wins"].update({"fighters": 1, "goblins": 1})
+    metrics["rounds"].extend([4, 6])
+    metrics["endingSpellSlots"].extend([0, 1])
+    metrics["endingSpellSlotsLevel1"].extend([0, 1])
+    metrics["endingSpellSlotsLevel2"].extend([0, 0])
+    metrics["endingWizardHp"].extend([8, 0])
+    metrics["wizardDownAtEnd"] = 1
+    metrics["wizardIncomingAttackHits"] = 3
+    metrics["wizardIncomingDamageToHp"] = 18
+    metrics["wizardDamagingHitsTaken"] = 2
+    metrics["wizardAttacks"] = 5
+    metrics["wizardHits"] = 3
+    metrics["wizardCrits"] = 1
+    metrics["wizardDamageToHp"] = 42
+    metrics["wizardSpellCasts"].update(
+        {
+            "fire_bolt": 2,
+            "magic_missile": 1,
+            "burning_hands": 1,
+            "shield": 1,
+            "shocking_grasp": 1,
+        }
+    )
+    metrics["wizardSpellDamage"].update(
+        {
+            "fire_bolt": 12,
+            "magic_missile": 9,
+            "burning_hands": 16,
+            "shocking_grasp": 5,
+        }
+    )
+    metrics["wizardSpellSlotsSpent"] = 3
+    metrics["wizardSpellSlotsSpentBySpell"].update({"magic_missile": 1, "burning_hands": 1, "shield": 1})
+    metrics["wizardCantripDamage"] = 17
+    metrics["wizardSlottedSpellDamage"] = 25
+    metrics["wizardAttackModeCounts"].update({"normal": 4, "disadvantage": 1})
+    metrics["fireBoltCasts"] = 2
+    metrics["fireBoltHits"] = 1
+    metrics["fireBoltDamage"] = 12
+    metrics["shockingGraspCasts"] = 1
+    metrics["shockingGraspHits"] = 1
+    metrics["shockingGraspDamage"] = 5
+    metrics["shockingGraspNoReactionApplications"] = 1
+    metrics["shockingGraspRetreats"] = 1
+    metrics["magicMissileCasts"] = 1
+    metrics["magicMissileDamage"] = 9
+    metrics["magicMissileKillSecures"] = 1
+    metrics["magicMissileOverkillDamage"] = 2
+    metrics["burningHandsCasts"] = 1
+    metrics["burningHandsTargetDamageEvents"] = 3
+    metrics["burningHandsDamage"] = 16
+    metrics["burningHandsEnemyTargets"].append(3)
+    metrics["burningHandsAllyTargets"].append(0)
+    metrics["burningHandsSaveSuccesses"] = 1
+    metrics["burningHandsSaveFailures"] = 2
+    metrics["shieldCasts"] = 1
+    metrics["shieldPreventedHits"] = 1
+    metrics["daggerFallbackAttacks"] = 1
+    metrics["daggerFallbackHits"] = 0
+    metrics["wizardMovementEvents"] = 2
+    metrics["wizardMovementSquares"] = 5
+
+    summary = run_pc_tuning_sample.summarize_metrics(metrics)
+
+    assert summary["playerWinRate"] == 50.0
+    assert summary["averageEndingWizardHp"] == 4
+    assert summary["wizardDownAtEndRate"] == 50.0
+    assert summary["wizardHitRate"] == 60.0
+    assert summary["averageWizardDamagePerRun"] == 21
+    assert summary["wizardSpellCasts"]["fire_bolt"] == 2
+    assert summary["wizardSpellDamage"]["burning_hands"] == 16
+    assert summary["wizardSpellSlotsSpentPerRun"] == 1.5
+    assert summary["wizardDamagePerSlotSpent"] == 8.33
+    assert summary["fireBoltHitRate"] == 50.0
+    assert summary["shockingGraspRetreatRate"] == 100.0
+    assert summary["magicMissileKillSecureRate"] == 100.0
+    assert summary["burningHandsAverageEnemyTargets"] == 3
+    assert summary["burningHandsAverageAllyTargets"] == 0
+    assert summary["burningHandsFriendlyFireRate"] == 0.0
+    assert summary["burningHandsFailedSaveRate"] == 66.7
+    assert summary["shieldPreventedHitRate"] == 100.0
+    assert summary["daggerFallbackHitRate"] == 0.0
+    assert summary["averageWizardMovementSquaresPerRun"] == 2.5
 
 
 def test_pc_tuning_sample_summary_tracks_fighter_action_economy_and_maneuvers() -> None:
@@ -258,3 +361,122 @@ def test_pc_tuning_sample_builds_fighter_behavior_delta() -> None:
         "averageEndingActionSurgeUses": -0.5,
         "averageEndingSecondWindUses": 1.0,
     }
+
+
+def test_pc_tuning_sample_builds_party_breakdown_payload() -> None:
+    overall_metrics = {profile: run_pc_tuning_sample.new_metrics(profile) for profile in run_pc_tuning_sample.PARTY_PROFILE_ORDER}
+    overall_metrics["fighter"]["runs"] = 1
+    overall_metrics["fighter"]["wins"].update({"fighters": 1})
+    overall_metrics["fighter"]["rounds"].append(3)
+    scenario_rows = {profile: [] for profile in run_pc_tuning_sample.PARTY_PROFILE_ORDER}
+    scenario_rows["fighter"].append({"scenarioId": "hobgoblin_kill_box", "runs": 1})
+    party_breakdown = run_pc_tuning_sample.build_party_breakdown_payload(
+        profile_unit_ids=dict(run_pc_tuning_sample.PARTY_PROFILE_UNIT_IDS),
+        overall_metrics_by_profile=overall_metrics,
+        scenario_rows_by_profile=scenario_rows,
+        missing_reasons={"wizard": "Unit `F4` is not present in final encounter state."},
+    )
+
+    assert tuple(party_breakdown) == run_pc_tuning_sample.PARTY_PROFILE_ORDER
+    assert party_breakdown["fighter"]["unitId"] == "F1"
+    assert party_breakdown["fighter"]["missing"] is False
+    assert party_breakdown["fighter"]["overall"]["runs"] == 1
+    assert party_breakdown["wizard"]["missing"] is True
+    assert "F4" in party_breakdown["wizard"]["reason"]
+
+
+def test_pc_tuning_sample_report_payload_preserves_selected_summary_and_party_breakdown() -> None:
+    selected_overall = {"runs": 1, "playerWinRate": 100.0}
+    selected_scenarios = [{"scenarioId": "hobgoblin_kill_box", "runs": 1}]
+    party_breakdown = {
+        "fighter": {"unitId": "F1", "overall": {"runs": 1}, "scenarios": []},
+        "paladin": {"unitId": "F2", "overall": {"runs": 1}, "scenarios": []},
+        "rogue": {"unitId": "F3", "overall": {"runs": 1}, "scenarios": []},
+        "wizard": {"unitId": "F4", "overall": selected_overall, "scenarios": selected_scenarios},
+    }
+
+    payload = run_pc_tuning_sample.build_report_payload(
+        profile="wizard",
+        unit_id="F4",
+        player_preset_id="martial_mixed_party",
+        scenario_ids=("hobgoblin_kill_box",),
+        runs_per_scenario=1,
+        player_behavior="smart",
+        monster_behavior="balanced",
+        elapsed_seconds=0.1,
+        overall=selected_overall,
+        scenarios=selected_scenarios,
+        party_breakdown=party_breakdown,
+    )
+
+    assert payload["overall"] is selected_overall
+    assert payload["scenarios"] is selected_scenarios
+    assert payload["partyBreakdown"] is party_breakdown
+
+
+def test_pc_tuning_sample_fighter_both_payload_includes_party_breakdown_per_behavior() -> None:
+    behavior_summaries = {
+        "smart": {
+            "overall": {"playerWinRate": 100.0},
+            "scenarios": [],
+            "partyBreakdown": {"fighter": {"unitId": "F1"}},
+        },
+        "dumb": {
+            "overall": {"playerWinRate": 0.0},
+            "scenarios": [],
+            "partyBreakdown": {"fighter": {"unitId": "F1"}},
+        },
+    }
+
+    payload = run_pc_tuning_sample.build_behavior_comparison_payload(
+        profile="fighter",
+        unit_id="F1",
+        player_preset_id="martial_mixed_party",
+        scenario_ids=("hobgoblin_kill_box",),
+        runs_per_scenario=1,
+        monster_behavior="balanced",
+        elapsed_seconds=0.1,
+        behavior_summaries=behavior_summaries,
+        behavior_delta={"playerWinRate": 100.0},
+    )
+
+    assert payload["behaviorSummaries"]["smart"]["partyBreakdown"]["fighter"]["unitId"] == "F1"
+    assert payload["behaviorSummaries"]["dumb"]["partyBreakdown"]["fighter"]["unitId"] == "F1"
+
+
+def test_pc_tuning_sample_party_sampler_records_current_party_profiles() -> None:
+    overall, scenarios, party_breakdown = run_pc_tuning_sample.run_party_profile_sample(
+        selected_profile="wizard",
+        selected_unit_id="F4",
+        player_preset_id=run_pc_tuning_sample.DEFAULT_PLAYER_PRESET_ID,
+        scenario_ids=("hobgoblin_kill_box",),
+        runs_per_scenario=1,
+        player_behavior="smart",
+        monster_behavior="balanced",
+    )
+
+    assert overall == party_breakdown["wizard"]["overall"]
+    assert scenarios == party_breakdown["wizard"]["scenarios"]
+    assert tuple(party_breakdown) == run_pc_tuning_sample.PARTY_PROFILE_ORDER
+    for profile in run_pc_tuning_sample.PARTY_PROFILE_ORDER:
+        assert party_breakdown[profile]["missing"] is False
+        assert party_breakdown[profile]["overall"]["runs"] == 1
+
+
+def test_pc_tuning_sample_compact_party_console_lines_skip_selected_until_detail() -> None:
+    party_breakdown = {
+        "fighter": {"unitId": "F1", "missing": True, "reason": "missing fighter", "overall": {}, "scenarios": []},
+        "paladin": {"unitId": "F2", "missing": True, "reason": "missing paladin", "overall": {}, "scenarios": []},
+        "rogue": {"unitId": "F3", "missing": True, "reason": "missing rogue", "overall": {}, "scenarios": []},
+        "wizard": {"unitId": "F4", "missing": True, "reason": "missing wizard", "overall": {}, "scenarios": []},
+    }
+
+    lines = run_pc_tuning_sample.format_compact_party_console_lines(party_breakdown, "wizard")
+    all_lines = run_pc_tuning_sample.format_compact_party_console_lines(
+        party_breakdown,
+        "wizard",
+        include_selected=True,
+    )
+
+    assert [line.split()[1] for line in lines] == ["fighter", "paladin", "rogue"]
+    assert [line.split()[1] for line in all_lines] == ["fighter", "paladin", "rogue", "wizard"]
