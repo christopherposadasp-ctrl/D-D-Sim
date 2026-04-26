@@ -37,6 +37,7 @@ FIXED_ATTACK_CASES = (
     ("cat", "scratch", [], ["slashing"], [1]),
     ("weasel", "bite", [], ["piercing"], [1]),
     ("badger", "bite", [], ["piercing"], [1]),
+    ("crab", "claw", [], ["bludgeoning"], [1]),
     ("tough", "heavy_crossbow", [5], ["piercing"], [6]),
     ("tough", "mace", [4], ["bludgeoning"], [6]),
     ("axe_beak", "beak", [5], ["slashing"], [7]),

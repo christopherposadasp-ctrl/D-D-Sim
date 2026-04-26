@@ -269,6 +269,32 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_count=15,
         damage_resistances=("poison",),
     ),
+    "crab": MonsterExpectation(
+        ai_profile_id="melee_brute",
+        max_hp=3,
+        ac=11,
+        speed=20,
+        initiative_mod=0,
+        passive_perception=9,
+        size_category="tiny",
+        footprint=(1, 1),
+        ability_mods={"str": -2, "dex": 0, "con": 1, "int": -5, "wis": -1, "cha": -4},
+        trait_ids=(),
+        attacks={
+            "claw": AttackExpectation(
+                kind="melee",
+                attack_bonus=2,
+                ability_modifier=0,
+                damage_modifier=1,
+                damage_type="bludgeoning",
+            )
+        },
+        opening_weapon_id="claw",
+        melee_fallback_weapon_id="claw",
+        special_mechanics=(),
+        benchmark_preset_id="crab_benchmark",
+        benchmark_count=15,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,
