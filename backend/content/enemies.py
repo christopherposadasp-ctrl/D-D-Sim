@@ -119,6 +119,7 @@ cat_ability_mods = AbilityModifiers(str=-4, dex=2, con=0, int=-4, wis=1, cha=-2)
 weasel_ability_mods = AbilityModifiers(str=-4, dex=3, con=-1, int=-4, wis=1, cha=-4)
 badger_ability_mods = AbilityModifiers(str=0, dex=0, con=3, int=-4, wis=1, cha=-3)
 crab_ability_mods = AbilityModifiers(str=-2, dex=0, con=1, int=-5, wis=-1, cha=-4)
+baboon_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-3, wis=1, cha=-2)
 hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3)
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
@@ -1211,6 +1212,38 @@ MONSTER_DEFINITIONS.update(
             tags=("beast", "crab", "melee"),
             action_ids=("melee_attack",),
             attack_actions=(melee_attack_action("claw", "Claw"),),
+            default_melee_attack_action_id="melee_attack",
+        ),
+        "baboon": MonsterDefinition(
+            base_creature_id="baboon",
+            variant_id="baboon",
+            display_name="Baboon",
+            combat_role="baboon",
+            ai_profile_id="pack_hunter",
+            max_hp=3,
+            ac=12,
+            speed=30,
+            initiative_mod=2,
+            passive_perception=11,
+            ability_mods=baboon_ability_mods,
+            size_category="small",
+            footprint=medium_footprint,
+            attacks={
+                "bite": WeaponProfile(
+                    id="bite",
+                    display_name="Bite",
+                    attack_bonus=1,
+                    ability_modifier=-1,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=-1,
+                    damage_type="piercing",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "pack", "melee"),
+            action_ids=("melee_attack",),
+            trait_ids=("pack_tactics",),
+            attack_actions=(melee_attack_action("bite", "Bite"),),
             default_melee_attack_action_id="melee_attack",
         ),
         "hyena": MonsterDefinition(
@@ -3280,6 +3313,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "weasel",
     "badger",
     "crab",
+    "baboon",
     "hyena",
     "jackal",
     "goblin_minion",

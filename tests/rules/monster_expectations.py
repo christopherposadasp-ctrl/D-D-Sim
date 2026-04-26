@@ -295,6 +295,33 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="crab_benchmark",
         benchmark_count=15,
     ),
+    "baboon": MonsterExpectation(
+        ai_profile_id="pack_hunter",
+        max_hp=3,
+        ac=12,
+        speed=30,
+        initiative_mod=2,
+        passive_perception=11,
+        size_category="small",
+        footprint=(1, 1),
+        ability_mods={"str": -1, "dex": 2, "con": 0, "int": -3, "wis": 1, "cha": -2},
+        trait_ids=("pack_tactics",),
+        attacks={
+            "bite": AttackExpectation(
+                kind="melee",
+                attack_bonus=1,
+                ability_modifier=-1,
+                damage_modifier=-1,
+                damage_type="piercing",
+                damage_dice=((1, 4),),
+            )
+        },
+        opening_weapon_id="bite",
+        melee_fallback_weapon_id="bite",
+        special_mechanics=("pack_tactics",),
+        benchmark_preset_id="baboon_benchmark",
+        benchmark_count=15,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,
