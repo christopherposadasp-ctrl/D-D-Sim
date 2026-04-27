@@ -285,17 +285,22 @@ def unit_is_raging(unit: UnitState) -> bool:
     return any(effect.kind == "rage" for effect in unit.temporary_effects)
 
 
-def should_use_second_wind(unit: UnitState) -> bool:
-    return (
+def should_use_second_wind(state: EncounterState, unit: UnitState) -> bool:
+    if not (
         can_use_player_bonus_action(unit, "second_wind")
         and unit.current_hp > 0
-        and unit.current_hp <= unit.max_hp // 2
         and unit.resources.second_wind_uses > 0
-    )
+    ):
+        return False
+
+    if state.player_behavior == "smart" and is_player_fighter(unit):
+        return unit.current_hp * 100 <= unit.max_hp * 40
+
+    return unit.current_hp <= unit.max_hp // 2
 
 
-def get_player_bonus_action(unit: UnitState) -> dict[str, str] | None:
-    if should_use_second_wind(unit):
+def get_player_bonus_action(state: EncounterState, unit: UnitState) -> dict[str, str] | None:
+    if should_use_second_wind(state, unit):
         return {"kind": "second_wind", "timing": "before_action"}
     return None
 
@@ -2729,6 +2734,102 @@ def build_ranged_attack_plan(
     return AttackPlan(target_id=target.id, weapon_id=weapon_id, path=best_square.path)
 
 
+def sort_frontliner_ranged_fallback_targets(
+    state: EncounterState,
+    actor: UnitState,
+    units: list[UnitState],
+) -> list[UnitState]:
+    return sorted(
+        units,
+        key=lambda unit: (
+            get_distance_for_priority(state, actor, unit),
+            -get_target_immediacy(state, actor, unit),
+            unit.current_hp,
+            unit.id,
+        ),
+    )
+
+
+def build_frontliner_clean_ranged_attack_plan(
+    state: EncounterState,
+    actor: UnitState,
+    targets: list[UnitState],
+    ranged_weapon_id: str | None,
+    max_move_squares: int,
+    position_index: PositionIndex | None = None,
+) -> AttackPlan | None:
+    if not (is_player_fighter(actor) or is_player_paladin(actor)):
+        return None
+    if not can_use_player_weapon(actor, ranged_weapon_id):
+        return None
+
+    weapon = actor.attacks[ranged_weapon_id]
+    for target in sort_frontliner_ranged_fallback_targets(state, actor, targets):
+        if not target.position:
+            continue
+        candidates = []
+        for square in get_safe_reachable_squares(state, actor.id, max_move_squares, False, position_index):
+            context = get_attack_context(
+                state,
+                actor.id,
+                target.id,
+                weapon,
+                square.position,
+                target.position,
+                position_index,
+            )
+            if not context.legal or not context.within_normal_range:
+                continue
+            attack_mode = get_attack_mode_for_context(state, actor, target, weapon, context)
+            if attack_mode == "disadvantage":
+                continue
+            candidates.append((square, context, attack_mode))
+
+        if not candidates:
+            continue
+
+        best_square, _, _ = sorted(
+            candidates,
+            key=lambda item: (
+                -int(item[2] == "advantage"),
+                item[1].cover_ac_bonus,
+                item[0].distance,
+                item[0].position.x,
+                item[0].position.y,
+            ),
+        )[0]
+        return AttackPlan(target_id=target.id, weapon_id=ranged_weapon_id, path=best_square.path)
+
+    return None
+
+
+def build_frontliner_clean_ranged_attack_decision(
+    state: EncounterState,
+    actor: UnitState,
+    targets: list[UnitState],
+    ranged_weapon_id: str | None,
+    move_squares: int,
+    bonus_action: dict[str, str] | None,
+    position_index: PositionIndex | None = None,
+) -> TurnDecision | None:
+    ranged_plan = build_frontliner_clean_ranged_attack_plan(
+        state,
+        actor,
+        targets,
+        ranged_weapon_id,
+        move_squares,
+        position_index,
+    )
+    if not ranged_plan:
+        return None
+
+    return TurnDecision(
+        bonus_action=bonus_action,
+        pre_action_movement=MovementPlan(path=ranged_plan.path, mode="move") if len(ranged_plan.path) > 1 else None,
+        action={"kind": "attack", "target_id": ranged_plan.target_id, "weapon_id": ranged_plan.weapon_id},
+    )
+
+
 def build_spell_attack_context_profile(spell_id: str) -> WeaponProfile:
     spell = get_spell_definition(spell_id)
     is_melee_spell = spell.targeting_mode == "melee_spell_attack"
@@ -2901,7 +3002,7 @@ def get_swallowed_player_decision(state: EncounterState, actor: UnitState) -> Tu
         state,
         actor,
         TurnDecision(
-            bonus_action=get_player_bonus_action(actor),
+            bonus_action=get_player_bonus_action(state, actor),
             action={"kind": "attack", "target_id": swallowing_source_id, "weapon_id": melee_weapon_id},
         ),
         melee_weapon_id,
@@ -3711,19 +3812,16 @@ def build_paladin_rescue_followup_action(
             if get_attack_context(projected_state, projected_actor.id, target.id, melee_weapon).legal:
                 return {"kind": "attack", "target_id": target.id, "weapon_id": melee_weapon_id}
 
-    if can_use_player_weapon(projected_actor, ranged_weapon_id):
-        ranged_weapon = projected_actor.attacks[ranged_weapon_id]
-        ranged_targets = sort_player_ranged_targets(
-            projected_state,
-            projected_actor,
-            conscious_enemies,
-            "smart",
-            ranged_weapon_id=ranged_weapon_id,
-            position_index=projected_position_index,
-        )
-        for target in ranged_targets:
-            if get_attack_context(projected_state, projected_actor.id, target.id, ranged_weapon).legal:
-                return {"kind": "attack", "target_id": target.id, "weapon_id": ranged_weapon_id}
+    ranged_plan = build_frontliner_clean_ranged_attack_plan(
+        projected_state,
+        projected_actor,
+        conscious_enemies,
+        ranged_weapon_id,
+        0,
+        projected_position_index,
+    )
+    if ranged_plan:
+        return {"kind": "attack", "target_id": ranged_plan.target_id, "weapon_id": ranged_plan.weapon_id}
 
     bless_targets = choose_paladin_bless_targets(projected_state, projected_actor)
     if (
@@ -3969,15 +4067,27 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
         )
 
     if can_use_player_weapon(actor, ranged_weapon_id):
-        ranged_decision = build_player_ranged_attack_decision(
-            state,
-            actor,
-            conscious_enemies,
-            ranged_weapon_id,
-            move_squares,
-            True,
-            position_index,
-            bonus_action,
+        ranged_decision = (
+            build_frontliner_clean_ranged_attack_decision(
+                state,
+                actor,
+                conscious_enemies,
+                ranged_weapon_id,
+                move_squares,
+                bonus_action,
+                position_index,
+            )
+            if state.player_behavior == "smart"
+            else build_player_ranged_attack_decision(
+                state,
+                actor,
+                conscious_enemies,
+                ranged_weapon_id,
+                move_squares,
+                True,
+                position_index,
+                bonus_action,
+            )
         )
         if ranged_decision:
             return apply_paladin_post_action_positioning(
@@ -4759,7 +4869,7 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
     position_index = build_position_index(state)
     melee_weapon_id = get_player_primary_melee_weapon_id(actor)
     ranged_weapon_id = get_player_primary_ranged_weapon_id(actor)
-    bonus_action = get_player_bonus_action(actor)
+    bonus_action = get_player_bonus_action(state, actor)
 
     conscious_enemies = sort_player_combat_targets(
         state,
@@ -4977,15 +5087,27 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
         # Fighters still treat ranged attacks as a fallback after checking for a
         # reachable melee line. Melee rogues reach this fallback only after they
         # fail to find a meaningful closing dash.
-        normal_range_decision = build_player_ranged_attack_decision(
-            state,
-            actor,
-            conscious_enemies,
-            ranged_weapon_id,
-            move_squares,
-            True,
-            position_index,
-            bonus_action,
+        normal_range_decision = (
+            build_frontliner_clean_ranged_attack_decision(
+                state,
+                actor,
+                conscious_enemies,
+                ranged_weapon_id,
+                move_squares,
+                bonus_action,
+                position_index,
+            )
+            if behavior == "smart" and is_player_fighter(actor)
+            else build_player_ranged_attack_decision(
+                state,
+                actor,
+                conscious_enemies,
+                ranged_weapon_id,
+                move_squares,
+                True,
+                position_index,
+                bonus_action,
+            )
         )
         if normal_range_decision:
             return finalize_player_turn_decision(state, actor, normal_range_decision, melee_weapon_id, position_index)
@@ -5011,7 +5133,7 @@ def get_player_martial_decision(state: EncounterState, actor: UnitState) -> Turn
             position_index,
         )
 
-    if can_use_player_weapon(actor, ranged_weapon_id):
+    if can_use_player_weapon(actor, ranged_weapon_id) and not (behavior == "smart" and is_player_fighter(actor)):
         long_range_decision = build_player_ranged_attack_decision(
             state,
             actor,

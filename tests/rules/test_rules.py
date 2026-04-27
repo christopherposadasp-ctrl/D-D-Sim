@@ -11,12 +11,14 @@ from backend.engine import create_encounter, run_encounter, step_encounter, summ
 from backend.engine.ai.decision import MovementPlan, TurnDecision, choose_turn_decision
 from backend.engine.combat.batch import resolve_batch_execution_plan
 from backend.engine.combat.engine import (
+    TurnNormalMovementBudget,
     execute_decision,
     execute_movement,
     expire_turn_end_effects,
     get_opportunity_attack_weapon_id,
     get_total_movement_budget,
     maybe_resolve_great_weapon_master_hewing,
+    maybe_resolve_smart_fighter_after_action_second_wind,
     resolve_action_surge,
     resolve_attack_action,
     resolve_bonus_action,
@@ -62,6 +64,7 @@ from backend.engine.rules.combat_rules import (
     attempt_hide,
     attempt_lay_on_hands,
     attempt_natures_wrath,
+    attempt_second_wind,
     attempt_uncanny_metabolism,
     can_trigger_attack_reaction,
     choose_damage_candidate,
@@ -826,6 +829,157 @@ def test_level4_great_weapon_master_hewing_triggers_after_dropping_a_target() ->
     assert hewing_attack.target_ids == ["E2"]
 
 
+def test_smart_fighter_moves_before_hewing_when_target_is_reachable() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-move"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3])],
+    )
+    movement_budget = TurnNormalMovementBudget(remaining_squares=6)
+    hewing_events = maybe_resolve_great_weapon_master_hewing(
+        encounter,
+        "F1",
+        attack_events,
+        planned_bonus_action=None,
+        turn_normal_movement_budget=movement_budget,
+    )
+
+    move_event = next(event for event in hewing_events if event.event_type == "move")
+    hewing_attack = next(event for event in hewing_events if event.event_type == "attack")
+    assert move_event.resolved_totals["movementPhase"] == "before_hewing"
+    assert move_event.resolved_totals["opportunityAttackers"] == []
+    assert hewing_attack.target_ids == ["E2"]
+    assert hewing_attack.damage_details.weapon_id == "greatsword"
+    assert movement_budget.movement_used is True
+    assert movement_budget.remaining_squares < 6
+
+
+def test_dumb_fighter_does_not_move_before_hewing() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-no-dumb-move", player_behavior="dumb"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3])],
+    )
+
+    assert (
+        maybe_resolve_great_weapon_master_hewing(
+            encounter,
+            "F1",
+            attack_events,
+            planned_bonus_action=None,
+            turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=6),
+        )
+        == []
+    )
+
+
+def test_hewing_movement_requires_remaining_normal_movement() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-no-budget"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3])],
+    )
+
+    assert (
+        maybe_resolve_great_weapon_master_hewing(
+            encounter,
+            "F1",
+            attack_events,
+            planned_bonus_action=None,
+            turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=0),
+        )
+        == []
+    )
+
+
+def test_hewing_movement_is_blocked_by_planned_bonus_action() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-planned-bonus"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3])],
+    )
+
+    assert (
+        maybe_resolve_great_weapon_master_hewing(
+            encounter,
+            "F1",
+            attack_events,
+            planned_bonus_action={"kind": "second_wind", "timing": "before_action"},
+            turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=6),
+        )
+        == []
+    )
+
+
+def test_hewing_movement_suppresses_routine_post_action_movement() -> None:
+    encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-post-suppressed"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E1"].ac = 1
+    encounter.units["E2"].current_hp = 100
+    encounter.units["E2"].ac = 1
+
+    events: list = []
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+            post_action_movement=MovementPlan(
+                path=[GridPosition(x=5, y=5), GridPosition(x=5, y=4)],
+                mode="move",
+            ),
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    movement_phases = [
+        event.resolved_totals.get("movementPhase") for event in events if event.event_type == "move"
+    ]
+    assert "before_hewing" in movement_phases
+    assert "after_action" not in movement_phases
+
+
 def test_level4_great_weapon_master_hewing_respects_bonus_action_limit() -> None:
     encounter = create_encounter(build_level4_fighter_config("fighter-gwm-hewing-bonus-used"))
     defeat_other_enemies(encounter, "E1")
@@ -930,6 +1084,145 @@ def test_level5_extra_attack_retargets_after_dropping_first_target() -> None:
     assert attacks[0].target_ids == ["E1"]
     assert attacks[0].resolved_totals["targetDroppedToZero"] is True
     assert attacks[1].target_ids == ["E2"]
+
+
+def test_smart_fighter_moves_between_extra_attack_steps_for_melee_retarget() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-between-step-melee"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5, 3]),
+        ],
+        turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=6),
+    )
+
+    attacks = [event for event in attack_events if event.event_type == "attack" and event.actor_id == "F1"]
+    move_event = next(event for event in attack_events if event.event_type == "move")
+    assert move_event.resolved_totals["movementPhase"] == "between_attack_steps"
+    assert move_event.resolved_totals["opportunityAttackers"] == []
+    assert attacks[0].target_ids == ["E1"]
+    assert attacks[1].target_ids == ["E2"]
+    assert attacks[1].damage_details.weapon_id == "greatsword"
+
+
+def test_dumb_fighter_does_not_move_between_extra_attack_steps() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-no-between-step-melee", player_behavior="dumb"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5, 3]),
+        ],
+        turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=6),
+    )
+
+    attacks = [event for event in attack_events if event.event_type == "attack" and event.actor_id == "F1"]
+    assert not any(event.event_type == "move" for event in attack_events)
+    assert attacks[0].target_ids == ["E1"]
+    assert attacks[1].damage_details.weapon_id != "greatsword"
+
+
+def test_smart_paladin_moves_between_extra_attack_steps_for_longsword_retarget() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-between-step-melee"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "longsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5]),
+        ],
+        turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=6),
+    )
+
+    attacks = [event for event in attack_events if event.event_type == "attack" and event.actor_id == "F1"]
+    move_event = next(event for event in attack_events if event.event_type == "move")
+    assert move_event.resolved_totals["movementPhase"] == "between_attack_steps"
+    assert attacks[0].target_ids == ["E1"]
+    assert attacks[1].target_ids == ["E2"]
+    assert attacks[1].damage_details.weapon_id == "longsword"
+
+
+def test_between_attack_step_movement_requires_remaining_normal_movement() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-between-step-no-budget"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E2"].current_hp = 100
+
+    attack_events = resolve_attack_action(
+        encounter,
+        "F1",
+        {"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        step_overrides=[
+            AttackRollOverrides(attack_rolls=[12], damage_rolls=[4, 3]),
+            AttackRollOverrides(attack_rolls=[13], damage_rolls=[5, 3]),
+        ],
+        turn_normal_movement_budget=TurnNormalMovementBudget(remaining_squares=0),
+    )
+
+    assert not any(event.event_type == "move" for event in attack_events)
+
+
+def test_between_attack_step_movement_suppresses_routine_post_action_movement() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-between-step-post-suppressed"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].current_hp = 1
+    encounter.units["E1"].ac = 1
+    encounter.units["E2"].current_hp = 100
+    encounter.units["E2"].ac = 1
+
+    events: list = []
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+            post_action_movement=MovementPlan(
+                path=[GridPosition(x=5, y=5), GridPosition(x=5, y=4)],
+                mode="move",
+            ),
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    movement_phases = [
+        event.resolved_totals.get("movementPhase") for event in events if event.event_type == "move"
+    ]
+    assert "between_attack_steps" in movement_phases
+    assert "after_action" not in movement_phases
 
 
 def test_level5_great_weapon_master_uses_proficiency_three_damage_bonus() -> None:
@@ -1059,6 +1352,84 @@ def test_second_wind_does_not_protect_unrelated_normal_movement() -> None:
     assert move_event.resolved_totals["tacticalShiftApplied"] is False
     assert move_event.resolved_totals["opportunityAttackers"] == ["E1"]
     assert encounter.units["E1"].reaction_available is False
+
+
+def test_second_wind_heals_d10_plus_fighter_level() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-second-wind-heal"))
+    encounter.units["F1"].current_hp = 20
+
+    event = attempt_second_wind(encounter, "F1", override_roll=10)
+
+    assert event is not None
+    assert event.resolved_totals["healingTotal"] == 15
+    assert encounter.units["F1"].current_hp == 35
+
+
+def test_smart_fighter_uses_after_action_second_wind_at_recovery_threshold() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-after-action-second-wind"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].current_hp = 30
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    events = maybe_resolve_smart_fighter_after_action_second_wind(
+        encounter,
+        "F1",
+        planned_bonus_action=None,
+        hewing_attack_resolved=False,
+    )
+
+    assert any(event.event_type == "heal" and "Second Wind" in event.text_summary for event in events)
+    assert any(
+        event.event_type == "move" and event.resolved_totals.get("movementMode") == "tactical_shift"
+        for event in events
+    )
+    assert encounter.units["F1"].resources.second_wind_uses == 2
+
+
+def test_smart_fighter_skips_after_action_second_wind_above_recovery_threshold() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-after-action-second-wind-high-hp"))
+    encounter.units["F1"].current_hp = 31
+
+    assert (
+        maybe_resolve_smart_fighter_after_action_second_wind(
+            encounter,
+            "F1",
+            planned_bonus_action=None,
+            hewing_attack_resolved=False,
+        )
+        == []
+    )
+
+
+def test_smart_fighter_after_action_second_wind_does_not_replace_hewing() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-after-action-second-wind-hewing"))
+    encounter.units["F1"].current_hp = 30
+
+    assert (
+        maybe_resolve_smart_fighter_after_action_second_wind(
+            encounter,
+            "F1",
+            planned_bonus_action=None,
+            hewing_attack_resolved=True,
+        )
+        == []
+    )
+
+
+def test_smart_fighter_after_action_second_wind_respects_planned_bonus_action() -> None:
+    encounter = create_encounter(build_level5_fighter_config("fighter-level5-after-action-second-wind-planned-ba"))
+    encounter.units["F1"].current_hp = 30
+
+    assert (
+        maybe_resolve_smart_fighter_after_action_second_wind(
+            encounter,
+            "F1",
+            planned_bonus_action={"kind": "great_weapon_master_hewing", "timing": "after_action"},
+            hewing_attack_resolved=False,
+        )
+        == []
+    )
 
 
 def test_barbarian_unarmored_defense_uses_dex_plus_con() -> None:
@@ -6966,7 +7337,7 @@ def test_attack_plus_action_surge_attack_resolves_two_separate_attack_actions() 
     encounter = create_encounter(EncounterConfig(seed="fighter-double-attack", placements=DEFAULT_POSITIONS))
     encounter.units["F1"].position = GridPosition(x=4, y=5)
     encounter.units["G1"].position = GridPosition(x=5, y=5)
-    encounter.units["G1"].current_hp = 40
+    encounter.units["G1"].current_hp = 200
 
     decision = choose_turn_decision(encounter, "F1")
     events: list = []
@@ -6992,8 +7363,7 @@ def test_attack_plus_action_surge_attack_resolves_two_separate_attack_actions() 
     }
     assert [event.event_type for event in events] == ["attack", "attack", "phase_change", "attack", "attack"]
     attack_target_ids = [event.target_ids for event in events if event.event_type == "attack"]
-    assert attack_target_ids[:3] == [["G1"], ["G1"], ["G1"]]
-    assert attack_target_ids[3][0].startswith("G")
+    assert attack_target_ids == [["G1"], ["G1"], ["G1"], ["G1"]]
     assert encounter.units["F1"].resources.action_surge_uses == 0
 
 

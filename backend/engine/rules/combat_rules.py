@@ -88,6 +88,7 @@ from backend.engine.rules.spatial import (
     GRID_SIZE,
     build_position_index,
     can_attempt_hide_from_position,
+    chebyshev_distance,
     get_attack_context,
     get_hide_passive_perception_dc,
     get_line_squares,
@@ -96,7 +97,6 @@ from backend.engine.rules.spatial import (
     get_unit_footprint,
     has_line_of_sight_between_units,
     is_active_grapple,
-    chebyshev_distance,
 )
 from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 from backend.engine.utils.rng import roll_die
@@ -1462,13 +1462,21 @@ def units_are_within_spell_range(state: EncounterState, actor_id: str, target_id
     )
 
 
+def get_second_wind_heal_modifier(actor: UnitState) -> int:
+    return max(1, actor.level or 1)
+
+
+def get_second_wind_max_heal(actor: UnitState) -> int:
+    return 10 + get_second_wind_heal_modifier(actor)
+
+
 def attempt_second_wind(state: EncounterState, actor_id: str, override_roll: int | None = None) -> CombatEvent | None:
     actor = state.units[actor_id]
     if not unit_has_feature(actor, "second_wind") or actor.resources.second_wind_uses <= 0 or actor.current_hp <= 0:
         return None
 
     raw_roll = pull_die(state, 10, override_roll)
-    healed = min(actor.max_hp - actor.current_hp, raw_roll + 1)
+    healed = min(actor.max_hp - actor.current_hp, raw_roll + get_second_wind_heal_modifier(actor))
     actor.current_hp += healed
     actor.resources.second_wind_uses -= 1
 

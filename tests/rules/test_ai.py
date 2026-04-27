@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from backend.content.enemies import create_enemy, get_monster_definition_for_unit, unit_has_bonus_action, unit_has_trait
-from backend.engine import create_encounter
+from backend.engine import create_encounter, run_encounter
 from backend.engine.ai.decision import (
     TurnDecision,
     can_intentionally_provoke_opportunity_attack,
@@ -166,7 +166,7 @@ def test_level5_fighter_uses_baseline_auto_maneuvers_when_already_in_melee() -> 
 
 def test_level5_fighter_can_tactical_shift_after_second_wind_and_normal_movement() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-tactical-shift-after-move", placements=DEFAULT_POSITIONS))
-    encounter.units["F1"].current_hp = 20
+    encounter.units["F1"].current_hp = 18
     encounter.units["F1"].position = GridPosition(x=1, y=1)
     encounter.units["G1"].position = GridPosition(x=5, y=1)
     defeat_other_enemies(encounter, "G1")
@@ -182,8 +182,44 @@ def test_level5_fighter_can_tactical_shift_after_second_wind_and_normal_movement
     assert len(decision.post_action_movement.path) - 1 <= 3
 
 
+def test_smart_fighter_does_not_use_before_action_second_wind_above_forty_percent() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-smart-second-wind-threshold",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="fighter_level5_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["F1"].current_hp = 19
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action is None
+
+
+def test_dumb_fighter_keeps_half_hp_before_action_second_wind_threshold() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-dumb-second-wind-threshold",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}),
+            player_preset_id="fighter_level5_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["F1"].current_hp = 22
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "second_wind", "timing": "before_action"}
+
+
 def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -> None:
-    encounter = create_encounter(EncounterConfig(seed="fighter-no-double-javelin", placements=DEFAULT_POSITIONS))
+    encounter = create_encounter(
+        EncounterConfig(seed="fighter-no-double-javelin", placements=DEFAULT_POSITIONS, player_behavior="dumb")
+    )
     encounter.units["F1"].position = GridPosition(x=1, y=1)
     encounter.units["G1"].position = GridPosition(x=15, y=1)
     encounter.units["F1"].effective_speed = 0
@@ -246,6 +282,88 @@ def test_level5_fighter_allows_action_surge_javelin_finisher_when_melee_is_gone(
     assert encounter.units["F1"].resources.action_surge_uses == 0
     assert any(event.event_type == "phase_change" and "Action Surge" in event.text_summary for event in events)
     assert any(event.event_type == "attack" and "with Javelin" in event.text_summary for event in events)
+
+
+def test_smart_fighter_does_not_throw_javelin_when_adjacent_melee_is_available() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-frontliner-melee-over-javelin",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}, G2={"x": 12, "y": 5}),
+            player_preset_id="fighter_level5_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].resources.action_surge_uses = 0
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["target_id"] == "G1"
+    assert decision.action["weapon_id"] == "greatsword"
+
+
+def test_smart_fighter_uses_clean_normal_range_javelin_when_melee_is_unreachable() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-frontliner-clean-javelin",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 9, "y": 1}),
+            player_preset_id="fighter_level5_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["F1"].resources.action_surge_uses = 0
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "attack"
+    assert decision.action["target_id"] == "G1"
+    assert decision.action["weapon_id"] == "javelin"
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.path[-1] == GridPosition(x=3, y=1)
+
+
+def test_smart_fighter_advances_instead_of_throwing_long_range_javelin() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-frontliner-no-long-range-javelin",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 15, "y": 1}),
+            player_preset_id="fighter_level5_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["F1"].resources.action_surge_uses = 0
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.post_action_movement is not None
+    assert decision.action.get("weapon_id") != "javelin"
+
+
+def test_smart_fighter_extra_attack_retarget_avoids_disadvantage_javelin() -> None:
+    result = run_encounter(
+        EncounterConfig(
+            seed="focused-first5-hobgoblin_command_screen-001",
+            enemy_preset_id="hobgoblin_command_screen",
+            player_preset_id="martial_mixed_party",
+            player_behavior="smart",
+            monster_behavior="balanced",
+        )
+    )
+
+    assert not any(
+        event.actor_id == "F1"
+        and event.event_type == "attack"
+        and event.damage_details
+        and event.damage_details.weapon_id == "javelin"
+        and event.resolved_totals.get("attackMode") == "disadvantage"
+        for frame in result.replay_frames
+        if frame.round <= 5
+        for event in frame.events
+    )
 
 
 def test_level3_fighter_uses_baseline_auto_maneuver_when_no_action_surge_followup_is_available() -> None:
@@ -978,6 +1096,66 @@ def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
 
     assert ranged_decision.action["kind"] == "attack"
     assert ranged_decision.action["weapon_id"] == "javelin"
+
+
+def test_smart_paladin_uses_clean_normal_range_javelin_when_melee_is_unreachable() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-frontliner-clean-javelin",
+            placements=build_placements(F2={"x": 1, "y": 2}, G1={"x": 6, "y": 2}),
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F2"].resources.spell_slots_level_1 = 0
+    encounter.units["F2"].resources.spell_slots_level_2 = 0
+    encounter.units["F2"].effective_speed = 0
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "javelin"}
+
+
+def test_smart_paladin_advances_instead_of_throwing_long_range_javelin() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-frontliner-no-long-range-javelin",
+            placements=build_placements(F2={"x": 1, "y": 2}, G1={"x": 15, "y": 2}),
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F2"].resources.spell_slots_level_1 = 0
+    encounter.units["F2"].resources.spell_slots_level_2 = 0
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action["kind"] == "dash"
+    assert decision.post_action_movement is not None
+    assert decision.action.get("weapon_id") != "javelin"
+
+
+def test_paladin_rescue_followup_does_not_throw_disadvantage_javelin() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-rescue-no-disadvantage-javelin",
+            placements=build_placements(F1={"x": 3, "y": 1}, F2={"x": 1, "y": 1}, G1={"x": 13, "y": 1}),
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+    encounter.units["F2"].resources.spell_slots_level_1 = 0
+    encounter.units["F2"].resources.spell_slots_level_2 = 0
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.pre_action_movement is not None
+    assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "after_action", "target_id": "F1"}
+    assert decision.action["kind"] == "skip"
+    assert decision.action.get("weapon_id") != "javelin"
 
 
 def test_paladin_does_not_select_aid_even_when_prepared_and_available() -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from backend.content.attack_sequences import AttackStepDefinition
 from backend.content.class_progressions import get_progression_scalar
 from backend.content.combat_actions import action_prevents_opportunity_attacks, get_extra_movement_multiplier
@@ -8,12 +10,13 @@ from backend.content.enemies import (
     get_attack_action_definition_for_unit,
     get_monster_command_spell_for_unit,
     get_monster_definition_for_unit,
-    get_monster_sphere_spell_for_unit,
     get_monster_spell_attack_profile_for_unit,
     get_monster_spellcasting_for_unit,
+    get_monster_sphere_spell_for_unit,
     unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
+from backend.content.player_loadouts import get_player_primary_melee_weapon_id
 from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     LEGENDARY_CONE_FEAR_ACTIONS,
@@ -29,6 +32,7 @@ from backend.engine.ai.decision import (
     TurnDecision,
     build_melee_attack_options,
     choose_closest_monster_melee_option,
+    choose_tactical_shift_movement,
     choose_turn_decision,
     get_enemy_melee_weapon_id,
     get_move_squares,
@@ -90,6 +94,7 @@ from backend.engine.rules.combat_rules import (
     get_active_rage_effect,
     get_attack_mode,
     get_saving_throw_mode,
+    get_second_wind_max_heal,
     maybe_commit_reckless_attack,
     pull_die,
     recalculate_effective_speed_for_unit,
@@ -136,6 +141,21 @@ from backend.engine.utils.helpers import (
     unit_can_take_reactions,
     unit_sort_key,
 )
+
+
+@dataclass
+class TurnNormalMovementBudget:
+    remaining_squares: int
+    movement_used: bool = False
+
+    def consume(self, distance: int) -> None:
+        if distance <= 0:
+            return
+        self.remaining_squares = max(0, self.remaining_squares - distance)
+        self.movement_used = True
+
+    def disable(self) -> None:
+        self.remaining_squares = 0
 
 
 def format_position(position: GridPosition) -> str:
@@ -2090,6 +2110,24 @@ def movement_distance(movement: MovementPlan | None) -> int:
     return len(movement.path) - 1
 
 
+def create_turn_normal_movement_budget(state: EncounterState, actor: UnitState) -> TurnNormalMovementBudget:
+    base_budget = max(0, get_move_squares(state, actor) - get_stand_up_cost_squares(actor))
+    return TurnNormalMovementBudget(remaining_squares=base_budget)
+
+
+def consume_preplanned_movement_for_turn_budget(
+    movement_budget: TurnNormalMovementBudget,
+    movement: MovementPlan | None,
+) -> None:
+    distance = movement_distance(movement)
+    if distance <= 0:
+        return
+    if movement and movement.mode == "move":
+        movement_budget.remaining_squares = max(0, movement_budget.remaining_squares - distance)
+        return
+    movement_budget.disable()
+
+
 def decision_movement_distance(decision: TurnDecision) -> int:
     return sum(
         movement_distance(movement)
@@ -3004,6 +3042,21 @@ def choose_step_weapon_for_target(
             continue
 
         attack_mode, _, _ = get_attack_mode(state, actor, actor_id, target, target_id, weapon)
+        preferred_ranged_finisher = (
+            weapon_id == preferred_weapon_id
+            and weapon.kind == "ranged"
+            and target.current_hp <= get_expected_weapon_damage(weapon, "normal")
+        )
+        if (
+            state.player_behavior == "smart"
+            and actor.faction == "fighters"
+            and actor.class_id in {"fighter", "paladin"}
+            and actor.behavior_profile in {"martial_striker", "divine_guardian"}
+            and weapon.kind == "ranged"
+            and (not attack_context.within_normal_range or attack_mode == "disadvantage")
+            and not preferred_ranged_finisher
+        ):
+            continue
         score = (
             attack_mode_priority[attack_mode],
             1 if weapon_id == preferred_weapon_id else 0,
@@ -3015,6 +3068,166 @@ def choose_step_weapon_for_target(
             best_choice = (score, weapon_id)
 
     return best_choice[1] if best_choice else None
+
+
+def is_smart_frontliner_between_attack_actor(state: EncounterState, actor: UnitState) -> bool:
+    return (
+        state.player_behavior == "smart"
+        and actor.faction == "fighters"
+        and actor.class_id in {"fighter", "paladin"}
+        and actor.behavior_profile in {"martial_striker", "divine_guardian"}
+        and actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+    )
+
+
+def choose_frontliner_current_primary_melee_step_target(
+    state: EncounterState,
+    actor_id: str,
+    attack_step: AttackStepDefinition,
+    preferred_target_id: str | None,
+    *,
+    action_id: str | None,
+    step_index: int,
+    position_index=None,
+) -> tuple[str, str] | None:
+    actor = state.units[actor_id]
+    if not is_smart_frontliner_between_attack_actor(state, actor):
+        return None
+
+    melee_weapon_id = get_player_primary_melee_weapon_id(actor)
+    if melee_weapon_id not in attack_step.allowed_weapon_ids:
+        return None
+
+    melee_weapon = actor.attacks.get(melee_weapon_id)
+    if not melee_weapon:
+        return None
+
+    for target in get_ranked_attack_targets(
+        state,
+        actor,
+        preferred_target_id,
+        preferred_weapon_id=melee_weapon_id,
+        action_id=action_id,
+        step_index=step_index,
+    ):
+        if target.conditions.dead or target.conditions.unconscious or target.current_hp <= 0:
+            continue
+        if get_attack_context(state, actor_id, target.id, melee_weapon, position_index=position_index).legal:
+            return target.id, melee_weapon_id
+
+    return None
+
+
+def choose_between_attack_step_movement(
+    state: EncounterState,
+    actor_id: str,
+    attack_step: AttackStepDefinition,
+    preferred_target_id: str | None,
+    *,
+    action_id: str | None,
+    step_index: int,
+    movement_budget: TurnNormalMovementBudget | None,
+) -> MovementPlan | None:
+    actor = state.units[actor_id]
+    if (
+        movement_budget is None
+        or movement_budget.remaining_squares <= 0
+        or step_index <= 0
+        or actor._bonus_action_reserved_this_turn
+        or not actor.position
+        or not is_smart_frontliner_between_attack_actor(state, actor)
+    ):
+        return None
+
+    melee_weapon_id = get_player_primary_melee_weapon_id(actor)
+    if melee_weapon_id not in attack_step.allowed_weapon_ids:
+        return None
+
+    position_index = build_position_index(state)
+    if choose_frontliner_current_primary_melee_step_target(
+        state,
+        actor_id,
+        attack_step,
+        preferred_target_id,
+        action_id=action_id,
+        step_index=step_index,
+        position_index=position_index,
+    ):
+        return None
+
+    ranked_targets = [
+        target
+        for target in get_ranked_attack_targets(
+            state,
+            actor,
+            preferred_target_id,
+            preferred_weapon_id=melee_weapon_id,
+            action_id=action_id,
+            step_index=step_index,
+        )
+        if not target.conditions.dead and not target.conditions.unconscious and target.current_hp > 0
+    ]
+    target_rank = {target.id: index for index, target in enumerate(ranked_targets)}
+    options = [
+        option
+        for option in build_melee_attack_options(
+            state,
+            actor,
+            ranked_targets,
+            movement_budget.remaining_squares,
+            melee_weapon_id,
+            True,
+            position_index,
+            allow_intentional_opportunity_attacks=False,
+        )
+        if option.distance > 0
+        and option.path
+        and not path_provokes_opportunity_attack(state, actor_id, option.path, position_index)
+    ]
+    if not options:
+        return None
+
+    best_option = sorted(
+        options,
+        key=lambda option: (
+            target_rank.get(option.target.id, 999),
+            0 if option.creates_flank else 1,
+            option.distance,
+            option.path[-1].x,
+            option.path[-1].y,
+        ),
+    )[0]
+    return MovementPlan(path=best_option.path, mode="move")
+
+
+def maybe_execute_between_attack_step_movement(
+    state: EncounterState,
+    actor_id: str,
+    attack_step: AttackStepDefinition,
+    preferred_target_id: str | None,
+    *,
+    action_id: str | None,
+    step_index: int,
+    movement_budget: TurnNormalMovementBudget | None,
+) -> tuple[list[CombatEvent], bool]:
+    movement = choose_between_attack_step_movement(
+        state,
+        actor_id,
+        attack_step,
+        preferred_target_id,
+        action_id=action_id,
+        step_index=step_index,
+        movement_budget=movement_budget,
+    )
+    if not movement:
+        return [], False
+
+    events, interrupted = execute_movement(state, actor_id, movement, False, "between_attack_steps")
+    if movement_budget:
+        movement_budget.consume(movement_distance(movement))
+    return events, interrupted
 
 
 def choose_attack_step_target_and_weapon(
@@ -3338,12 +3551,83 @@ def get_great_weapon_master_hewing_target_id(
     return None
 
 
+def is_smart_fighter_hewing_movement_actor(state: EncounterState, actor: UnitState) -> bool:
+    return (
+        state.player_behavior == "smart"
+        and actor.faction == "fighters"
+        and actor.class_id == "fighter"
+        and actor.behavior_profile == "martial_striker"
+        and actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+    )
+
+
+def choose_great_weapon_master_hewing_movement(
+    state: EncounterState,
+    actor_id: str,
+    weapon_id: str,
+    movement_budget: TurnNormalMovementBudget | None,
+) -> tuple[MovementPlan, str] | None:
+    actor = state.units[actor_id]
+    weapon = actor.attacks.get(weapon_id)
+    if (
+        movement_budget is None
+        or movement_budget.remaining_squares <= 0
+        or actor._bonus_action_reserved_this_turn
+        or not actor.position
+        or not weapon
+        or weapon.kind != "melee"
+        or not is_smart_fighter_hewing_movement_actor(state, actor)
+    ):
+        return None
+
+    position_index = build_position_index(state)
+    ranked_targets = [
+        target
+        for target in get_ranked_attack_targets(state, actor, preferred_weapon_id=weapon_id)
+        if target.position and target.current_hp > 0 and not target.conditions.dead and not target.conditions.unconscious
+    ]
+    target_rank = {target.id: index for index, target in enumerate(ranked_targets)}
+    options = [
+        option
+        for option in build_melee_attack_options(
+            state,
+            actor,
+            ranked_targets,
+            movement_budget.remaining_squares,
+            weapon_id,
+            True,
+            position_index,
+            allow_intentional_opportunity_attacks=False,
+        )
+        if option.distance > 0
+        and option.path
+        and not path_provokes_opportunity_attack(state, actor_id, option.path, position_index)
+    ]
+    if not options:
+        return None
+
+    best_option = sorted(
+        options,
+        key=lambda option: (
+            target_rank.get(option.target.id, 999),
+            0 if option.creates_flank else 1,
+            option.distance,
+            option.path[-1].x,
+            option.path[-1].y,
+        ),
+    )[0]
+    return MovementPlan(path=best_option.path, mode="move"), best_option.target.id
+
+
 def maybe_resolve_great_weapon_master_hewing(
     state: EncounterState,
     actor_id: str,
     turn_events: list[CombatEvent],
     *,
     planned_bonus_action: dict[str, str] | None,
+    turn_normal_movement_budget: TurnNormalMovementBudget | None = None,
 ) -> list[CombatEvent]:
     actor = state.units[actor_id]
     if planned_bonus_action or actor._bonus_action_used_this_turn:
@@ -3361,8 +3645,32 @@ def maybe_resolve_great_weapon_master_hewing(
 
     weapon_id = trigger_event.damage_details.weapon_id
     target_id = get_great_weapon_master_hewing_target_id(state, actor_id, trigger_event, weapon_id)
+    events: list[CombatEvent] = []
     if not target_id:
-        return []
+        movement_target = choose_great_weapon_master_hewing_movement(
+            state,
+            actor_id,
+            weapon_id,
+            turn_normal_movement_budget,
+        )
+        if not movement_target:
+            return []
+
+        movement, moved_target_id = movement_target
+        movement_events, interrupted = execute_movement(state, actor_id, movement, False, "before_hewing")
+        events.extend(movement_events)
+        if turn_normal_movement_budget:
+            turn_normal_movement_budget.consume(movement_distance(movement))
+        target_id = moved_target_id
+        weapon = state.units[actor_id].attacks.get(weapon_id)
+        if (
+            interrupted
+            or not weapon
+            or state.units[actor_id].conditions.dead
+            or state.units[actor_id].current_hp <= 0
+            or not get_attack_context(state, actor_id, target_id, weapon).legal
+        ):
+            return events
 
     actor._bonus_action_used_this_turn = True
     actor._great_weapon_master_hewing_used_this_turn = True
@@ -3391,7 +3699,7 @@ def maybe_resolve_great_weapon_master_hewing(
     if savage_consumed:
         actor._savage_attacker_used_this_turn = True
 
-    events = [phase_event]
+    events.append(phase_event)
     events.extend(build_attack_reaction_pre_events(state, hewing_attack))
     events.extend(build_attack_reaction_phase_events(state, hewing_attack))
     events.append(hewing_attack)
@@ -3401,6 +3709,56 @@ def maybe_resolve_great_weapon_master_hewing(
             events.extend(release_grappled_targets_from_source(state, hewing_target_id, "source_dead"))
             events.extend(release_swallowed_units_from_source(state, hewing_target_id))
 
+    return events
+
+
+def smart_fighter_should_use_after_action_second_wind(
+    state: EncounterState,
+    actor: UnitState,
+    *,
+    planned_bonus_action: dict[str, str] | None,
+    hewing_attack_resolved: bool,
+) -> bool:
+    return bool(
+        state.player_behavior == "smart"
+        and actor.faction == "fighters"
+        and actor.class_id == "fighter"
+        and actor.behavior_profile == "martial_striker"
+        and not planned_bonus_action
+        and not hewing_attack_resolved
+        and not actor._bonus_action_used_this_turn
+        and not actor._bonus_action_reserved_this_turn
+        and unit_has_feature(actor, "second_wind")
+        and actor.resources.second_wind_uses > 0
+        and actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+        and actor.current_hp <= actor.max_hp - get_second_wind_max_heal(actor)
+    )
+
+
+def maybe_resolve_smart_fighter_after_action_second_wind(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    planned_bonus_action: dict[str, str] | None,
+    hewing_attack_resolved: bool,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if not smart_fighter_should_use_after_action_second_wind(
+        state,
+        actor,
+        planned_bonus_action=planned_bonus_action,
+        hewing_attack_resolved=hewing_attack_resolved,
+    ):
+        return []
+
+    events = resolve_bonus_action_events(state, actor_id, {"kind": "second_wind", "timing": "after_action"})
+    if actor._bonus_action_used_this_turn and unit_has_feature(actor, "tactical_shift") and can_act_after_movement(actor):
+        tactical_shift = choose_tactical_shift_movement(state, actor, build_position_index(state), actor.position)
+        if tactical_shift:
+            movement_events, _ = execute_movement(state, actor_id, tactical_shift, False, "after_action")
+            events.extend(movement_events)
     return events
 
 
@@ -3432,6 +3790,7 @@ def resolve_attack_action(
     action: dict[str, str],
     *,
     step_overrides: list[AttackRollOverrides] | None = None,
+    turn_normal_movement_budget: TurnNormalMovementBudget | None = None,
 ) -> list[CombatEvent]:
     actor = state.units[actor_id]
     preferred_target_id = action.get("target_id")
@@ -3451,15 +3810,48 @@ def resolve_attack_action(
         if state.units[actor_id].conditions.dead or state.units[actor_id].current_hp <= 0:
             break
 
-        selected_target_and_weapon = choose_attack_step_target_and_weapon(
-            state,
-            actor_id,
-            attack_step,
-            preferred_target_id,
-            preferred_weapon_id,
-            action_id=attack_action.action_id,
-            step_index=step_index,
-        )
+        selected_target_and_weapon = None
+        if step_index > 0:
+            selected_target_and_weapon = choose_frontliner_current_primary_melee_step_target(
+                state,
+                actor_id,
+                attack_step,
+                preferred_target_id,
+                action_id=attack_action.action_id,
+                step_index=step_index,
+            )
+            if not selected_target_and_weapon:
+                movement_events, interrupted = maybe_execute_between_attack_step_movement(
+                    state,
+                    actor_id,
+                    attack_step,
+                    preferred_target_id,
+                    action_id=attack_action.action_id,
+                    step_index=step_index,
+                    movement_budget=turn_normal_movement_budget,
+                )
+                attack_events.extend(movement_events)
+                if interrupted or state.units[actor_id].conditions.dead or state.units[actor_id].current_hp <= 0:
+                    break
+                selected_target_and_weapon = choose_frontliner_current_primary_melee_step_target(
+                    state,
+                    actor_id,
+                    attack_step,
+                    preferred_target_id,
+                    action_id=attack_action.action_id,
+                    step_index=step_index,
+                )
+
+        if not selected_target_and_weapon:
+            selected_target_and_weapon = choose_attack_step_target_and_weapon(
+                state,
+                actor_id,
+                attack_step,
+                preferred_target_id,
+                preferred_weapon_id,
+                action_id=attack_action.action_id,
+                step_index=step_index,
+            )
         if not selected_target_and_weapon:
             if step_index == 0 and not attack_events:
                 return [create_skip_event(state, actor_id, "No legal attack target is available.")]
@@ -3702,6 +4094,17 @@ def create_movement_event(
     if landing_applied:
         protection_note = " from flight"
     distance_text = "" if landing_applied else f"{distance} square{'s' if distance != 1 else ''} "
+    phase_text = (
+        "before acting"
+        if phase == "before_action"
+        else "between actions"
+        if phase == "between_actions"
+        else "between attacks"
+        if phase == "between_attack_steps"
+        else "before hewing"
+        if phase == "before_hewing"
+        else "after acting"
+    )
     return CombatEvent(
         round=state.round,
         actor_id=actor_id,
@@ -3724,7 +4127,7 @@ def create_movement_event(
             f"{actor_id} {movement_verb} "
             f"{distance_text}"
             f"from {format_position(start)} to {format_position(end)}{protection_note} "
-            f"{'before acting' if phase == 'before_action' else 'between actions' if phase == 'between_actions' else 'after acting'}."
+            f"{phase_text}."
         ),
     )
 
@@ -4170,9 +4573,17 @@ def resolve_turn_action(
     events: list[CombatEvent],
     *,
     rescue_mode: bool,
+    turn_normal_movement_budget: TurnNormalMovementBudget | None = None,
 ) -> None:
     if action["kind"] == "attack" and not rescue_mode:
-        events.extend(resolve_attack_action(state, actor_id, action))
+        events.extend(
+            resolve_attack_action(
+                state,
+                actor_id,
+                action,
+                turn_normal_movement_budget=turn_normal_movement_budget,
+            )
+        )
     elif action["kind"] == "cast_spell" and not rescue_mode:
         events.extend(resolve_cast_spell_action(state, actor_id, action))
     elif action["kind"] == "special_action" and not rescue_mode:
@@ -4314,6 +4725,7 @@ def execute_decision(
     state.units[actor_id]._bonus_action_reserved_this_turn = bool(
         decision.bonus_action and decision.bonus_action["timing"] in {"after_action", "after_movement"}
     )
+    turn_normal_movement_budget = create_turn_normal_movement_budget(state, state.units[actor_id])
 
     if decision.bonus_action and decision.bonus_action["timing"] == "before_action":
         events.extend(resolve_bonus_action_events(state, actor_id, decision.bonus_action))
@@ -4328,10 +4740,18 @@ def execute_decision(
         "before_action",
     )
     events.extend(pre_events)
+    consume_preplanned_movement_for_turn_budget(turn_normal_movement_budget, decision.pre_action_movement)
 
     action_sequence_start_index = len(events)
     if can_act_after_movement(state.units[actor_id]):
-        resolve_turn_action(state, actor_id, decision.action, events, rescue_mode=rescue_mode)
+        resolve_turn_action(
+            state,
+            actor_id,
+            decision.action,
+            events,
+            rescue_mode=rescue_mode,
+            turn_normal_movement_budget=turn_normal_movement_budget,
+        )
 
     surged_action_position = (
         decision.between_action_movement.path[-1]
@@ -4356,25 +4776,57 @@ def execute_decision(
                 "between_actions",
             )
             events.extend(between_events)
+            consume_preplanned_movement_for_turn_budget(
+                turn_normal_movement_budget,
+                decision.between_action_movement,
+            )
 
         if action_surge_event.event_type != "skip" and can_act_after_movement(state.units[actor_id]):
-            resolve_turn_action(state, actor_id, decision.surged_action, events, rescue_mode=rescue_mode)
-
-    if can_act_after_movement(state.units[actor_id]):
-        events.extend(
-            maybe_resolve_great_weapon_master_hewing(
+            resolve_turn_action(
                 state,
                 actor_id,
-                events[action_sequence_start_index:],
-                planned_bonus_action=decision.bonus_action,
+                decision.surged_action,
+                events,
+                rescue_mode=rescue_mode,
+                turn_normal_movement_budget=turn_normal_movement_budget,
             )
+
+    fallback_second_wind_moved = False
+    if can_act_after_movement(state.units[actor_id]):
+        hewing_events = maybe_resolve_great_weapon_master_hewing(
+            state,
+            actor_id,
+            events[action_sequence_start_index:],
+            planned_bonus_action=decision.bonus_action,
+            turn_normal_movement_budget=turn_normal_movement_budget,
         )
+        events.extend(hewing_events)
+        hewing_attack_resolved = any(
+            event.resolved_totals.get("bonusAction") == "great_weapon_master_hewing" for event in hewing_events
+        )
+        second_wind_events = maybe_resolve_smart_fighter_after_action_second_wind(
+            state,
+            actor_id,
+            planned_bonus_action=decision.bonus_action,
+            hewing_attack_resolved=hewing_attack_resolved,
+        )
+        fallback_second_wind_moved = any(
+            event.event_type == "move" and event.resolved_totals.get("movementMode") == "tactical_shift"
+            for event in second_wind_events
+        )
+        events.extend(second_wind_events)
 
     if can_act_after_movement(state.units[actor_id]) and decision.bonus_action and decision.bonus_action["timing"] == "after_action":
         events.extend(resolve_bonus_action_events(state, actor_id, decision.bonus_action))
 
     if can_act_after_movement(state.units[actor_id]):
         post_action_movement = decision.post_action_movement
+        if (
+            (turn_normal_movement_budget.movement_used or fallback_second_wind_moved)
+            and post_action_movement
+            and post_action_movement.mode == "move"
+        ):
+            post_action_movement = None
         if is_cunning_withdraw_movement(post_action_movement) and not action_sequence_triggered_cunning_withdraw(
             events[action_sequence_start_index:],
             actor_id,
