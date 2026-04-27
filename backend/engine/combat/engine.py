@@ -1198,9 +1198,6 @@ def resolve_fireball(
     return resolve_monster_sphere_save_action(state, actor_id, {**action, "action_id": "fireball"}, overrides)
 
 
-SCORCHING_RAY_RAY_COUNT = 3
-
-
 def choose_scorching_ray_target_id(
     state: EncounterState,
     actor_id: str,
@@ -1348,6 +1345,7 @@ def resolve_scorching_ray(
 
     events: list[CombatEvent] = []
     if include_phase:
+        ray_count = get_spell_definition("scorching_ray").ray_count
         events.append(
             add_unit_phase_event(
                 state,
@@ -1355,7 +1353,7 @@ def resolve_scorching_ray(
                 primary_target_id,
                 f"{actor_id} casts Scorching Ray.",
                 condition_deltas=[f"{actor_id} makes three ranged spell attacks."],
-                resolved_totals={"specialAction": "scorching_ray", "rayCount": SCORCHING_RAY_RAY_COUNT},
+                resolved_totals={"specialAction": "scorching_ray", "rayCount": ray_count},
             )
         )
     events.extend(resolve_scorching_ray_attacks(state, actor_id, preferred_target_ids, overrides))

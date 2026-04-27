@@ -58,6 +58,12 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         description="Strength increase plus heavy-weapon damage and Hew bonus attacks for great-weapon strikes.",
         granted_bonus_action_ids=("great_weapon_master_hewing",),
     ),
+    "ability_score_improvement": FeatureDefinition(
+        feature_id="ability_score_improvement",
+        display_name="Ability Score Improvement",
+        kind="feat",
+        description="Level 4 ability score increase tracked through sample build ability modifiers.",
+    ),
     "tactical_shift": FeatureDefinition(
         feature_id="tactical_shift",
         display_name="Tactical Shift",

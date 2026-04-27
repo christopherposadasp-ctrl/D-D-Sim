@@ -73,6 +73,7 @@ monk_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=0, wis=2, cha=-1)
 paladin_ability_mods = AbilityModifiers(str=3, dex=0, con=3, int=-1, wis=0, cha=2)
 paladin_level4_ability_mods = AbilityModifiers(str=4, dex=0, con=3, int=-1, wis=0, cha=2)
 wizard_ability_mods = AbilityModifiers(str=-1, dex=2, con=2, int=3, wis=1, cha=0)
+wizard_level4_ability_mods = AbilityModifiers(str=-1, dex=2, con=2, int=4, wis=1, cha=0)
 medium_footprint = Footprint(width=1, height=1)
 TRIO_PLAYER_IDS = ("F1", "F2", "F3")
 COMBAT_SKILL_ABILITY_IDS = {
@@ -924,6 +925,35 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
             "shatter",
         ),
     ),
+    "wizard_level4_evoker_sample_build": PlayerLoadoutDefinition(
+        loadout_id="wizard_level4_evoker_sample_build",
+        display_name="Level 4 Evoker Wizard Sample Build",
+        class_id="wizard",
+        level=4,
+        template_name="Level 4 Evoker Wizard Sample Build",
+        behavior_profile="arcane_artillery",
+        max_hp=26,
+        ac=12,
+        speed=30,
+        initiative_mod=2,
+        passive_perception=11,
+        ability_mods=wizard_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={"dagger": player_weapons["dagger"]},
+        role_tags=("caster",),
+        medicine_modifier=1,
+        default_melee_weapon_id="dagger",
+        combat_cantrip_ids=("fire_bolt", "shocking_grasp"),
+        prepared_combat_spell_ids=(
+            "magic_missile",
+            "shield",
+            "burning_hands",
+            "mage_armor",
+            "scorching_ray",
+            "shatter",
+        ),
+    ),
 }
 
 PLAYER_LOADOUTS.update(
@@ -1184,15 +1214,24 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "wizard_level4_evoker_sample_trio": PlayerPresetDefinition(
+        preset_id="wizard_level4_evoker_sample_trio",
+        display_name="Level 4 Evoker Wizard Trio",
+        description="Three level 4 Evoker wizards with an Intelligence ASI and expanded spell access metadata.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="wizard_level4_evoker_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 3 Evoker wizard.",
+        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 4 Evoker wizard.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
             PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level5_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
-            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_level3_evoker_sample_build"),
+            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_level4_evoker_sample_build"),
         ),
     ),
 }
@@ -1237,6 +1276,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "wizard_sample_trio",
     "wizard_level2_sample_trio",
     "wizard_level3_evoker_sample_trio",
+    "wizard_level4_evoker_sample_trio",
     "martial_mixed_party",
 )
 

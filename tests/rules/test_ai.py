@@ -597,6 +597,24 @@ def test_level3_evoker_wizard_does_not_select_mage_armor_in_normal_ai_turns() ->
     assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
 
 
+def test_level4_evoker_wizard_keeps_existing_spell_priority_and_ignores_mage_armor() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level4-shatter-cluster",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 9, "y": 1}),
+            player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action
+    assert decision.action["kind"] == "cast_spell"
+    assert decision.action["spell_id"] == "shatter"
+    assert set(decision.action["target_ids"]) == {"G1", "G2"}
+
+
 def test_level3_evoker_wizard_uses_shatter_over_scorching_ray_for_ally_safe_cluster() -> None:
     encounter = create_encounter(
         EncounterConfig(

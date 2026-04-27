@@ -208,6 +208,15 @@ def build_level3_wizard_config(seed: str, *, player_behavior: str = "smart") -> 
     )
 
 
+def build_level4_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="wizard_level4_evoker_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
 def build_level3_fighter_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
@@ -1140,6 +1149,26 @@ def test_evoker_potent_cantrip_shocking_grasp_miss_deals_damage_without_no_react
     assert attack_event.resolved_totals["potentCantripDamage"] == 2
     assert attack_event.damage_details.total_damage == 2
     assert all(effect.kind != "no_reactions" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_level4_evoker_fire_bolt_uses_int_asi_spell_attack_bonus() -> None:
+    encounter = create_encounter(build_level4_wizard_config("wizard-level4-fire-bolt-attack-bonus"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[9], damage_rolls=[6]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "fire_bolt"
+    assert attack_event.resolved_totals["selectedRoll"] == 9
+    assert attack_event.resolved_totals["attackTotal"] == 15
+    assert attack_event.resolved_totals["hit"] is True
 
 
 def test_magic_missile_auto_hits_and_spends_a_level1_slot() -> None:
@@ -2432,6 +2461,40 @@ def test_shatter_deals_thunder_damage_on_con_saves_spends_level2_slot_and_logs_e
     assert encounter.units["F1"].resources.spell_slots_level_2 == 0
 
 
+def test_level4_evoker_shatter_and_burning_hands_use_int_asi_save_dc() -> None:
+    shatter_encounter = create_encounter(build_level4_wizard_config("wizard-level4-shatter-save-dc"))
+    defeat_other_enemies(shatter_encounter, "E1")
+    shatter_encounter.units["F1"].position = GridPosition(x=5, y=5)
+    shatter_encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    shatter_events = resolve_cast_spell_action(
+        shatter_encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shatter", "target_id": "E1", "target_ids": ["E1"]},
+        overrides=AttackRollOverrides(save_rolls=[13], damage_rolls=[3, 4, 5]),
+    )
+    shatter_attack = next(event for event in shatter_events if event.event_type == "attack")
+
+    assert shatter_attack.resolved_totals["saveDc"] == 14
+    assert shatter_attack.resolved_totals["saveSucceeded"] is False
+
+    burning_hands_encounter = create_encounter(build_level4_wizard_config("wizard-level4-burning-hands-save-dc"))
+    defeat_other_enemies(burning_hands_encounter, "E1")
+    burning_hands_encounter.units["F1"].position = GridPosition(x=5, y=5)
+    burning_hands_encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    burning_hands_events = resolve_cast_spell_action(
+        burning_hands_encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "burning_hands", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[3, 2, 1]),
+    )
+    burning_hands_attack = next(event for event in burning_hands_events if event.event_type == "attack")
+
+    assert burning_hands_attack.resolved_totals["saveDc"] == 14
+    assert burning_hands_attack.resolved_totals["saveSucceeded"] is False
+
+
 def test_scorching_ray_spends_one_level2_slot_and_resolves_three_spell_attacks() -> None:
     spell = get_spell_definition("scorching_ray")
     encounter = create_encounter(build_level3_wizard_config("wizard-scorching-ray-three-rays"))
@@ -2459,6 +2522,27 @@ def test_scorching_ray_spends_one_level2_slot_and_resolves_three_spell_attacks()
     assert [event.damage_details.total_damage for event in attack_events] == [3, 7, 11]
     assert encounter.units["F1"].resources.spell_slots_level_2 == 1
     assert all("potentCantripApplied" not in event.resolved_totals for event in attack_events)
+
+
+def test_level4_evoker_scorching_ray_uses_int_asi_spell_attack_bonus_and_third_level2_slot() -> None:
+    encounter = create_encounter(build_level4_wizard_config("wizard-level4-scorching-ray-attack-bonus"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E1"].max_hp = 50
+    encounter.units["E1"].current_hp = 50
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[9, 9, 9], damage_rolls=[1, 2, 3, 4, 5, 6]),
+    )
+    attack_events = [event for event in spell_events if event.event_type == "attack"]
+
+    assert [event.resolved_totals["attackTotal"] for event in attack_events] == [15, 15, 15]
+    assert [event.resolved_totals["hit"] for event in attack_events] == [True, True, True]
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 2
 
 
 def test_scorching_ray_stops_remaining_rays_after_target_drops() -> None:
