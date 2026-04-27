@@ -48,7 +48,10 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
     "aura_of_authority": MonsterTraitDefinition(
         trait_id="aura_of_authority",
         display_name="Aura of Authority",
-        description="This creature projects a command aura; aura-based advantage is not modeled by the live simulator.",
+        description=(
+            "While this creature is active, it and allied creatures within 10 feet "
+            "have advantage on attack rolls and saving throws."
+        ),
     ),
     "agile": MonsterTraitDefinition(
         trait_id="agile",

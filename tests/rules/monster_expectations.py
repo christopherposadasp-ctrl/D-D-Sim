@@ -163,7 +163,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         },
         opening_weapon_id="greatsword",
         melee_fallback_weapon_id="greatsword",
-        special_mechanics=("multiattack",),
+        special_mechanics=("multiattack", "aura_of_authority"),
         benchmark_preset_id="hobgoblin_captain_benchmark",
         benchmark_count=2,
     ),

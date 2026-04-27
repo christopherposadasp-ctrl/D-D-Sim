@@ -131,6 +131,9 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     if "pack_tactics" in expectation.special_mechanics:
         assert "pack_tactics" in definition.trait_ids
 
+    if "aura_of_authority" in expectation.special_mechanics:
+        assert "aura_of_authority" in definition.trait_ids
+
     if "sunlight_sensitivity" in expectation.special_mechanics:
         assert "sunlight_sensitivity" in definition.trait_ids
 

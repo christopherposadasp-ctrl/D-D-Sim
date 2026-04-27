@@ -320,6 +320,33 @@ def clear_frightened_effects(unit: UnitState, source_id: str | None = None) -> i
     return original_count - len(unit.temporary_effects)
 
 
+def unit_projects_aura_of_authority(unit: UnitState) -> bool:
+    if not unit.position or unit.current_hp <= 0 or unit.conditions.dead or unit.conditions.unconscious:
+        return False
+    try:
+        return unit_has_trait(unit, "aura_of_authority")
+    except ValueError:
+        return False
+
+
+def unit_benefits_from_aura_of_authority(state: EncounterState, unit: UnitState) -> bool:
+    if not unit.position or unit.current_hp <= 0 or unit.conditions.dead or unit.conditions.unconscious:
+        return False
+
+    for source in state.units.values():
+        if source.faction != unit.faction or not unit_projects_aura_of_authority(source):
+            continue
+        distance = get_min_chebyshev_distance_between_footprints(
+            source.position,
+            get_unit_footprint(source),
+            unit.position,
+            get_unit_footprint(unit),
+        )
+        if distance <= 2:
+            return True
+    return False
+
+
 def unit_is_halted(unit: UnitState) -> bool:
     return any(effect.kind == "halted" for effect in unit.temporary_effects)
 
@@ -985,6 +1012,8 @@ def get_saving_throw_mode(
     ability: str,
     base_advantage_sources: list[str] | None = None,
     base_disadvantage_sources: list[str] | None = None,
+    *,
+    state: EncounterState | None = None,
 ) -> tuple[AttackMode, list[str], list[str]]:
     advantage_sources = list(base_advantage_sources or [])
     disadvantage_sources = list(base_disadvantage_sources or [])
@@ -994,6 +1023,9 @@ def get_saving_throw_mode(
 
     if actor.faction == "goblins" and unit_has_trait(actor, "bloodied_frenzy") and unit_is_bloodied(actor):
         advantage_sources.append("bloodied_frenzy")
+
+    if state and "aura_of_authority" not in advantage_sources and unit_benefits_from_aura_of_authority(state, actor):
+        advantage_sources.append("aura_of_authority")
 
     if advantage_sources and disadvantage_sources:
         return "normal", advantage_sources, disadvantage_sources
@@ -1012,6 +1044,7 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
         args.ability,
         args.advantage_sources,
         args.disadvantage_sources,
+        state=state,
     )
 
     if mode == "normal":
@@ -2999,6 +3032,9 @@ def get_attack_mode(
 
     if attacker.faction == "goblins" and unit_has_trait(attacker, "bloodied_frenzy") and unit_is_bloodied(attacker):
         advantage_sources.append("bloodied_frenzy")
+
+    if "aura_of_authority" not in advantage_sources and unit_benefits_from_aura_of_authority(state, attacker):
+        advantage_sources.append("aura_of_authority")
 
     if unit_has_reckless_attack_effect(attacker) and weapon.attack_ability == "str":
         advantage_sources.append("reckless_attack")

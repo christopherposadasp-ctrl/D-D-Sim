@@ -412,7 +412,7 @@ def resolve_legendary_freezing_burst(
 
     for resolved_target_id in targeting.target_ids:
         target = state.units[resolved_target_id]
-        save_mode, _, _ = get_saving_throw_mode(target, burst.save_ability)
+        save_mode, _, _ = get_saving_throw_mode(target, burst.save_ability, state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
         save_event = resolve_saving_throw(
@@ -693,7 +693,7 @@ def resolve_legendary_frightful_presence(
             )
             continue
 
-        save_mode, _, _ = get_saving_throw_mode(target, fear.save_ability)
+        save_mode, _, _ = get_saving_throw_mode(target, fear.save_ability, state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
         save_event = resolve_saving_throw(
@@ -2106,7 +2106,7 @@ def resolve_dragon_cone_breath(
 
     for resolved_target_id in targeting.target_ids:
         target = state.units[resolved_target_id]
-        save_mode, _, _ = get_saving_throw_mode(target, breath.save_ability)
+        save_mode, _, _ = get_saving_throw_mode(target, breath.save_ability, state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
         save_event = resolve_saving_throw(

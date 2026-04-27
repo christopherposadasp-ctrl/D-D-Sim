@@ -220,6 +220,7 @@ def test_remaining_monster_attack_math_with_fixed_rolls(
     encounter = build_monster_benchmark_encounter(variant_id)
     defeat_other_units(encounter, "E1", "F1")
     set_duel_positions(encounter, variant_id, weapon_id)
+    attack_rolls = [3, 18] if variant_id == "hobgoblin_captain" else [18]
 
     attack, _ = resolve_attack(
         encounter,
@@ -228,13 +229,168 @@ def test_remaining_monster_attack_math_with_fixed_rolls(
             target_id="F1",
             weapon_id=weapon_id,
             savage_attacker_available=False,
-            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=damage_rolls),
+            overrides=AttackRollOverrides(attack_rolls=attack_rolls, damage_rolls=damage_rolls),
         ),
     )
 
     assert [component.damage_type for component in attack.damage_details.damage_components] == damage_types
     assert [component.total_damage for component in attack.damage_details.damage_components] == damage_totals
     assert attack.damage_details.total_damage == sum(damage_totals)
+    if variant_id == "hobgoblin_captain":
+        assert attack.resolved_totals["attackMode"] == "advantage"
+        assert attack.raw_rolls["attackRolls"] == attack_rolls
+        assert "aura_of_authority" in attack.raw_rolls["advantageSources"]
+
+
+def test_hobgoblin_captain_aura_grants_self_attack_advantage() -> None:
+    encounter = build_monster_benchmark_encounter("hobgoblin_captain")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 18], damage_rolls=[3, 4, 5]),
+        ),
+    )
+
+    assert attack.resolved_totals["attackMode"] == "advantage"
+    assert attack.raw_rolls["attackRolls"] == [3, 18]
+    assert attack.resolved_totals["selectedRoll"] == 18
+    assert attack.raw_rolls["advantageSources"] == ["aura_of_authority"]
+
+
+def test_hobgoblin_captain_aura_grants_nearby_ally_attack_advantage() -> None:
+    encounter = build_monster_benchmark_encounter("hobgoblin_captain")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E2",
+            target_id="F1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 18], damage_rolls=[3, 4]),
+        ),
+    )
+
+    assert attack.resolved_totals["attackMode"] == "advantage"
+    assert attack.raw_rolls["attackRolls"] == [3, 18]
+    assert attack.raw_rolls["advantageSources"] == ["aura_of_authority"]
+
+
+def test_hobgoblin_captain_aura_does_not_reach_distant_ally() -> None:
+    encounter = build_monster_benchmark_encounter("hobgoblin_captain")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=9, y=5)
+    encounter.units["F1"].position = GridPosition(x=10, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E2",
+            target_id="F1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[3, 4]),
+        ),
+    )
+
+    assert attack.resolved_totals["attackMode"] == "normal"
+    assert "aura_of_authority" not in attack.raw_rolls["advantageSources"]
+
+
+def test_hobgoblin_captain_aura_grants_nearby_ally_saving_throw_advantage() -> None:
+    encounter = build_monster_benchmark_encounter("hobgoblin_captain")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=5)
+
+    save_event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E2",
+            ability="wis",
+            dc=10,
+            reason="aura test",
+            overrides=SavingThrowOverrides(save_rolls=[3, 18]),
+        ),
+    )
+
+    assert save_event.resolved_totals["saveMode"] == "advantage"
+    assert save_event.raw_rolls["savingThrowRolls"] == [3, 18]
+    assert save_event.resolved_totals["selectedRoll"] == 18
+    assert save_event.raw_rolls["advantageSources"] == ["aura_of_authority"]
+
+
+@pytest.mark.parametrize("inactive_state", ("dead", "unconscious", "zero_hp"))
+def test_hobgoblin_captain_aura_stops_when_source_is_inactive(inactive_state: str) -> None:
+    encounter = build_monster_benchmark_encounter("hobgoblin_captain")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    if inactive_state == "dead":
+        encounter.units["E1"].current_hp = 0
+        encounter.units["E1"].conditions.dead = True
+    elif inactive_state == "unconscious":
+        encounter.units["E1"].conditions.unconscious = True
+    else:
+        encounter.units["E1"].current_hp = 0
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E2",
+            target_id="F1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[3, 4]),
+        ),
+    )
+
+    assert attack.resolved_totals["attackMode"] == "normal"
+    assert "aura_of_authority" not in attack.raw_rolls["advantageSources"]
+
+
+def test_overlapping_hobgoblin_captain_auras_do_not_stack_beyond_normal_advantage() -> None:
+    encounter = build_monster_benchmark_encounter("hobgoblin_captain")
+    encounter.units["E3"] = create_enemy("E3", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "E3", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=5)
+    encounter.units["E3"].position = GridPosition(x=7, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E3",
+            target_id="F1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 18], damage_rolls=[3, 4]),
+        ),
+    )
+
+    assert attack.resolved_totals["attackMode"] == "advantage"
+    assert attack.raw_rolls["attackRolls"] == [3, 18]
+    assert attack.raw_rolls["advantageSources"].count("aura_of_authority") == 1
 
 
 def test_hobgoblin_archer_advantaged_longbow_hit_adds_poison_damage() -> None:

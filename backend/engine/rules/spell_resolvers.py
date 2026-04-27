@@ -769,7 +769,7 @@ def resolve_multi_target_save_spell(
 
     for resolved_target_id in resolved_target_ids:
         target = state.units[resolved_target_id]
-        save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "con")
+        save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "con", state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [
             save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))
@@ -913,7 +913,7 @@ def resolve_burning_hands(
 
     for resolved_target_id in targeting.target_ids:
         target = state.units[resolved_target_id]
-        save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "dex")
+        save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "dex", state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [
             save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))
