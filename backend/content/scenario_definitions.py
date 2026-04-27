@@ -125,7 +125,13 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         display_name="Berserker Overrun",
         description=ENEMY_PRESETS["berserker_overrun"].description,
         enemy_preset_id="berserker_overrun",
-        audit_expectation_ids=("berserker_greataxe_attack", "goblin_melee_engagement", "goblin_shortbow_attack"),
+        audit_expectation_ids=(
+            "berserker_greataxe_attack",
+            "goblin_melee_engagement",
+            "hobgoblin_captain_multiattack",
+            "hobgoblin_captain_longbow_attack",
+            "hobgoblin_longbow_attack",
+        ),
     ),
 }
 

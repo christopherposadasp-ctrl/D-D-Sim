@@ -195,7 +195,7 @@ def test_berserker_overrun_builds_staggered_mob_and_hammers() -> None:
     ]
     assert encounter.units["E1"].combat_role == "goblin_melee"
     assert encounter.units["E12"].combat_role == "berserker"
-    assert encounter.units["E14"].combat_role == "goblin_archer"
+    assert encounter.units["E14"].combat_role == "hobgoblin_archer"
 
 
 def test_preset_layout_rejects_missing_active_unit() -> None:

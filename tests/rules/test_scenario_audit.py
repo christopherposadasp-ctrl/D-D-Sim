@@ -253,7 +253,9 @@ def test_berserker_overrun_scenario_definition_is_staged_with_expected_expectati
     assert definition.audit_expectation_ids == (
         "berserker_greataxe_attack",
         "goblin_melee_engagement",
-        "goblin_shortbow_attack",
+        "hobgoblin_captain_multiattack",
+        "hobgoblin_captain_longbow_attack",
+        "hobgoblin_longbow_attack",
     )
 
 
@@ -277,5 +279,7 @@ def test_audit_scenario_supports_staged_berserker_overrun() -> None:
     assert set(payload["signatureBreakdown"]) == {
         "berserkerGreataxeAttack",
         "goblinMeleeEngagement",
-        "goblinShortbowAttack",
+        "hobgoblinCaptainMultiattack",
+        "hobgoblinCaptainLongbowAttack",
+        "hobgoblinLongbowAttack",
     }
