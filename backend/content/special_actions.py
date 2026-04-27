@@ -57,33 +57,6 @@ class LegendaryConeFearActionDefinition:
     duration_rounds: int
 
 
-@dataclass(frozen=True)
-class MonsterCommandActionDefinition:
-    action_id: str
-    display_name: str
-    save_ability: str
-    save_dc: int
-    range_squares: int
-    target_count: int
-    command_word: str
-
-
-@dataclass(frozen=True)
-class MonsterSphereSaveActionDefinition:
-    action_id: str
-    display_name: str
-    resource_pool_id: str
-    save_ability: str
-    save_dc: int
-    range_squares: int
-    radius_squares: int
-    damage_die_count: int
-    damage_die_sides: int
-    damage_type: str
-    half_damage_on_success: bool = True
-    exclude_actor: bool = True
-
-
 SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
     "swallow": SpecialActionDefinition(
         action_id="swallow",
@@ -103,17 +76,17 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
     "scorching_ray": SpecialActionDefinition(
         action_id="scorching_ray",
         display_name="Scorching Ray",
-        description="Cast three ranged fire rays as a monster spell-like action.",
+        description="Cast shared Scorching Ray through monster spellcasting.",
     ),
     "command": SpecialActionDefinition(
         action_id="command",
         display_name="Command",
-        description="Issue a monster-only command that can force targets to flee on failed Wisdom saves.",
+        description="Cast shared Command through monster spellcasting.",
     ),
     "fireball": SpecialActionDefinition(
         action_id="fireball",
         display_name="Fireball",
-        description="Hurl a monster-only fiery sphere that forces Dexterity saves for half fire damage.",
+        description="Cast shared Fireball through monster spellcasting.",
     ),
     "freezing_burst": SpecialActionDefinition(
         action_id="freezing_burst",
@@ -190,35 +163,6 @@ LEGENDARY_CONE_FEAR_ACTIONS: dict[str, LegendaryConeFearActionDefinition] = {
         save_dc=14,
         range_squares=6,
         duration_rounds=10,
-    ),
-}
-
-
-MONSTER_COMMAND_ACTIONS: dict[str, MonsterCommandActionDefinition] = {
-    "command": MonsterCommandActionDefinition(
-        action_id="command",
-        display_name="Command",
-        save_ability="wis",
-        save_dc=20,
-        range_squares=12,
-        target_count=2,
-        command_word="flee",
-    ),
-}
-
-
-MONSTER_SPHERE_ACTIONS: dict[str, MonsterSphereSaveActionDefinition] = {
-    "fireball": MonsterSphereSaveActionDefinition(
-        action_id="fireball",
-        display_name="Fireball",
-        resource_pool_id="fireball_uses",
-        save_ability="dex",
-        save_dc=20,
-        range_squares=30,
-        radius_squares=4,
-        damage_die_count=8,
-        damage_die_sides=6,
-        damage_type="fire",
     ),
 }
 

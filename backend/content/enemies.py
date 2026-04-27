@@ -11,6 +11,7 @@ from backend.content.attack_sequences import (
     single_weapon_attack_action,
 )
 from backend.content.monster_traits import get_monster_trait
+from backend.content.spell_definitions import SpellDefinition, get_spell_definition
 from backend.engine.models.state import (
     AbilityModifiers,
     AttackId,
@@ -28,6 +29,43 @@ from backend.engine.models.state import (
     WeaponProfile,
     WeaponRange,
 )
+
+
+@dataclass(frozen=True)
+class MonsterSpellcastingDefinition:
+    spellcasting_ability: str
+    spell_attack_bonus: int
+    spell_save_dc: int
+    at_will_spell_ids: tuple[str, ...] = ()
+    limited_use_spell_resources: dict[str, str] = field(default_factory=dict)
+    spell_target_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MonsterCommandSpellDefinition:
+    action_id: str
+    display_name: str
+    save_ability: str
+    save_dc: int
+    range_squares: int
+    target_count: int
+    command_word: str
+
+
+@dataclass(frozen=True)
+class MonsterSphereSpellDefinition:
+    action_id: str
+    display_name: str
+    resource_pool_id: str
+    save_ability: str
+    save_dc: int
+    range_squares: int
+    radius_squares: int
+    damage_die_count: int
+    damage_die_sides: int
+    damage_type: str
+    half_damage_on_success: bool = True
+    exclude_actor: bool = True
 
 
 @dataclass(frozen=True)
@@ -59,6 +97,7 @@ class MonsterDefinition:
     role_tags: tuple[RoleTag, ...] = ()
     action_ids: tuple[str, ...] = ()
     special_action_ids: tuple[str, ...] = ()
+    monster_spellcasting: MonsterSpellcastingDefinition | None = None
     dragon_breath_profile_ids: dict[str, str] = field(default_factory=dict)
     legendary_action_ids: tuple[str, ...] = ()
     bonus_action_ids: tuple[str, ...] = ()
@@ -2639,26 +2678,23 @@ MONSTER_DEFINITIONS.update(
                     kind="melee",
                     reach=10,
                 ),
-                "scorching_ray": WeaponProfile(
-                    id="scorching_ray",
-                    display_name="Scorching Ray",
-                    attack_bonus=12,
-                    ability_modifier=6,
-                    damage_dice=[DiceSpec(count=2, sides=6)],
-                    damage_modifier=0,
-                    damage_type="fire",
-                    kind="ranged",
-                    range=WeaponRange(normal=120, long=120),
-                ),
             },
             tags=("dragon", "chromatic", "red", "melee"),
             creature_tags=("dragon",),
             movement_modes=("walk", "climb", "fly"),
             action_ids=("multiattack", "fire_breath", "scorching_ray", "command", "fireball"),
             special_action_ids=("fire_breath", "scorching_ray", "command", "fireball"),
+            monster_spellcasting=MonsterSpellcastingDefinition(
+                spellcasting_ability="cha",
+                spell_attack_bonus=12,
+                spell_save_dc=20,
+                at_will_spell_ids=("command", "detect_magic", "scorching_ray"),
+                limited_use_spell_resources={"fireball": "fireball_uses"},
+                spell_target_counts={"command": 2},
+            ),
             dragon_breath_profile_ids={"fire_breath": "adult_red_fire_breath"},
             legendary_action_ids=("pounce", "fiery_rays", "commanding_presence"),
-            trait_ids=("opening_flight_landing", "legendary_resistance", "detect_magic"),
+            trait_ids=("opening_flight_landing", "legendary_resistance"),
             attack_actions=(
                 repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),
                 AttackActionDefinition(
@@ -3798,6 +3834,93 @@ def get_monster_definition_for_unit(unit: UnitState) -> MonsterDefinition:
         return MONSTER_DEFINITIONS_BY_COMBAT_ROLE[unit.combat_role]
     except KeyError as error:
         raise ValueError(f"No monster definition is registered for combat role '{unit.combat_role}'.") from error
+
+
+def get_monster_spellcasting_for_unit(unit: UnitState) -> MonsterSpellcastingDefinition | None:
+    try:
+        return get_monster_definition_for_unit(unit).monster_spellcasting
+    except ValueError:
+        return None
+
+
+def unit_has_monster_spell(unit: UnitState, spell_id: str) -> bool:
+    spellcasting = get_monster_spellcasting_for_unit(unit)
+    if not spellcasting:
+        return False
+    return spell_id in spellcasting.at_will_spell_ids or spell_id in spellcasting.limited_use_spell_resources
+
+
+def get_monster_spell_definition_for_unit(unit: UnitState, spell_id: str) -> SpellDefinition | None:
+    if not unit_has_monster_spell(unit, spell_id):
+        return None
+    return get_spell_definition(spell_id)
+
+
+def get_monster_spell_attack_profile_for_unit(unit: UnitState, spell_id: str) -> WeaponProfile | None:
+    spellcasting = get_monster_spellcasting_for_unit(unit)
+    spell = get_monster_spell_definition_for_unit(unit, spell_id)
+    if not spellcasting or not spell:
+        return None
+    if spell.targeting_mode not in {"ranged_spell_attack", "melee_spell_attack", "multi_ray_spell_attack"}:
+        return None
+
+    ability_modifier = getattr(unit.ability_mods, spellcasting.spellcasting_ability)
+    is_melee_spell = spell.targeting_mode == "melee_spell_attack"
+    return WeaponProfile(
+        id=spell_id,
+        display_name=spell.display_name,
+        attack_bonus=spellcasting.spell_attack_bonus,
+        ability_modifier=ability_modifier,
+        damage_dice=list(spell.damage_dice),
+        damage_modifier=spell.damage_modifier,
+        damage_type=spell.damage_type,
+        selectable_damage_types=list(spell.selectable_damage_types) or None,
+        kind="melee" if is_melee_spell else "ranged",
+        reach=spell.range_feet if is_melee_spell else None,
+        range=None if is_melee_spell else WeaponRange(normal=spell.range_feet, long=spell.range_feet),
+    )
+
+
+def get_monster_command_spell_for_unit(unit: UnitState, spell_id: str = "command") -> MonsterCommandSpellDefinition | None:
+    spellcasting = get_monster_spellcasting_for_unit(unit)
+    spell = get_monster_spell_definition_for_unit(unit, spell_id)
+    if not spellcasting or not spell or spell.targeting_mode != "multi_target_command":
+        return None
+    if not spell.save_ability or not spell.command_word:
+        return None
+    return MonsterCommandSpellDefinition(
+        action_id=spell.spell_id,
+        display_name=spell.display_name,
+        save_ability=spell.save_ability,
+        save_dc=spellcasting.spell_save_dc,
+        range_squares=spell.range_feet // 5,
+        target_count=spellcasting.spell_target_counts.get(spell_id, spell.max_targets),
+        command_word=spell.command_word,
+    )
+
+
+def get_monster_sphere_spell_for_unit(unit: UnitState, spell_id: str) -> MonsterSphereSpellDefinition | None:
+    spellcasting = get_monster_spellcasting_for_unit(unit)
+    spell = get_monster_spell_definition_for_unit(unit, spell_id)
+    if not spellcasting or not spell or spell.targeting_mode != "point_sphere_save":
+        return None
+    resource_pool_id = spellcasting.limited_use_spell_resources.get(spell_id)
+    if not resource_pool_id or not spell.save_ability or not spell.damage_dice:
+        return None
+    damage_die = spell.damage_dice[0]
+    return MonsterSphereSpellDefinition(
+        action_id=spell.spell_id,
+        display_name=spell.display_name,
+        resource_pool_id=resource_pool_id,
+        save_ability=spell.save_ability,
+        save_dc=spellcasting.spell_save_dc,
+        range_squares=spell.range_feet // 5,
+        radius_squares=spell.radius_feet // 5,
+        damage_die_count=damage_die.count,
+        damage_die_sides=damage_die.sides,
+        damage_type=spell.damage_type,
+        half_damage_on_success=spell.half_on_success,
+    )
 
 
 def get_unit_action_ids(unit: UnitState) -> tuple[str, ...]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from backend.engine.models.state import DiceSpec
@@ -35,6 +35,9 @@ class SpellDefinition:
         "multi_target_save",
         "self_weapon_damage_buff",
         "touch_heroism_buff",
+        "point_sphere_save",
+        "multi_target_command",
+        "metadata_only",
     ]
     range_feet: int
     damage_dice: tuple[DiceSpec, ...]
@@ -58,7 +61,10 @@ class SpellDefinition:
     speed_bonus: int = 0
     speed_penalty: int = 0
     selectable_damage_types: tuple[str, ...] = ()
+    radius_feet: int = 0
     ray_count: int = 1
+    command_word: str | None = None
+    upcast_target_counts: dict[int, int] = field(default_factory=dict)
 
 
 SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
@@ -403,6 +409,54 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         damage_type="fire",
         attack_ability="spellcasting",
         ray_count=3,
+    ),
+    "fireball": SpellDefinition(
+        spell_id="fireball",
+        display_name="Fireball",
+        level=3,
+        school="evocation",
+        description="Point-origin fiery sphere forcing Dexterity saves for half damage.",
+        timing="action",
+        targeting_mode="point_sphere_save",
+        range_feet=150,
+        radius_feet=20,
+        damage_dice=(DiceSpec(count=8, sides=6),),
+        damage_modifier=0,
+        damage_type="fire",
+        save_ability="dex",
+        half_on_success=True,
+    ),
+    "command": SpellDefinition(
+        spell_id="command",
+        display_name="Command",
+        level=1,
+        school="enchantment",
+        description="Single-word command forcing a Wisdom save.",
+        timing="action",
+        targeting_mode="multi_target_command",
+        range_feet=60,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        save_ability="wis",
+        command_word="flee",
+        max_targets=1,
+        upcast_target_counts={2: 2},
+    ),
+    "detect_magic": SpellDefinition(
+        spell_id="detect_magic",
+        display_name="Detect Magic",
+        level=1,
+        school="divination",
+        description="Utility detection spell recorded as metadata only in combat.",
+        timing="action",
+        targeting_mode="metadata_only",
+        range_feet=0,
+        damage_dice=(),
+        damage_modifier=0,
+        damage_type="none",
+        concentration=True,
+        duration_rounds=100,
     ),
     "divine_smite": SpellDefinition(
         spell_id="divine_smite",

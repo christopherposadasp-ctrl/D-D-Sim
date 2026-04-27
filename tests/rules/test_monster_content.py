@@ -11,6 +11,9 @@ from backend.content.enemies import (
     MONSTER_DEFINITIONS,
     create_enemy,
     get_enemy_preset,
+    get_monster_command_spell_for_unit,
+    get_monster_sphere_spell_for_unit,
+    get_monster_spell_attack_profile_for_unit,
     get_unit_bonus_action_ids,
     get_unit_reaction_ids,
     unit_has_creature_tag,
@@ -20,9 +23,8 @@ from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     LEGENDARY_CONE_FEAR_ACTIONS,
     LEGENDARY_SPHERE_ACTIONS,
-    MONSTER_COMMAND_ACTIONS,
-    MONSTER_SPHERE_ACTIONS,
 )
+from backend.content.spell_definitions import get_spell_definition
 from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
 
@@ -92,6 +94,18 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert tuple(definition.special_action_ids) == expectation.special_action_ids
     assert tuple(definition.dragon_breath_profile_ids.items()) == expectation.dragon_breath_profile_ids
     assert tuple(definition.legendary_action_ids) == expectation.legendary_action_ids
+    if expectation.monster_at_will_spell_ids or expectation.monster_limited_use_spell_resources:
+        assert definition.monster_spellcasting is not None
+        assert definition.monster_spellcasting.spell_attack_bonus == expectation.monster_spell_attack_bonus
+        assert definition.monster_spellcasting.spell_save_dc == expectation.monster_spell_save_dc
+        assert tuple(definition.monster_spellcasting.at_will_spell_ids) == expectation.monster_at_will_spell_ids
+        assert (
+            tuple(definition.monster_spellcasting.limited_use_spell_resources.items())
+            == expectation.monster_limited_use_spell_resources
+        )
+        assert tuple(definition.monster_spellcasting.spell_target_counts.items()) == expectation.monster_spell_target_counts
+    else:
+        assert definition.monster_spellcasting is None
     assert tuple(definition.damage_resistances) == expectation.damage_resistances
     assert tuple(definition.damage_immunities) == expectation.damage_immunities
     assert tuple(definition.damage_vulnerabilities) == expectation.damage_vulnerabilities
@@ -283,7 +297,16 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
 
     if "scorching_ray" in expectation.special_mechanics:
         assert "scorching_ray" in definition.special_action_ids
-        scorching_ray = definition.attacks["scorching_ray"]
+        scorching_ray_spell = get_spell_definition("scorching_ray")
+        assert scorching_ray_spell.targeting_mode == "multi_ray_spell_attack"
+        assert scorching_ray_spell.level == 2
+        assert scorching_ray_spell.range_feet == 120
+        assert scorching_ray_spell.ray_count == 3
+        assert tuple((die.count, die.sides) for die in scorching_ray_spell.damage_dice) == ((2, 6),)
+        assert scorching_ray_spell.damage_type == "fire"
+        assert "scorching_ray" not in definition.attacks
+        scorching_ray = get_monster_spell_attack_profile_for_unit(runtime_unit, "scorching_ray")
+        assert scorching_ray is not None
         assert scorching_ray.attack_bonus == 12
         assert tuple((die.count, die.sides) for die in scorching_ray.damage_dice) == ((2, 6),)
         assert scorching_ray.damage_type == "fire"
@@ -295,8 +318,14 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert runtime_unit.resource_pools.get("fiery_rays_available") == 1
 
     if "command" in expectation.special_mechanics:
-        command = MONSTER_COMMAND_ACTIONS["command"]
+        command_spell = get_spell_definition("command")
+        command = get_monster_command_spell_for_unit(runtime_unit, "command")
+        assert command is not None
         assert "command" in definition.special_action_ids
+        assert command_spell.targeting_mode == "multi_target_command"
+        assert command_spell.range_feet == 60
+        assert command_spell.max_targets == 1
+        assert command_spell.upcast_target_counts[2] == 2
         assert command.save_ability == "wis"
         assert command.save_dc == 20
         assert command.range_squares == 12
@@ -308,9 +337,15 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert runtime_unit.resource_pools.get("commanding_presence_available") == 1
 
     if "fireball" in expectation.special_mechanics:
-        fireball = MONSTER_SPHERE_ACTIONS["fireball"]
+        fireball_spell = get_spell_definition("fireball")
+        fireball = get_monster_sphere_spell_for_unit(runtime_unit, "fireball")
+        assert fireball is not None
         assert "fireball" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("fireball_uses") == 1
+        assert fireball_spell.targeting_mode == "point_sphere_save"
+        assert fireball_spell.range_feet == 150
+        assert fireball_spell.radius_feet == 20
+        assert tuple((die.count, die.sides) for die in fireball_spell.damage_dice) == ((8, 6),)
         assert fireball.resource_pool_id == "fireball_uses"
         assert fireball.save_ability == "dex"
         assert fireball.save_dc == 20
@@ -322,7 +357,11 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert fireball.half_damage_on_success is True
 
     if "detect_magic" in expectation.special_mechanics:
-        assert "detect_magic" in definition.trait_ids
+        detect_magic = get_spell_definition("detect_magic")
+        assert detect_magic.targeting_mode == "metadata_only"
+        assert definition.monster_spellcasting is not None
+        assert "detect_magic" in definition.monster_spellcasting.at_will_spell_ids
+        assert "detect_magic" not in definition.trait_ids
         assert "detect_magic" not in definition.action_ids
         assert "detect_magic" not in definition.special_action_ids
         assert "detect_magic" not in definition.legendary_action_ids

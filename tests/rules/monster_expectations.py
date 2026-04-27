@@ -58,6 +58,11 @@ class MonsterExpectation:
     resource_pools: tuple[tuple[str, int], ...] = ()
     dragon_breath_profile_ids: tuple[tuple[str, str], ...] = ()
     legendary_action_ids: tuple[str, ...] = ()
+    monster_spell_attack_bonus: int | None = None
+    monster_spell_save_dc: int | None = None
+    monster_at_will_spell_ids: tuple[str, ...] = ()
+    monster_limited_use_spell_resources: tuple[tuple[str, str], ...] = ()
+    monster_spell_target_counts: tuple[tuple[str, int], ...] = ()
 
 
 MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
@@ -1753,7 +1758,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         size_category="huge",
         footprint=(3, 3),
         ability_mods={"str": 8, "dex": 0, "con": 7, "int": 3, "wis": 1, "cha": 6},
-        trait_ids=("opening_flight_landing", "legendary_resistance", "detect_magic"),
+        trait_ids=("opening_flight_landing", "legendary_resistance"),
         attacks={
             "rend": AttackExpectation(
                 kind="melee",
@@ -1766,15 +1771,6 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
                     DamageComponentExpectation("slashing", ((1, 10),), 8),
                     DamageComponentExpectation("fire", ((2, 4),), 0),
                 ),
-            ),
-            "scorching_ray": AttackExpectation(
-                kind="ranged",
-                attack_bonus=12,
-                ability_modifier=6,
-                damage_modifier=0,
-                damage_type="fire",
-                range=(120, 120),
-                damage_dice=((2, 6),),
             ),
         },
         opening_weapon_id="rend",
@@ -1812,6 +1808,11 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         ),
         dragon_breath_profile_ids=(("fire_breath", "adult_red_fire_breath"),),
         legendary_action_ids=("pounce", "fiery_rays", "commanding_presence"),
+        monster_spell_attack_bonus=12,
+        monster_spell_save_dc=20,
+        monster_at_will_spell_ids=("command", "detect_magic", "scorching_ray"),
+        monster_limited_use_spell_resources=(("fireball", "fireball_uses"),),
+        monster_spell_target_counts=(("command", 2),),
     ),
     "berserker": MonsterExpectation(
         ai_profile_id="melee_brute",

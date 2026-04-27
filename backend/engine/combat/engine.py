@@ -4,8 +4,13 @@ from backend.content.attack_sequences import AttackStepDefinition
 from backend.content.class_progressions import get_progression_scalar
 from backend.content.combat_actions import action_prevents_opportunity_attacks, get_extra_movement_multiplier
 from backend.content.enemies import (
+    MonsterSphereSpellDefinition,
     get_attack_action_definition_for_unit,
+    get_monster_command_spell_for_unit,
     get_monster_definition_for_unit,
+    get_monster_sphere_spell_for_unit,
+    get_monster_spell_attack_profile_for_unit,
+    get_monster_spellcasting_for_unit,
     unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
@@ -13,12 +18,9 @@ from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     LEGENDARY_CONE_FEAR_ACTIONS,
     LEGENDARY_SPHERE_ACTIONS,
-    MONSTER_COMMAND_ACTIONS,
-    MONSTER_SPHERE_ACTIONS,
     DragonBreathActionDefinition,
     LegendaryConeFearActionDefinition,
     LegendarySphereActionDefinition,
-    MonsterSphereSaveActionDefinition,
     get_special_action,
 )
 from backend.content.spell_definitions import get_spell_definition
@@ -734,13 +736,9 @@ def resolve_legendary_frightful_presence(
 
 
 def get_monster_command_action_for_unit(unit: UnitState, action_id: str):
-    try:
-        definition = get_monster_definition_for_unit(unit)
-    except ValueError:
+    if action_id != "command":
         return None
-    if action_id not in definition.special_action_ids:
-        return None
-    return MONSTER_COMMAND_ACTIONS.get(action_id)
+    return get_monster_command_spell_for_unit(unit, action_id)
 
 
 def unit_is_command_immune(unit: UnitState) -> bool:
@@ -1004,18 +1002,18 @@ def resolve_legendary_commanding_presence(
 
 def get_monster_sphere_action_for_unit(
     unit: UnitState, action_id: str
-) -> MonsterSphereSaveActionDefinition | None:
+) -> MonsterSphereSpellDefinition | None:
     try:
         definition = get_monster_definition_for_unit(unit)
     except ValueError:
         return None
     if action_id not in definition.special_action_ids:
         return None
-    return MONSTER_SPHERE_ACTIONS.get(action_id)
+    return get_monster_sphere_spell_for_unit(unit, action_id)
 
 
 def build_monster_sphere_damage_component(
-    action: MonsterSphereSaveActionDefinition, base_rolls: list[int], applied_damage: int
+    action: MonsterSphereSpellDefinition, base_rolls: list[int], applied_damage: int
 ) -> list[DamageComponentResult]:
     return [
         DamageComponentResult(
@@ -1209,7 +1207,7 @@ def choose_scorching_ray_target_id(
     preferred_target_id: str | None = None,
 ) -> str | None:
     actor = state.units[actor_id]
-    weapon = actor.attacks.get("scorching_ray")
+    weapon = get_monster_spell_attack_profile_for_unit(actor, "scorching_ray")
     if not weapon:
         return None
 
@@ -1240,7 +1238,9 @@ def build_scorching_ray_attack_overrides(
 ) -> AttackRollOverrides:
     actor = state.units[actor_id]
     target = state.units[target_id]
-    weapon = actor.attacks["scorching_ray"]
+    weapon = get_monster_spell_attack_profile_for_unit(actor, "scorching_ray")
+    if not weapon:
+        return AttackRollOverrides()
     attack_mode, _, _ = get_attack_mode(state, actor, actor_id, target, target_id, weapon)
     attack_roll_count = 1 if attack_mode == "normal" else 2
     ray_damage_die_count = sum(spec.count for spec in weapon.damage_dice)
@@ -1257,15 +1257,17 @@ def resolve_scorching_ray_attacks(
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
     actor = state.units[actor_id]
-    if "scorching_ray" not in actor.attacks:
+    spellcasting = get_monster_spellcasting_for_unit(actor)
+    if not spellcasting or not get_monster_spell_attack_profile_for_unit(actor, "scorching_ray"):
         return [create_skip_event(state, actor_id, "Scorching Ray is unavailable.")]
 
     attack_rolls = list(overrides.attack_rolls if overrides else [])
     damage_rolls = list(overrides.damage_rolls if overrides else [])
     preferred_target_ids = preferred_target_ids or []
     events: list[CombatEvent] = []
+    ray_count = get_spell_definition("scorching_ray").ray_count
 
-    for ray_index in range(SCORCHING_RAY_RAY_COUNT):
+    for ray_index in range(ray_count):
         if actor.conditions.dead or actor.current_hp <= 0:
             break
         preferred_target_id = (
@@ -1280,18 +1282,24 @@ def resolve_scorching_ray_attacks(
             break
 
         ray_overrides = build_scorching_ray_attack_overrides(state, actor_id, target_id, attack_rolls, damage_rolls)
-        attack_event, _ = resolve_attack(
+        attack_event = spell_resolvers.resolve_ranged_spell_attack(
             state,
-            ResolveAttackArgs(
-                attacker_id=actor_id,
-                target_id=target_id,
-                weapon_id="scorching_ray",
-                savage_attacker_available=False,
-                overrides=ray_overrides,
-            ),
+            actor_id,
+            target_id,
+            "scorching_ray",
+            ray_overrides,
+            spend_slot=False,
+            attack_bonus_override=spellcasting.spell_attack_bonus,
+            spellcasting_ability_override=spellcasting.spellcasting_ability,
         )
+        if attack_event.event_type != "attack":
+            events.append(attack_event)
+            break
         attack_event.resolved_totals["specialAction"] = "scorching_ray"
         attack_event.resolved_totals["scorchingRayIndex"] = ray_index + 1
+        attack_event.resolved_totals["rayIndex"] = ray_index + 1
+        attack_event.resolved_totals["rayCount"] = ray_count
+        attack_event.resolved_totals["spellLikeAction"] = True
         events.extend(build_attack_reaction_pre_events(state, attack_event))
         events.extend(build_attack_reaction_phase_events(state, attack_event))
         events.append(attack_event)
@@ -2948,7 +2956,7 @@ def resolve_special_action_events(
         return resolve_scorching_ray(state, actor_id, action, overrides)
     if action.get("action_id") == "command":
         return resolve_command(state, actor_id, action, overrides)
-    if action.get("action_id") in MONSTER_SPHERE_ACTIONS:
+    if get_monster_sphere_action_for_unit(state.units[actor_id], str(action.get("action_id") or "")):
         return resolve_monster_sphere_save_action(state, actor_id, action, overrides)
     return [resolve_special_action(state, actor_id, action)]
 
@@ -2987,7 +2995,7 @@ def choose_step_weapon_for_target(
     attack_mode_priority = {"advantage": 2, "normal": 1, "disadvantage": 0}
 
     for order_index, weapon_id in enumerate(attack_step.allowed_weapon_ids):
-        weapon = actor.attacks.get(weapon_id)
+        weapon = actor.attacks.get(weapon_id) or get_monster_spell_attack_profile_for_unit(actor, weapon_id)
         if not weapon:
             continue
         if weapon.resource_pool_id and actor.resources.get_pool(weapon.resource_pool_id) <= 0:
@@ -3554,7 +3562,6 @@ def resolve_cast_spell_action(
                     follow_up_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
                     follow_up_events.extend(release_swallowed_units_from_source(state, target_id))
         return spell_events + follow_up_events
-
 
     if spell.targeting_mode == "multi_ray_spell_attack":
         raw_spell_events = spell_resolvers.resolve_scorching_ray(state, actor_id, action["target_id"], overrides)

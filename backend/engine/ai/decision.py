@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.content.enemies import (
+    MonsterSphereSpellDefinition,
     get_attack_action_definition_for_unit,
     get_monster_definition_for_unit,
+    get_monster_sphere_spell_for_unit,
+    get_monster_spell_attack_profile_for_unit,
     unit_has_bonus_action,
     unit_has_reaction,
     unit_has_trait,
@@ -13,9 +16,7 @@ from backend.content.feature_definitions import unit_has_feature, unit_has_grant
 from backend.content.player_loadouts import get_player_primary_melee_weapon_id, get_player_primary_ranged_weapon_id
 from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
-    MONSTER_SPHERE_ACTIONS,
     DragonBreathActionDefinition,
-    MonsterSphereSaveActionDefinition,
 )
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.profiles import get_monster_ai_profile
@@ -3210,6 +3211,7 @@ def build_scorching_ray_decision(
 
     return None
 
+
 def build_shocking_grasp_decision(
     state: EncounterState,
     actor: UnitState,
@@ -5221,21 +5223,18 @@ def build_dragon_breath_action(breath: DragonBreathActionDefinition, targeting) 
     }
 
 
-def get_available_adult_red_fireball_action(actor: UnitState) -> MonsterSphereSaveActionDefinition | None:
+def get_available_adult_red_fireball_action(actor: UnitState) -> MonsterSphereSpellDefinition | None:
     if actor.combat_role != "adult_red_dragon":
         return None
-    action = MONSTER_SPHERE_ACTIONS.get("fireball")
+    action = get_monster_sphere_spell_for_unit(actor, "fireball")
     if not action:
-        return None
-    definition = get_monster_definition_for_unit(actor)
-    if action.action_id not in definition.special_action_ids:
         return None
     if actor.resource_pools.get(action.resource_pool_id, 0) <= 0:
         return None
     return action
 
 
-def build_monster_sphere_action(action: MonsterSphereSaveActionDefinition, targeting) -> dict[str, str]:
+def build_monster_sphere_action(action: MonsterSphereSpellDefinition, targeting) -> dict[str, str]:
     return {
         "kind": "special_action",
         "action_id": action.action_id,
@@ -5248,7 +5247,7 @@ def build_monster_sphere_action(action: MonsterSphereSaveActionDefinition, targe
 def choose_adult_red_fireball_targeting(
     state: EncounterState,
     actor: UnitState,
-    fireball: MonsterSphereSaveActionDefinition,
+    fireball: MonsterSphereSpellDefinition,
     *,
     actor_position: GridPosition | None = None,
 ):
@@ -5267,11 +5266,13 @@ def choose_adult_red_fireball_targeting(
 def choose_adult_red_scorching_ray_multiattack_action(state: EncounterState, actor: UnitState) -> dict[str, str] | None:
     if actor.combat_role != "adult_red_dragon":
         return None
-    if "scorching_ray" not in actor.attacks or "rend" not in actor.attacks:
+    if "rend" not in actor.attacks:
         return None
 
     rend = actor.attacks["rend"]
-    scorching_ray = actor.attacks["scorching_ray"]
+    scorching_ray = get_monster_spell_attack_profile_for_unit(actor, "scorching_ray")
+    if not scorching_ray:
+        return None
     for target in get_ranked_attack_targets(state, actor, preferred_weapon_id="rend"):
         if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
             continue
@@ -5338,7 +5339,7 @@ def choose_adult_red_landing_fireball_option(
     state: EncounterState,
     actor: UnitState,
     position_index: PositionIndex,
-    fireball: MonsterSphereSaveActionDefinition,
+    fireball: MonsterSphereSpellDefinition,
 ):
     if not actor.position:
         return None
