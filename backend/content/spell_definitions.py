@@ -19,6 +19,7 @@ class SpellDefinition:
     targeting_mode: Literal[
         "ranged_spell_attack",
         "melee_spell_attack",
+        "multi_ray_spell_attack",
         "auto_hit_single_target",
         "reaction_self",
         "smite_trigger",
@@ -57,6 +58,7 @@ class SpellDefinition:
     speed_bonus: int = 0
     speed_penalty: int = 0
     selectable_damage_types: tuple[str, ...] = ()
+    ray_count: int = 1
 
 
 SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
@@ -386,6 +388,21 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         half_on_success=True,
         max_targets=8,
         target_cluster_feet=10,
+    ),
+    "scorching_ray": SpellDefinition(
+        spell_id="scorching_ray",
+        display_name="Scorching Ray",
+        level=2,
+        school="evocation",
+        description="Ranged spell attack that creates three fire rays.",
+        timing="action",
+        targeting_mode="multi_ray_spell_attack",
+        range_feet=120,
+        damage_dice=(DiceSpec(count=2, sides=6),),
+        damage_modifier=0,
+        damage_type="fire",
+        attack_ability="spellcasting",
+        ray_count=3,
     ),
     "divine_smite": SpellDefinition(
         spell_id="divine_smite",

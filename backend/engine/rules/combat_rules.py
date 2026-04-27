@@ -3890,6 +3890,7 @@ _SPELL_RESOLVER_EXPORTS = {
     "resolve_multi_target_save_spell",
     "resolve_ranged_spell_attack",
     "resolve_ray_of_sickness_poison_save",
+    "resolve_scorching_ray",
     "resolve_shield_of_faith",
     "resolve_single_target_save_spell",
 }

@@ -56,6 +56,7 @@ from backend.engine.models.state import (
     StepEncounterResult,
     UnitState,
 )
+from backend.engine.rules import spell_resolvers
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
@@ -3553,6 +3554,23 @@ def resolve_cast_spell_action(
                     follow_up_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
                     follow_up_events.extend(release_swallowed_units_from_source(state, target_id))
         return spell_events + follow_up_events
+
+
+    if spell.targeting_mode == "multi_ray_spell_attack":
+        raw_spell_events = spell_resolvers.resolve_scorching_ray(state, actor_id, action["target_id"], overrides)
+        spell_events: list[CombatEvent] = []
+        for event in raw_spell_events:
+            if event.event_type == "attack":
+                spell_events.extend(build_attack_reaction_pre_events(state, event))
+                spell_events.extend(build_attack_reaction_phase_events(state, event))
+            spell_events.append(event)
+            if event.event_type == "attack":
+                spell_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, event))
+                for target_id in event.target_ids:
+                    if state.units[target_id].conditions.dead:
+                        spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
+                        spell_events.extend(release_swallowed_units_from_source(state, target_id))
+        return spell_events
 
     if spell.targeting_mode == "multi_ally_buff":
         target_ids = action.get("target_ids")

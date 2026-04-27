@@ -302,6 +302,24 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Wizard level 2 academic expertise tracked as metadata for future non-combat checks.",
     ),
+    "evoker": FeatureDefinition(
+        feature_id="evoker",
+        display_name="Evoker",
+        kind="subclass",
+        description="Wizard subclass focused on direct Evocation damage.",
+    ),
+    "evocation_savant": FeatureDefinition(
+        feature_id="evocation_savant",
+        display_name="Evocation Savant",
+        kind="class_feature",
+        description="Evoker spellbook growth tracked through the level 3 spellbook count.",
+    ),
+    "potent_cantrip": FeatureDefinition(
+        feature_id="potent_cantrip",
+        display_name="Potent Cantrip",
+        kind="class_feature",
+        description="Damaging cantrips deal half rolled damage, minimum 1, on misses or successful saves.",
+    ),
     "ki": FeatureDefinition(
         feature_id="ki",
         display_name="Ki",

@@ -3102,6 +3102,114 @@ def build_burning_hands_decision(
     )
 
 
+def build_shatter_decision(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+) -> TurnDecision | None:
+    if not actor.position or not can_cast_combat_spell(actor, "shatter"):
+        return None
+
+    shatter_profile = build_spell_attack_context_profile("shatter")
+    prioritized_targets = sort_player_ranged_targets(
+        state,
+        actor,
+        conscious_enemies,
+        state.player_behavior,
+        attack_profile=build_spell_attack_profile(actor, "shatter"),
+    )
+    allies = [
+        unit
+        for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id))
+        if unit.faction == actor.faction and unit.id != actor.id and unit.position and not unit.conditions.dead
+    ]
+
+    for primary in prioritized_targets:
+        if not primary.position:
+            continue
+        primary_context = get_attack_context(state, actor.id, primary.id, shatter_profile)
+        if not primary_context.legal or not primary_context.within_normal_range:
+            continue
+
+        if any(ally.position and get_distance_between_units(primary, ally) <= 2 for ally in allies):
+            continue
+
+        cluster = [primary.id]
+        for target in sorted(conscious_enemies, key=lambda item: unit_sort_key(item.id)):
+            if target.id == primary.id or not target.position:
+                continue
+            target_context = get_attack_context(state, actor.id, target.id, shatter_profile)
+            if not target_context.legal or not target_context.within_normal_range:
+                continue
+            if get_distance_between_units(primary, target) <= 2:
+                cluster.append(target.id)
+
+        if len(cluster) >= 2:
+            return TurnDecision(
+                action={
+                    "kind": "cast_spell",
+                    "spell_id": "shatter",
+                    "target_id": primary.id,
+                    "target_ids": cluster[: get_spell_definition("shatter").max_targets],
+                }
+            )
+
+    return None
+
+
+def build_scorching_ray_decision(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> TurnDecision | None:
+    if not can_cast_combat_spell(actor, "scorching_ray"):
+        return None
+
+    ranged_targets = sort_player_ranged_targets(
+        state,
+        actor,
+        conscious_enemies,
+        state.player_behavior,
+        attack_profile=build_spell_attack_profile(actor, "scorching_ray"),
+        position_index=position_index,
+    )
+
+    for target in ranged_targets:
+        if target.current_hp <= 10:
+            continue
+        spell_plan = build_spell_attack_plan(
+            state,
+            actor,
+            target,
+            "scorching_ray",
+            move_squares,
+            position_index,
+        )
+        if not spell_plan:
+            continue
+
+        pre_action_movement = MovementPlan(path=spell_plan.path, mode="move") if len(spell_plan.path) > 1 else None
+        attack_position = spell_plan.path[-1] if spell_plan.path else actor.position
+        post_action_movement = (
+            build_post_action_retreat(
+                state,
+                actor,
+                attack_position,
+                move_squares - get_movement_distance(pre_action_movement),
+            )
+            if attack_position
+            else None
+        )
+        return TurnDecision(
+            pre_action_movement=pre_action_movement,
+            post_action_movement=post_action_movement,
+            action={"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": spell_plan.target_id},
+        )
+
+    return None
+
 def build_shocking_grasp_decision(
     state: EncounterState,
     actor: UnitState,
@@ -3241,6 +3349,14 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     burning_hands_decision = build_burning_hands_decision(state, actor, move_squares, position_index)
     if burning_hands_decision:
         return burning_hands_decision
+
+    shatter_decision = build_shatter_decision(state, actor, conscious_enemies)
+    if shatter_decision:
+        return shatter_decision
+
+    scorching_ray_decision = build_scorching_ray_decision(state, actor, conscious_enemies, move_squares, position_index)
+    if scorching_ray_decision:
+        return scorching_ray_decision
 
     magic_missile_target_id = choose_magic_missile_target_id(state, actor, conscious_enemies)
     if magic_missile_target_id:

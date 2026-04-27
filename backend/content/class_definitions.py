@@ -64,7 +64,7 @@ CLASS_DEFINITIONS: dict[str, ClassDefinition] = {
         category="spellcaster",
         hit_die=6,
         primary_abilities=("int",),
-        max_supported_level=2,
+        max_supported_level=3,
     ),
 }
 

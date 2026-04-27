@@ -579,6 +579,85 @@ def test_level2_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
     assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
 
 
+def test_level3_evoker_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level3-no-mage-armor-ai",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["F1"].resources.spell_slots_level_2 = 0
+    encounter.units["G1"].current_hp = 7
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+
+
+def test_level3_evoker_wizard_uses_shatter_over_scorching_ray_for_ally_safe_cluster() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level3-shatter-cluster",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 9, "y": 1}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G2"].current_hp = 20
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "cast_spell"
+    assert decision.action["spell_id"] == "shatter"
+    assert set(decision.action["target_ids"]) == {"G1", "G2"}
+
+
+def test_level3_evoker_wizard_rejects_ally_unsafe_shatter_and_uses_single_target_spell() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level3-shatter-ally-unsafe",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                F2={"x": 8, "y": 2},
+                G1={"x": 8, "y": 1},
+                G2={"x": 9, "y": 1},
+            ),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F2", "G1", "G2")
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G2"].current_hp = 20
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": "G1"}
+
+
+def test_level3_evoker_wizard_uses_scorching_ray_for_healthy_single_target() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level3-scorching-ray-single-target",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G1"].max_hp = 20
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": "G1"}
+
+
 def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_by_one_enemy() -> None:
     encounter = create_encounter(
         EncounterConfig(

@@ -24,9 +24,9 @@ It exists to keep class work:
 - Fighter is live through level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift.
 - Ranged Rogue is live through level 5 as an Assassin; melee Rogue is live through level 2.
 - Barbarian and Monk are live through level 2.
-- Wizard is live at level 2 as a narrow combat spellcasting slice with Mage Armor metadata/manual support.
+- Wizard is live at level 3 as an Evoker with Potent Cantrip, Scorching Ray, Shatter, and Mage Armor metadata/manual support.
 - Paladin is live at level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel.
-- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter, level 5 Oath of the Ancients Paladin, level 5 ranged Assassin Rogue, and level 2 Wizard.
+- The default `martial_mixed_party` starts with the level 5 Battle Master Fighter, level 5 Oath of the Ancients Paladin, level 5 ranged Assassin Rogue, and level 3 Evoker Wizard.
 
 ## Primary Backend Files
 

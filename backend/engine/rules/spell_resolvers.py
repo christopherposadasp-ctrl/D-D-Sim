@@ -78,18 +78,27 @@ from backend.engine.rules.spatial import (
 )
 
 
-def build_spell_attack_profile(attacker: UnitState, spell_id: str) -> WeaponProfile:
+def build_spell_attack_profile(
+    attacker: UnitState,
+    spell_id: str,
+    *,
+    attack_bonus_override: int | None = None,
+    spellcasting_ability_override: str | None = None,
+) -> WeaponProfile:
     spell = get_spell_definition(spell_id)
-    spell_attack_bonus = get_proficiency_bonus(attacker.level or 1) + get_ability_modifier(
-        attacker,
-        resolve_spell_ability(attacker, spell.attack_ability),
+    ability = spellcasting_ability_override or resolve_spell_ability(attacker, spell.attack_ability)
+    ability_modifier = get_ability_modifier(attacker, ability)
+    spell_attack_bonus = (
+        attack_bonus_override
+        if attack_bonus_override is not None
+        else get_proficiency_bonus(attacker.level or 1) + ability_modifier
     )
     is_melee_spell = spell.targeting_mode == "melee_spell_attack"
     return WeaponProfile(
         id=spell_id,
         display_name=spell.display_name,
         attack_bonus=spell_attack_bonus,
-        ability_modifier=0,
+        ability_modifier=ability_modifier if attack_bonus_override is not None else 0,
         damage_dice=list(spell.damage_dice),
         damage_modifier=spell.damage_modifier,
         damage_type=spell.damage_type,
@@ -105,22 +114,68 @@ def build_spell_skip_event(state: EncounterState, actor_id: str, spell_id: str, 
     return build_skip_event(state, actor_id, f"{spell.display_name}: {reason}")
 
 
+def can_apply_potent_cantrip(attacker: UnitState, spell_id: str) -> bool:
+    spell = get_spell_definition(spell_id)
+    return (
+        spell.level == 0
+        and "potent_cantrip" in attacker.feature_ids
+        and bool(spell.damage_dice)
+        and spell.damage_type != "none"
+    )
+
+
+def build_potent_cantrip_damage_components(
+    state: EncounterState,
+    weapon: WeaponProfile,
+    override_rolls: list[int] | None = None,
+) -> tuple[DamageCandidate, list[DamageComponentResult], int]:
+    primary_candidate = roll_damage_candidate(state, weapon, override_rolls)
+    rolled_damage = sum(component.total_damage for component in primary_candidate.components)
+    potent_damage = max(1, rolled_damage // 2) if rolled_damage > 0 else 0
+    damage_type = weapon.damage_type or (
+        weapon.damage_components[0].damage_type if weapon.damage_components else "damage"
+    )
+    return (
+        primary_candidate,
+        [
+            DamageComponentResult(
+                damage_type=damage_type,
+                raw_rolls=list(primary_candidate.raw_rolls),
+                adjusted_rolls=list(primary_candidate.adjusted_rolls),
+                subtotal=primary_candidate.subtotal,
+                flat_modifier=0,
+                total_damage=potent_damage,
+            )
+        ],
+        potent_damage,
+    )
+
+
 def resolve_ranged_spell_attack(
     state: EncounterState,
     attacker_id: str,
     target_id: str,
     spell_id: str,
     overrides: AttackRollOverrides | None = None,
+    *,
+    spend_slot: bool = True,
+    attack_bonus_override: int | None = None,
+    spellcasting_ability_override: str | None = None,
 ) -> CombatEvent:
     attacker = state.units[attacker_id]
     target = state.units[target_id]
     spell = get_spell_definition(spell_id)
-    weapon = build_spell_attack_profile(attacker, spell_id)
+    weapon = build_spell_attack_profile(
+        attacker,
+        spell_id,
+        attack_bonus_override=attack_bonus_override,
+        spellcasting_ability_override=spellcasting_ability_override,
+    )
 
     attack_context = get_attack_context(state, attacker_id, target_id, weapon)
     if not attack_context.legal or not attack_context.within_normal_range:
         return build_spell_skip_event(state, attacker_id, spell_id, "is not in range.")
-    if spell.level > 0 and not spend_spell_slot(attacker, spell.level):
+    if spell.level > 0 and spend_slot and not spend_spell_slot(attacker, spell.level):
         return build_spell_skip_event(state, attacker_id, spell_id, f"No level {spell.level} spell slots remain.")
 
     overrides = AttackRollOverrides(
@@ -230,6 +285,9 @@ def resolve_ranged_spell_attack(
     slow_previous_effective_speed: int | None = None
     slow_new_effective_speed: int | None = None
     healing_blocked_applied = False
+    potent_cantrip_applied = False
+    potent_cantrip_damage = 0
+    damage_result: DamageApplicationResult | None = None
 
     if attack_reaction == "redirect_attack":
         condition_deltas.append(f"{target_id} uses Redirect Attack and swaps with {resolved_target_id}.")
@@ -329,6 +387,31 @@ def resolve_ranged_spell_attack(
             condition_deltas.append(
                 f"{resolved_target_id} cannot regain HP until the start of {attacker_id}'s next turn."
             )
+    elif can_apply_potent_cantrip(attacker, spell_id):
+        primary_candidate, final_damage_components, potent_cantrip_damage = build_potent_cantrip_damage_components(
+            state,
+            weapon,
+            overrides.damage_rolls,
+        )
+        if potent_cantrip_damage > 0:
+            damage_result = apply_damage(
+                state,
+                resolved_target_id,
+                final_damage_components,
+                False,
+                attacker_id=attacker_id,
+                attack_roll_damage=False,
+                concentration_save_rolls=overrides.concentration_rolls,
+            )
+            potent_cantrip_applied = True
+            total_damage = sum(component.total_damage for component in final_damage_components)
+            resisted_damage = damage_result.resisted_damage
+            amplified_damage = damage_result.amplified_damage
+            temporary_hp_absorbed = damage_result.temporary_hp_absorbed
+            final_damage_to_hp = damage_result.final_damage_to_hp
+            final_total_damage = damage_result.final_total_damage
+            hp_delta = damage_result.hp_delta
+            condition_deltas.extend(damage_result.condition_deltas)
 
     if sap_consumed > 0:
         condition_deltas.append(f"{attacker_id}'s sap disadvantage is consumed on this attack roll.")
@@ -381,6 +464,10 @@ def resolve_ranged_spell_attack(
         resolved_totals["healingBlockedApplied"] = True
         resolved_totals["healingBlockedExpiresAtTurnStartOf"] = attacker_id
         resolved_totals["undeadAttackDisadvantageModeled"] = False
+    if potent_cantrip_applied:
+        resolved_totals["potentCantripApplied"] = True
+        resolved_totals["potentCantripDamage"] = potent_cantrip_damage
+        resolved_totals["potentCantripNoRider"] = True
     raw_rolls = {
         "attackRolls": attack_rolls,
         "advantageSources": advantage_sources,
@@ -388,7 +475,7 @@ def resolve_ranged_spell_attack(
     }
     if bless_rolls:
         raw_rolls["blessRolls"] = bless_rolls
-    if hit:
+    if damage_result:
         attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
 
     return CombatEvent(
@@ -653,6 +740,133 @@ def build_no_damage_result() -> DamageApplicationResult:
     )
 
 
+def resolve_spell_attack_roll_count(
+    state: EncounterState,
+    attacker: UnitState,
+    target_id: str,
+    spell_id: str,
+    *,
+    attack_bonus_override: int | None = None,
+    spellcasting_ability_override: str | None = None,
+) -> int:
+    target = state.units[target_id]
+    weapon = build_spell_attack_profile(
+        attacker,
+        spell_id,
+        attack_bonus_override=attack_bonus_override,
+        spellcasting_ability_override=spellcasting_ability_override,
+    )
+    mode, _, _ = get_attack_mode(state, attacker, attacker.id, target, target_id, weapon)
+    return 1 if mode == "normal" else 2
+
+
+def resolve_scorching_ray(
+    state: EncounterState,
+    attacker_id: str,
+    target_id: str,
+    overrides: AttackRollOverrides | None = None,
+    *,
+    spend_slot: bool = True,
+    require_prepared: bool = True,
+    attack_bonus_override: int | None = None,
+    spellcasting_ability_override: str | None = None,
+) -> list[CombatEvent]:
+    attacker = state.units[attacker_id]
+    spell = get_spell_definition("scorching_ray")
+    weapon = build_spell_attack_profile(
+        attacker,
+        "scorching_ray",
+        attack_bonus_override=attack_bonus_override,
+        spellcasting_ability_override=spellcasting_ability_override,
+    )
+
+    if require_prepared and not unit_has_combat_spell(attacker, "scorching_ray"):
+        return [build_spell_skip_event(state, attacker_id, "scorching_ray", "is not prepared.")]
+    target = state.units.get(target_id)
+    if not target or target.conditions.dead:
+        return [build_spell_skip_event(state, attacker_id, "scorching_ray", "target is unavailable.")]
+
+    attack_context = get_attack_context(state, attacker_id, target_id, weapon)
+    if not attack_context.legal or not attack_context.within_normal_range:
+        return [build_spell_skip_event(state, attacker_id, "scorching_ray", "is not in range.")]
+    if spend_slot and not spend_spell_slot(attacker, spell.level):
+        return [build_spell_skip_event(state, attacker_id, "scorching_ray", "No level 2 spell slots remain.")]
+
+    attack_rolls_override = list(overrides.attack_rolls if overrides else [])
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
+    phase_totals = {
+        "spellId": "scorching_ray",
+        "spellLevel": spell.level,
+        "rayCount": spell.ray_count,
+    }
+    if spend_slot:
+        phase_totals["spellSlotsLevel2Remaining"] = get_remaining_spell_slots(attacker, spell.level)
+    else:
+        phase_totals["spellLikeAction"] = True
+    events: list[CombatEvent] = [
+        CombatEvent(
+            **event_base(state, attacker_id),
+            target_ids=[target_id],
+            event_type="phase_change",
+            raw_rolls={},
+            resolved_totals=phase_totals,
+            movement_details=None,
+            damage_details=None,
+            condition_deltas=[],
+            text_summary=f"{attacker_id} casts {spell.display_name} at {target_id}.",
+        )
+    ]
+
+    for ray_index in range(1, spell.ray_count + 1):
+        target = state.units.get(target_id)
+        if not target or target.conditions.dead or target.current_hp <= 0:
+            break
+        attack_roll_count = resolve_spell_attack_roll_count(
+            state,
+            attacker,
+            target_id,
+            "scorching_ray",
+            attack_bonus_override=attack_bonus_override,
+            spellcasting_ability_override=spellcasting_ability_override,
+        )
+        ray_attack_rolls = [
+            attack_rolls_override.pop(0) for _ in range(min(attack_roll_count, len(attack_rolls_override)))
+        ]
+        ray_overrides = AttackRollOverrides(
+            attack_rolls=ray_attack_rolls,
+            damage_rolls=list(damage_rolls_override[:2]),
+            concentration_rolls=list(concentration_rolls_override),
+        )
+        ray_event = resolve_ranged_spell_attack(
+            state,
+            attacker_id,
+            target_id,
+            "scorching_ray",
+            ray_overrides,
+            spend_slot=False,
+            attack_bonus_override=attack_bonus_override,
+            spellcasting_ability_override=spellcasting_ability_override,
+        )
+        if ray_event.event_type != "attack":
+            events.append(ray_event)
+            break
+        if ray_event.damage_details and ray_event.damage_details.primary_candidate:
+            used_damage_rolls = len(ray_event.damage_details.primary_candidate.raw_rolls)
+            damage_rolls_override = damage_rolls_override[used_damage_rolls:]
+        if ray_event.damage_details and ray_event.damage_details.final_damage_to_hp > 0:
+            concentration_rolls_override = []
+        ray_event.resolved_totals["rayIndex"] = ray_index
+        ray_event.resolved_totals["rayCount"] = spell.ray_count
+        if spend_slot:
+            ray_event.resolved_totals["spellSlotsLevel2Remaining"] = get_remaining_spell_slots(attacker, spell.level)
+        else:
+            ray_event.resolved_totals["spellLikeAction"] = True
+        events.append(ray_event)
+
+    return events
+
+
 def resolve_single_target_save_spell(
     state: EncounterState,
     attacker_id: str,
@@ -724,6 +938,8 @@ def resolve_multi_target_save_spell(
             return [build_spell_skip_event(state, attacker_id, spell_id, "target is unavailable.")]
         if target.conditions.dead:
             return [build_spell_skip_event(state, attacker_id, spell_id, "target is dead.")]
+        if spell_id == "shatter" and target.faction == attacker.faction:
+            return [build_spell_skip_event(state, attacker_id, spell_id, "cannot intentionally target allies.")]
         attack_context = get_attack_context(state, attacker_id, target_id, weapon)
         if not attack_context.legal or not attack_context.within_normal_range:
             return [build_spell_skip_event(state, attacker_id, spell_id, "is not in range.")]
@@ -795,7 +1011,11 @@ def resolve_multi_target_save_spell(
             ),
         )
         save_success = bool(save_event.resolved_totals["success"])
-        applied_damage = 0 if save_success and not spell.half_on_success else full_damage // 2 if save_success else full_damage
+        potent_cantrip_applied = save_success and can_apply_potent_cantrip(attacker, spell_id)
+        if potent_cantrip_applied:
+            applied_damage = max(1, full_damage // 2) if full_damage > 0 else 0
+        else:
+            applied_damage = 0 if save_success and not spell.half_on_success else full_damage // 2 if save_success else full_damage
         damage_components = build_spell_save_damage_component(damage_rolls, applied_damage, spell.damage_type)
         damage_result = (
             apply_damage(
@@ -825,6 +1045,10 @@ def resolve_multi_target_save_spell(
             "distanceSquares": attack_context.distance_squares,
             "distanceFeet": attack_context.distance_feet,
         }
+        if potent_cantrip_applied:
+            resolved_totals["potentCantripApplied"] = True
+            resolved_totals["potentCantripDamage"] = applied_damage
+            resolved_totals["potentCantripNoRider"] = True
         if spell.level > 0:
             resolved_totals[f"spellSlotsLevel{spell.level}Remaining"] = get_remaining_spell_slots(attacker, spell.level)
         attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
