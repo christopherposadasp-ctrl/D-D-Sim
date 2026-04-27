@@ -123,6 +123,17 @@ class AttackProjection:
     average_on_hit_damage: float
 
 
+@dataclass(frozen=True)
+class SmartTargetFacts:
+    kill_band: int
+    kill_probability: float
+    immediate_danger: int
+    focus_score: int
+    backline_priority_score: int
+    best_hit_probability: float
+    distance: int
+
+
 def get_monster_profile(unit: UnitState):
     definition = get_monster_definition_for_unit(unit)
     return get_monster_ai_profile(definition.ai_profile_id)
@@ -1165,6 +1176,39 @@ def get_best_attack_step_projection(
     return best_choice[1] if best_choice else None
 
 
+def get_attack_step_projections(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None,
+    *,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> list[AttackProjection]:
+    if not attack_step_weapon_profiles:
+        return []
+
+    return [
+        projection
+        for weapon_profiles in attack_step_weapon_profiles
+        if (
+            projection := get_best_attack_step_projection(
+                state,
+                actor,
+                target,
+                weapon_profiles,
+                preferred_weapon_id=preferred_weapon_id,
+                attacker_position=attacker_position,
+                target_position=target_position,
+                position_index=position_index,
+            )
+        )
+        is not None
+    ]
+
+
 def probability_of_at_least_hits(probabilities: list[float], minimum_hits: int) -> float:
     if minimum_hits <= 0:
         return 1.0
@@ -1195,26 +1239,16 @@ def classify_target_kill_band(
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
 ) -> tuple[int, float]:
-    if not attack_step_weapon_profiles:
-        return 0, 0.0
-
-    projections = [
-        projection
-        for weapon_profiles in attack_step_weapon_profiles
-        if (
-            projection := get_best_attack_step_projection(
-                state,
-                actor,
-                target,
-                weapon_profiles,
-                preferred_weapon_id=preferred_weapon_id,
-                attacker_position=attacker_position,
-                target_position=target_position,
-                position_index=position_index,
-            )
-        )
-        is not None
-    ]
+    projections = get_attack_step_projections(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
     if not projections:
         return 0, 0.0
 
@@ -1276,19 +1310,55 @@ def get_target_immediacy(state: EncounterState, actor: UnitState, target: UnitSt
     return 1
 
 
-def get_target_base_threat_tier(target: UnitState) -> int:
-    has_swallow = target.faction == "goblins" and "swallow" in get_monster_definition_for_unit(target).special_action_ids
-    has_grapple_and_restrain = any(
+def target_has_special_action(target: UnitState, action_id: str) -> bool:
+    return target.faction == "goblins" and action_id in get_monster_definition_for_unit(target).special_action_ids
+
+
+def target_has_grapple_and_restrain(target: UnitState) -> bool:
+    return any(
         weapon.kind == "melee"
         and any(effect.kind == "grapple_and_restrain" for effect in weapon.on_hit_effects or [])
         for weapon in target.attacks.values()
     )
-    has_pressure_rider = any(
+
+
+def target_has_controller_style_restraint(target: UnitState) -> bool:
+    return has_role_tag(target, "controller") or any(
+        weapon.kind == "melee"
+        and any(effect.kind in {"grapple_on_hit", "grapple_and_restrain"} for effect in weapon.on_hit_effects or [])
+        for weapon in target.attacks.values()
+    )
+
+
+def target_has_pressure_rider(target: UnitState) -> bool:
+    return any(
         weapon.kind == "melee"
         and any(effect.kind in {"grapple_on_hit", "prone_on_hit", "harry_target"} for effect in weapon.on_hit_effects or [])
         for weapon in target.attacks.values()
     )
-    has_multiattack = len(get_attack_action_definition_for_unit(target).steps) >= 2
+
+
+def target_has_multiattack(target: UnitState) -> bool:
+    return len(get_attack_action_definition_for_unit(target).steps) >= 2
+
+
+def target_has_ranged_multiattack(target: UnitState) -> bool:
+    if not target_has_multiattack(target):
+        return False
+    attack_action = get_attack_action_definition_for_unit(target)
+    for step in attack_action.steps:
+        for weapon_id in step.allowed_weapon_ids:
+            weapon = target.attacks.get(weapon_id)
+            if weapon and weapon.kind == "ranged":
+                return True
+    return False
+
+
+def get_target_base_threat_tier(target: UnitState) -> int:
+    has_swallow = target_has_special_action(target, "swallow")
+    has_grapple_and_restrain = target_has_grapple_and_restrain(target)
+    has_pressure_rider = target_has_pressure_rider(target)
+    has_multiattack = target_has_multiattack(target)
     has_elite_reaction = unit_has_reaction(target, "parry") or unit_has_reaction(target, "redirect_attack")
 
     if has_role_tag(target, "caster") or has_role_tag(target, "healer"):
@@ -1322,7 +1392,19 @@ def get_target_threat_tier(
     return base_tier
 
 
-def build_smart_melee_target_priority(
+def get_focus_score(target: UnitState) -> int:
+    if target.current_hp >= target.max_hp:
+        return 0
+    if target.current_hp <= max(1, target.max_hp // 2):
+        return 2
+    return 1
+
+
+def actor_uses_backline_priority(actor: UnitState) -> bool:
+    return is_player_ranged_skirmisher(actor) or is_player_wizard(actor)
+
+
+def get_backline_priority_score(
     state: EncounterState,
     actor: UnitState,
     target: UnitState,
@@ -1332,7 +1414,58 @@ def build_smart_melee_target_priority(
     attacker_position: GridPosition | None = None,
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
-) -> tuple[int, int, int, int, float, int, str]:
+) -> int:
+    if not actor_uses_backline_priority(actor):
+        return 0
+
+    projections = get_attack_step_projections(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
+    if not projections:
+        return 0
+
+    if has_role_tag(target, "caster") or has_role_tag(target, "healer") or unit_has_trait(target, "aura_of_authority"):
+        return 2
+
+    if (
+        target_has_special_action(target, "swallow")
+        or target_has_grapple_and_restrain(target)
+        or target_has_controller_style_restraint(target)
+        or (target_has_ranged_multiattack(target) and get_target_immediacy(state, actor, target) >= 2)
+    ):
+        return 1
+
+    return 0
+
+
+def build_smart_target_facts(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> SmartTargetFacts:
+    projections = get_attack_step_projections(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
     kill_band, kill_probability = classify_target_kill_band(
         state,
         actor,
@@ -1343,50 +1476,23 @@ def build_smart_melee_target_priority(
         target_position=target_position,
         position_index=position_index,
     )
-    immediacy = get_target_immediacy(state, actor, target)
-    threat_tier = get_target_threat_tier(state, actor, target, immediacy)
-    return (
-        -kill_band,
-        -immediacy,
-        get_distance_for_priority(state, actor, target),
-        -threat_tier,
-        -kill_probability,
-        target.current_hp,
-        target.id,
-    )
-
-
-def build_smart_ranged_target_priority(
-    state: EncounterState,
-    actor: UnitState,
-    target: UnitState,
-    *,
-    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
-    preferred_weapon_id: str | None = None,
-    attacker_position: GridPosition | None = None,
-    target_position: GridPosition | None = None,
-    position_index: PositionIndex | None = None,
-) -> tuple[int, int, int, float, int, int, str]:
-    kill_band, kill_probability = classify_target_kill_band(
-        state,
-        actor,
-        target,
-        attack_step_weapon_profiles,
-        preferred_weapon_id=preferred_weapon_id,
-        attacker_position=attacker_position,
-        target_position=target_position,
-        position_index=position_index,
-    )
-    immediacy = get_target_immediacy(state, actor, target)
-    threat_tier = get_target_threat_tier(state, actor, target, immediacy)
-    return (
-        -kill_band,
-        -threat_tier,
-        -immediacy,
-        -kill_probability,
-        target.current_hp,
-        get_distance_for_priority(state, actor, target),
-        target.id,
+    return SmartTargetFacts(
+        kill_band=kill_band,
+        kill_probability=kill_probability,
+        immediate_danger=get_target_immediacy(state, actor, target),
+        focus_score=get_focus_score(target),
+        backline_priority_score=get_backline_priority_score(
+            state,
+            actor,
+            target,
+            attack_step_weapon_profiles=attack_step_weapon_profiles,
+            preferred_weapon_id=preferred_weapon_id,
+            attacker_position=attacker_position,
+            target_position=target_position,
+            position_index=position_index,
+        ),
+        best_hit_probability=max((projection.hit_probability for projection in projections), default=0.0),
+        distance=get_distance_for_priority(state, actor, target),
     )
 
 
@@ -1400,8 +1506,65 @@ def build_smart_target_priority(
     attacker_position: GridPosition | None = None,
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
-) -> tuple[int, int, int, float, int, int, str]:
-    return build_smart_ranged_target_priority(
+) -> tuple[int, int, int, int, float, float, int, int, str]:
+    facts = build_smart_target_facts(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles=attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
+    return (
+        -facts.kill_band,
+        -facts.immediate_danger,
+        -facts.backline_priority_score,
+        -facts.focus_score,
+        -facts.kill_probability,
+        -facts.best_hit_probability,
+        target.current_hp,
+        facts.distance,
+        target.id,
+    )
+
+
+def build_smart_melee_target_priority(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> tuple[int, int, int, int, float, float, int, int, str]:
+    return build_smart_target_priority(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles=attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
+
+
+def build_smart_ranged_target_priority(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> tuple[int, int, int, int, float, float, int, int, str]:
+    return build_smart_target_priority(
         state,
         actor,
         target,
@@ -1954,29 +2117,21 @@ def get_smart_melee_attack_option(
 
     attack_step_weapon_profiles = build_repeated_weapon_step_profiles(actor, melee_weapon_id)
 
-    def option_priority(option: MeleeAttackOption) -> tuple[int, int, int, int, float, int, int, int, str, int]:
-        kill_band, kill_probability = classify_target_kill_band(
+    def option_priority(option: MeleeAttackOption) -> tuple[int, int, int, int, float, float, int, int, str, int, int, int, int]:
+        target_priority = build_smart_target_priority(
             state,
             actor,
             option.target,
-            attack_step_weapon_profiles,
+            attack_step_weapon_profiles=attack_step_weapon_profiles,
             preferred_weapon_id=melee_weapon_id,
             attacker_position=option.path[-1],
             target_position=option.target.position,
             position_index=position_index,
         )
-        immediacy = get_target_immediacy(state, actor, option.target)
-        threat_tier = get_target_threat_tier(state, actor, option.target, immediacy)
-        return (
-            -kill_band,
-            -immediacy,
+        return target_priority + (
             option.distance,
-            -threat_tier,
-            -kill_probability,
             -int(option.creates_flank),
             -option.adjacent_allies if is_player_melee_opportunist(actor) else 0,
-            option.target.current_hp,
-            option.target.id,
             option.path[-1].x,
         )
 

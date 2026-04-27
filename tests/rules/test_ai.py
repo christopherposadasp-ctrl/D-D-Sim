@@ -1514,7 +1514,7 @@ def test_smart_players_seek_flanking_while_dumb_players_take_first_adjacent_squa
     assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
 
 
-def test_smart_players_prioritize_rider_over_non_rider_when_both_are_in_kill_band() -> None:
+def test_smart_frontliner_prefers_lower_hp_kill_target_over_fresh_rider() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="smart-kill-band-rider-priority",
@@ -1530,10 +1530,10 @@ def test_smart_players_prioritize_rider_over_non_rider_when_both_are_in_kill_ban
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "greatsword"}
 
 
-def test_smart_players_prioritize_caster_over_medium_rider_when_both_are_in_kill_band() -> None:
+def test_smart_frontliner_does_not_chase_caster_over_better_kill_target() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="smart-kill-band-caster-priority",
@@ -1550,7 +1550,7 @@ def test_smart_players_prioritize_caster_over_medium_rider_when_both_are_in_kill
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "greatsword"}
 
 
 def test_smart_players_take_kill_confirm_over_higher_threat_outside_kill_band() -> None:
@@ -1651,6 +1651,71 @@ def test_smart_ranged_assassin_prioritizes_kobold_scale_sorcerer_caster_target()
 
     assert encounter.units["G2"].role_tags == ["caster"]
     assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+
+
+def test_smart_rogue_and_wizard_prioritize_aura_of_authority_leader() -> None:
+    rogue = create_encounter(
+        EncounterConfig(
+            seed="smart-rogue-aura-of-authority-priority",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 6, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="rogue_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(rogue, "F1", "G1", "G2")
+    rogue.units["G1"].current_hp = 30
+    rogue.units["G1"].max_hp = 30
+    rogue.units["G2"] = create_enemy("G2", "hobgoblin_captain")
+    rogue.units["G2"].position = GridPosition(x=8, y=1)
+    rogue.units["G2"].current_hp = 30
+    rogue.units["G2"].max_hp = 30
+
+    wizard = create_encounter(
+        EncounterConfig(
+            seed="smart-wizard-aura-of-authority-priority",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 6, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(wizard, "F1", "G1", "G2")
+    wizard.units["F1"].resources.spell_slots_level_1 = 0
+    wizard.units["G1"].current_hp = 30
+    wizard.units["G1"].max_hp = 30
+    wizard.units["G2"] = create_enemy("G2", "hobgoblin_captain")
+    wizard.units["G2"].position = GridPosition(x=8, y=1)
+    wizard.units["G2"].current_hp = 30
+    wizard.units["G2"].max_hp = 30
+
+    rogue_decision = choose_turn_decision(rogue, "F1")
+    wizard_decision = choose_turn_decision(wizard, "F1")
+
+    assert unit_has_trait(rogue.units["G2"], "aura_of_authority")
+    assert rogue_decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert wizard_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G2"}
+
+
+def test_smart_rogue_ignores_backline_priority_without_a_legal_attack_line() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="smart-rogue-backline-no-legal-line",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 6, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="rogue_ranged_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 30
+    encounter.units["G1"].max_hp = 30
+    encounter.units["G2"] = create_enemy("G2", "hobgoblin_captain")
+    encounter.units["G2"].position = None
+    encounter.units["G2"].current_hp = 30
+    encounter.units["G2"].max_hp = 30
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert unit_has_trait(encounter.units["G2"], "aura_of_authority")
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
 
 
 def test_melee_ranked_attack_targets_use_immediacy_and_distance_before_backline_threat() -> None:
