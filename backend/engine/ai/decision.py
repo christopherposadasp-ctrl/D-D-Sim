@@ -529,6 +529,323 @@ def get_remaining_move_squares_after_primary_action(
     return max(0, get_move_squares(actor, state) - get_movement_distance(decision.pre_action_movement))
 
 
+def get_post_action_movement_origin(actor: UnitState, decision: TurnDecision) -> GridPosition | None:
+    for movement in (decision.between_action_movement, decision.pre_action_movement):
+        if movement and movement.path:
+            return movement.path[-1]
+    return actor.position
+
+
+def get_remaining_normal_move_squares_before_post_action(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+) -> int:
+    if decision.action.get("kind") == "dash":
+        return 0
+    if decision.bonus_action and decision.bonus_action.get("kind") in {"bonus_dash", "step_of_the_wind"}:
+        return 0
+
+    used_move = get_movement_distance(decision.pre_action_movement) + get_movement_distance(decision.between_action_movement)
+    return max(0, get_move_squares(actor, state) - used_move)
+
+
+def should_consider_end_turn_flanking_support(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+) -> bool:
+    if state.player_behavior != "smart":
+        return False
+    if actor.id not in {"F1", "F2"} or not (is_player_fighter(actor) or is_player_paladin(actor)):
+        return False
+    if not is_unit_conscious(actor) or not actor.position:
+        return False
+    if decision.bonus_action and decision.bonus_action.get("timing") == "after_movement":
+        return False
+    if decision.bonus_action and decision.bonus_action.get("kind") in {"disengage", "bonus_dash", "step_of_the_wind"}:
+        return False
+    if decision.post_action_movement and decision.post_action_movement.mode != "move":
+        return False
+    return True
+
+
+def get_action_enemy_target_id(state: EncounterState, actor: UnitState, decision: TurnDecision) -> str | None:
+    target_id = decision.action.get("target_id")
+    target = state.units.get(target_id or "")
+    if target and target.faction != actor.faction and is_unit_conscious(target):
+        return target.id
+    return None
+
+
+def copy_state_with_actor_position(
+    state: EncounterState,
+    actor_id: str,
+    position: GridPosition,
+) -> tuple[EncounterState, UnitState, PositionIndex]:
+    projected_state = state.model_copy(deep=True)
+    projected_actor = projected_state.units[actor_id]
+    projected_actor.position = position.model_copy(deep=True)
+    projected_index = build_position_index(projected_state)
+    return projected_state, projected_actor, projected_index
+
+
+def count_flanking_support_pairs_for_position(
+    state: EncounterState,
+    actor: UnitState,
+    position: GridPosition,
+) -> int:
+    projected_state, projected_actor, projected_index = copy_state_with_actor_position(state, actor.id, position)
+    enemy_faction = "goblins" if projected_actor.faction == "fighters" else "fighters"
+    support_pairs = 0
+
+    for ally in get_units_by_faction(projected_state, projected_actor.faction):
+        if ally.id == projected_actor.id or not is_unit_conscious(ally) or not ally.position:
+            continue
+        try:
+            melee_weapon_id = get_player_primary_melee_weapon_id(ally)
+        except ValueError:
+            continue
+        melee_weapon = ally.attacks.get(melee_weapon_id)
+        if not melee_weapon or melee_weapon.kind != "melee":
+            continue
+
+        for enemy in get_units_by_faction(projected_state, enemy_faction):
+            if not is_unit_conscious(enemy) or not enemy.position:
+                continue
+            attack_context = get_attack_context(
+                projected_state,
+                ally.id,
+                enemy.id,
+                melee_weapon,
+                ally.position,
+                enemy.position,
+                projected_index,
+            )
+            if attack_context.legal and "flanking" in attack_context.advantage_sources:
+                support_pairs += 1
+
+    return support_pairs
+
+
+def get_protected_backline_allies(state: EncounterState, actor: UnitState) -> list[UnitState]:
+    return [
+        ally
+        for ally in get_units_by_faction(state, actor.faction)
+        if ally.id in {"F3", "F4"} and is_unit_conscious(ally) and ally.position
+    ]
+
+
+def get_distance_from_position_to_unit(
+    position: GridPosition,
+    actor: UnitState,
+    target: UnitState,
+) -> int:
+    if not target.position:
+        return 9999
+    return get_min_chebyshev_distance_between_footprints(
+        position,
+        get_unit_footprint(actor),
+        target.position,
+        get_unit_footprint(target),
+    )
+
+
+def get_body_blocking_value(
+    state: EncounterState,
+    actor: UnitState,
+    position: GridPosition,
+    action_target_id: str | None,
+) -> tuple[int, int, int, int]:
+    protected_allies = get_protected_backline_allies(state, actor)
+    if not protected_allies:
+        return (0, 0, 0, 0)
+
+    projected_state, projected_actor, _ = copy_state_with_actor_position(state, actor.id, position)
+    enemy_faction = "goblins" if projected_actor.faction == "fighters" else "fighters"
+    adjacent_enemies = get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, position)
+    adjacent_action_target = int(any(enemy.id == action_target_id for enemy in adjacent_enemies))
+
+    screened_pair_count = 0
+    pressure_reduction = 0
+    for enemy in get_units_by_faction(projected_state, enemy_faction):
+        if not is_unit_conscious(enemy) or not enemy.position:
+            continue
+        enemy_threat_range = get_move_squares(enemy, projected_state) + 1
+        for ally in protected_allies:
+            protected_ally = projected_state.units[ally.id]
+            if not protected_ally.position:
+                continue
+            enemy_to_ally = get_distance_between_units(enemy, protected_ally)
+            if enemy_to_ally > enemy_threat_range + 1:
+                continue
+            enemy_to_actor = get_distance_from_position_to_unit(position, projected_actor, enemy)
+            if enemy_to_actor >= enemy_to_ally:
+                continue
+            screened_pair_count += 1
+            pressure_reduction += enemy_to_ally - enemy_to_actor
+
+    return (
+        screened_pair_count,
+        pressure_reduction,
+        adjacent_action_target,
+        min(len(adjacent_enemies), 2),
+    )
+
+
+def get_end_turn_flanking_support_value(
+    state: EncounterState,
+    actor: UnitState,
+    position: GridPosition,
+    action_target_id: str | None,
+) -> tuple[int, int, int]:
+    projected_state, projected_actor, _ = copy_state_with_actor_position(state, actor.id, position)
+    adjacent_enemies = get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, position)
+    adjacent_action_target = int(any(enemy.id == action_target_id for enemy in adjacent_enemies))
+    return (
+        count_flanking_support_pairs_for_position(state, actor, position),
+        adjacent_action_target,
+        min(len(adjacent_enemies), 2),
+    )
+
+
+def choose_end_turn_flanking_support_square(
+    state: EncounterState,
+    actor: UnitState,
+    projected_state: EncounterState,
+    projected_actor: UnitState,
+    projected_index: PositionIndex,
+    remaining_move_squares: int,
+    baseline_position: GridPosition,
+    action_target_id: str | None,
+) -> ReachableSquare | None:
+    baseline_value = get_end_turn_flanking_support_value(state, actor, baseline_position, action_target_id)
+    candidate_options: list[tuple[ReachableSquare, tuple[int, int, int]]] = []
+    for square in get_safe_reachable_squares(projected_state, actor.id, remaining_move_squares, False, projected_index):
+        if square.distance <= 0:
+            continue
+        if not get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, square.position):
+            continue
+        support_value = get_end_turn_flanking_support_value(state, actor, square.position, action_target_id)
+        if support_value > baseline_value:
+            candidate_options.append((square, support_value))
+
+    if not candidate_options:
+        return None
+
+    return sorted(
+        candidate_options,
+        key=lambda item: (
+            -item[1][0],
+            -item[1][1],
+            -item[1][2],
+            item[0].distance,
+            item[0].position.x,
+            item[0].position.y,
+        ),
+    )[0][0]
+
+
+def choose_end_turn_body_blocking_square(
+    state: EncounterState,
+    actor: UnitState,
+    origin: GridPosition,
+    projected_state: EncounterState,
+    projected_actor: UnitState,
+    projected_index: PositionIndex,
+    remaining_move_squares: int,
+    baseline_position: GridPosition,
+    action_target_id: str | None,
+) -> ReachableSquare | None:
+    if get_end_turn_flanking_support_value(state, actor, baseline_position, action_target_id)[0] > 0:
+        return None
+
+    origin_adjacent_enemy_count = len(get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, origin))
+    baseline_value = get_body_blocking_value(state, actor, baseline_position, action_target_id)
+    candidate_options: list[tuple[ReachableSquare, tuple[int, int, int, int]]] = []
+    for square in get_safe_reachable_squares(projected_state, actor.id, remaining_move_squares, False, projected_index):
+        if square.distance <= 0:
+            continue
+        adjacent_enemies = get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, square.position)
+        if origin_adjacent_enemy_count and not adjacent_enemies:
+            continue
+        body_blocking_value = get_body_blocking_value(state, actor, square.position, action_target_id)
+        if body_blocking_value[0] <= 0:
+            continue
+        if body_blocking_value > baseline_value:
+            candidate_options.append((square, body_blocking_value))
+
+    if not candidate_options:
+        return None
+
+    return sorted(
+        candidate_options,
+        key=lambda item: (
+            -item[1][0],
+            -item[1][1],
+            -item[1][2],
+            -item[1][3],
+            item[0].distance,
+            item[0].position.x,
+            item[0].position.y,
+        ),
+    )[0][0]
+
+
+def apply_end_turn_flanking_support_movement(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    position_index: PositionIndex | None = None,
+) -> TurnDecision:
+    if not should_consider_end_turn_flanking_support(state, actor, decision):
+        return decision
+
+    origin = get_post_action_movement_origin(actor, decision)
+    if not origin:
+        return decision
+
+    remaining_move_squares = get_remaining_normal_move_squares_before_post_action(state, actor, decision)
+    if remaining_move_squares <= 0:
+        return decision
+
+    projected_state, projected_actor, projected_index = copy_state_with_actor_position(state, actor.id, origin)
+    action_target_id = get_action_enemy_target_id(state, actor, decision)
+    baseline_position = (
+        decision.post_action_movement.path[-1]
+        if decision.post_action_movement and decision.post_action_movement.path
+        else origin
+    )
+
+    best_square = choose_end_turn_flanking_support_square(
+        state,
+        actor,
+        projected_state,
+        projected_actor,
+        projected_index,
+        remaining_move_squares,
+        baseline_position,
+        action_target_id,
+    )
+    if not best_square:
+        best_square = choose_end_turn_body_blocking_square(
+            state,
+            actor,
+            origin,
+            projected_state,
+            projected_actor,
+            projected_index,
+            remaining_move_squares,
+            baseline_position,
+            action_target_id,
+        )
+    if not best_square:
+        return decision
+
+    decision.post_action_movement = MovementPlan(path=best_square.path, mode="move")
+    return decision
+
+
 def choose_action_surge_reposition(
     state: EncounterState,
     actor: UnitState,
@@ -777,7 +1094,8 @@ def finalize_player_turn_decision(
 ) -> TurnDecision:
     decision = apply_fighter_action_surge(state, actor, decision, melee_weapon_id, position_index)
     decision = apply_fighter_maneuver_intents(state, actor, decision)
-    return finalize_player_bonus_action_decision(state, actor, decision, position_index)
+    decision = finalize_player_bonus_action_decision(state, actor, decision, position_index)
+    return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
 
 def build_fighter_action_surge_dash_attack_decision(
@@ -3185,15 +3503,15 @@ def apply_paladin_post_action_positioning(
     position_index: PositionIndex | None,
 ) -> TurnDecision:
     if decision.post_action_movement or not actor.position or decision.action.get("kind") == "dash":
-        return decision
+        return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
     action_position = get_planned_attack_position(actor, decision)
     if not action_position:
-        return decision
+        return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
     remaining_move_squares = move_squares - get_movement_distance(decision.pre_action_movement)
     if remaining_move_squares <= 0:
-        return decision
+        return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
     projected_state = state.model_copy(deep=True)
     projected_actor = projected_state.units[actor.id]
@@ -3201,7 +3519,7 @@ def apply_paladin_post_action_positioning(
     projected_index = build_position_index(projected_state)
 
     if get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, action_position):
-        return decision
+        return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
     enemy_faction = "goblins" if actor.faction == "fighters" else "fighters"
     current_distance = get_min_distance_to_faction(
@@ -3212,7 +3530,7 @@ def apply_paladin_post_action_positioning(
         get_unit_footprint(projected_actor),
     )
     if current_distance >= 9999:
-        return decision
+        return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
     candidates = get_safe_reachable_squares(projected_state, actor.id, remaining_move_squares, False, projected_index)
     improvements = [
@@ -3229,7 +3547,7 @@ def apply_paladin_post_action_positioning(
         < current_distance
     ]
     if not improvements:
-        return decision
+        return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
     best_square = sorted(
         improvements,
@@ -3248,7 +3566,7 @@ def apply_paladin_post_action_positioning(
         ),
     )[0]
     decision.post_action_movement = MovementPlan(path=best_square.path, mode="move")
-    return decision
+    return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 
 
 def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> TurnDecision:

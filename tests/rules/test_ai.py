@@ -6,6 +6,7 @@ from backend.engine.ai.decision import (
     TurnDecision,
     can_intentionally_provoke_opportunity_attack,
     choose_turn_decision,
+    finalize_player_turn_decision,
     get_ranked_attack_targets,
 )
 from backend.engine.combat.engine import clear_turn_flags, execute_decision, resolve_attack_action
@@ -691,6 +692,70 @@ def test_paladin_opens_with_level2_bless_on_full_mixed_party() -> None:
     assert decision.post_action_movement.path[-1] != encounter.units["F2"].position
 
 
+def test_smart_paladin_bless_movement_prefers_ending_as_flanking_support() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="paladin-bless-flank-support",
+            placements=build_placements(F1={"x": 5, "y": 5}, F2={"x": 1, "y": 3}, G1={"x": 6, "y": 5}),
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="paladin-bless-no-flank-support",
+            placements=build_placements(F1={"x": 5, "y": 5}, F2={"x": 1, "y": 3}, G1={"x": 6, "y": 5}),
+            player_behavior="dumb",
+        )
+    )
+    defeat_other_enemies(smart, "G1")
+    defeat_other_enemies(dumb, "G1")
+
+    smart_decision = choose_turn_decision(smart, "F2")
+    dumb_decision = choose_turn_decision(dumb, "F2")
+
+    assert smart_decision.action["spell_id"] == "bless"
+    assert smart_decision.post_action_movement is not None
+    assert smart_decision.post_action_movement.path[-1].model_dump() in [
+        {"x": 7, "y": 4},
+        {"x": 7, "y": 5},
+        {"x": 7, "y": 6},
+    ]
+    assert dumb_decision.post_action_movement is not None
+    assert dumb_decision.post_action_movement.path[-1].model_dump() not in [
+        {"x": 7, "y": 4},
+        {"x": 7, "y": 5},
+        {"x": 7, "y": 6},
+    ]
+
+
+def test_smart_paladin_bless_movement_body_blocks_for_backline_when_no_flank_exists() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-bless-body-block",
+            placements=build_placements(
+                F1={"x": 1, "y": 1},
+                F2={"x": 1, "y": 9},
+                F3={"x": 1, "y": 5},
+                F4={"x": 1, "y": 15},
+                G1={"x": 6, "y": 15},
+                G2={"x": 4, "y": 5},
+            ),
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1", "G2")
+    encounter.units["F3"].current_hp = 0
+    encounter.units["F3"].conditions.dead = True
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action["spell_id"] == "bless"
+    assert decision.post_action_movement is not None
+    end = decision.post_action_movement.path[-1]
+    assert abs(end.x - 6) <= 1
+    assert abs(end.y - 15) <= 1
+
+
 def test_paladin_trio_does_not_recast_redundant_bless() -> None:
     encounter = create_encounter(
         EncounterConfig(
@@ -813,6 +878,37 @@ def test_paladin_uses_natures_wrath_when_four_enemies_can_be_caught() -> None:
     assert decision.action["kind"] == "special_action"
     assert decision.action["action_id"] == "natures_wrath"
     assert decision.action["target_ids"] == ["G1", "G2", "G3", "G4"]
+
+
+def test_smart_paladin_natures_wrath_can_still_end_as_flanking_support() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-natures-wrath-flank-support",
+            placements=build_placements(
+                F1={"x": 5, "y": 5},
+                F2={"x": 4, "y": 4},
+                G1={"x": 6, "y": 5},
+                G2={"x": 6, "y": 6},
+                G3={"x": 6, "y": 7},
+                G4={"x": 7, "y": 7},
+            ),
+            player_behavior="smart",
+        )
+    )
+    encounter.units["F2"].resources.spell_slots_level_1 = 0
+    encounter.units["F2"].resources.spell_slots_level_2 = 0
+    keep_only_active_units(encounter, "F1", "F2", "G1", "G2", "G3", "G4")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "natures_wrath"
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.path[-1].model_dump() in [
+        {"x": 7, "y": 4},
+        {"x": 7, "y": 5},
+        {"x": 7, "y": 6},
+    ]
 
 
 def test_paladin_does_not_use_natures_wrath_for_three_enemies() -> None:
@@ -1512,6 +1608,97 @@ def test_smart_players_seek_flanking_while_dumb_players_take_first_adjacent_squa
     assert smart_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
     assert [point.model_dump() for point in smart_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 6}]
     assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
+
+
+def test_smart_fighter_can_use_leftover_movement_for_end_turn_flanking_support() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-end-turn-flank-support",
+            placements=build_placements(
+                F1={"x": 1, "y": 5},
+                F2={"x": 5, "y": 5},
+                F3={"x": 1, "y": 7},
+                F4={"x": 1, "y": 9},
+                G1={"x": 6, "y": 5},
+                G2={"x": 10, "y": 1},
+            ),
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F2", "G1", "G2")
+
+    decision = finalize_player_turn_decision(
+        encounter,
+        encounter.units["F1"],
+        TurnDecision(action={"kind": "attack", "target_id": "G2", "weapon_id": "javelin"}),
+        "greatsword",
+    )
+
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "move"
+    assert decision.post_action_movement.path[-1].model_dump() in [
+        {"x": 7, "y": 4},
+        {"x": 7, "y": 5},
+        {"x": 7, "y": 6},
+    ]
+
+
+def test_dumb_fighter_does_not_add_end_turn_flanking_support_movement() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-no-end-turn-flank-support",
+            placements=build_placements(
+                F1={"x": 1, "y": 5},
+                F2={"x": 5, "y": 5},
+                F3={"x": 1, "y": 7},
+                F4={"x": 1, "y": 9},
+                G1={"x": 6, "y": 5},
+                G2={"x": 10, "y": 1},
+            ),
+            player_behavior="dumb",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F2", "G1", "G2")
+
+    decision = finalize_player_turn_decision(
+        encounter,
+        encounter.units["F1"],
+        TurnDecision(action={"kind": "attack", "target_id": "G2", "weapon_id": "javelin"}),
+        "greatsword",
+    )
+
+    assert decision.post_action_movement is None
+
+
+def test_smart_fighter_can_body_block_for_backline_when_no_flank_exists() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="fighter-body-block-backline",
+            placements=build_placements(
+                F1={"x": 1, "y": 8},
+                F2={"x": 1, "y": 3},
+                F3={"x": 1, "y": 5},
+                F4={"x": 1, "y": 12},
+                G1={"x": 6, "y": 12},
+                G2={"x": 10, "y": 1},
+            ),
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F2", "F3", "F4", "G1", "G2")
+
+    decision = finalize_player_turn_decision(
+        encounter,
+        encounter.units["F1"],
+        TurnDecision(action={"kind": "attack", "target_id": "G2", "weapon_id": "javelin"}),
+        "greatsword",
+    )
+
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "move"
+    end = decision.post_action_movement.path[-1]
+    assert abs(end.x - 6) <= 1
+    assert abs(end.y - 12) <= 1
 
 
 def test_smart_frontliner_prefers_lower_hp_kill_target_over_fresh_rider() -> None:
