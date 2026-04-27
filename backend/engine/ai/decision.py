@@ -11,6 +11,7 @@ from backend.content.enemies import (
 )
 from backend.content.feature_definitions import unit_has_feature, unit_has_granted_action, unit_has_granted_bonus_action
 from backend.content.player_loadouts import get_player_primary_melee_weapon_id, get_player_primary_ranged_weapon_id
+from backend.content.special_actions import DRAGON_BREATH_ACTIONS, DragonBreathActionDefinition
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.profiles import get_monster_ai_profile
 from backend.engine.models.state import (
@@ -31,7 +32,7 @@ from backend.engine.rules.combat_rules import (
     can_apply_sneak_attack,
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
-    choose_cold_breath_targeting,
+    choose_cone_breath_targeting,
     choose_selectable_damage_type,
     get_active_bless_effect,
     get_damage_defense_flags,
@@ -4158,14 +4159,20 @@ def get_opening_flight_landing_decision(state: EncounterState, actor: UnitState)
     )
 
 
-def can_use_cold_breath(actor: UnitState) -> bool:
-    return actor.resource_pools.get("cold_breath_available", 0) > 0
+def get_available_dragon_breath_actions(actor: UnitState) -> tuple[DragonBreathActionDefinition, ...]:
+    definition = get_monster_definition_for_unit(actor)
+    return tuple(
+        DRAGON_BREATH_ACTIONS[action_id]
+        for action_id in definition.special_action_ids
+        if action_id in DRAGON_BREATH_ACTIONS
+        and actor.resource_pools.get(DRAGON_BREATH_ACTIONS[action_id].resource_pool_id, 0) > 0
+    )
 
 
-def build_cold_breath_action(targeting) -> dict[str, str]:
+def build_dragon_breath_action(breath: DragonBreathActionDefinition, targeting) -> dict[str, str]:
     return {
         "kind": "special_action",
-        "action_id": "cold_breath",
+        "action_id": breath.action_id,
         "target_id": targeting.primary_target_id,
         "origin_x": str(targeting.origin.x),
         "origin_y": str(targeting.origin.y),
@@ -4177,21 +4184,24 @@ def choose_dragon_landing_breath_option(
     state: EncounterState,
     actor: UnitState,
     position_index: PositionIndex,
+    breath_actions: tuple[DragonBreathActionDefinition, ...],
 ):
     if not actor.position:
         return None
 
     candidates = []
     for landing_position in get_legal_landing_positions(state, actor, position_index):
-        targeting = choose_cold_breath_targeting(
-            state,
-            actor.id,
-            actor_position=landing_position,
-            minimum_enemy_targets=2,
-            allow_allies=False,
-        )
-        if targeting:
-            candidates.append((landing_position, targeting))
+        for breath in breath_actions:
+            targeting = choose_cone_breath_targeting(
+                state,
+                actor.id,
+                actor_position=landing_position,
+                minimum_enemy_targets=2,
+                allow_allies=False,
+                range_squares=breath.range_squares,
+            )
+            if targeting:
+                candidates.append((landing_position, breath, targeting))
 
     if not candidates:
         return None
@@ -4199,41 +4209,44 @@ def choose_dragon_landing_breath_option(
     return sorted(
         candidates,
         key=lambda candidate: (
-            -len(candidate[1].enemy_target_ids),
+            -len(candidate[2].enemy_target_ids),
+            candidate[1].action_id,
             candidate[0].x,
             candidate[0].y,
-            candidate[1].origin.x,
-            candidate[1].origin.y,
-            candidate[1].direction,
-            candidate[1].target_ids,
+            candidate[2].origin.x,
+            candidate[2].origin.y,
+            candidate[2].direction,
+            candidate[2].target_ids,
         ),
     )[0]
 
 
 def get_dragon_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     position_index = build_position_index(state)
-    if can_use_cold_breath(actor):
-        current_breath = choose_cold_breath_targeting(
+    breath_actions = get_available_dragon_breath_actions(actor)
+    for breath in breath_actions:
+        current_breath = choose_cone_breath_targeting(
             state,
             actor.id,
             minimum_enemy_targets=2,
             allow_allies=False,
+            range_squares=breath.range_squares,
         )
         if current_breath:
-            return TurnDecision(action=build_cold_breath_action(current_breath))
+            return TurnDecision(action=build_dragon_breath_action(breath, current_breath))
 
-        if can_use_opening_flight_landing(actor):
-            landing_breath = choose_dragon_landing_breath_option(state, actor, position_index)
-            if landing_breath:
-                landing_position, targeting = landing_breath
-                actor.resource_pools["opening_landing_uses"] = max(0, actor.resource_pools.get("opening_landing_uses", 0) - 1)
-                return TurnDecision(
-                    pre_action_movement=MovementPlan(
-                        path=[actor.position.model_copy(deep=True), landing_position.model_copy(deep=True)],
-                        mode="landing",
-                    ),
-                    action=build_cold_breath_action(targeting),
-                )
+    if breath_actions and can_use_opening_flight_landing(actor):
+        landing_breath = choose_dragon_landing_breath_option(state, actor, position_index, breath_actions)
+        if landing_breath:
+            landing_position, breath, targeting = landing_breath
+            actor.resource_pools["opening_landing_uses"] = max(0, actor.resource_pools.get("opening_landing_uses", 0) - 1)
+            return TurnDecision(
+                pre_action_movement=MovementPlan(
+                    path=[actor.position.model_copy(deep=True), landing_position.model_copy(deep=True)],
+                    mode="landing",
+                ),
+                action=build_dragon_breath_action(breath, targeting),
+            )
 
     if can_use_opening_flight_landing(actor):
         return get_opening_flight_landing_decision(state, actor)

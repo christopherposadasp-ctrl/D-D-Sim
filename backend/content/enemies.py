@@ -167,6 +167,7 @@ guard_captain_ability_mods = AbilityModifiers(str=4, dex=2, con=3, int=1, wis=2,
 warrior_veteran_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=0, wis=0, cha=0)
 knight_ability_mods = AbilityModifiers(str=3, dex=0, con=2, int=0, wis=0, cha=2)
 young_white_dragon_ability_mods = AbilityModifiers(str=4, dex=0, con=4, int=-2, wis=0, cha=1)
+young_red_dragon_ability_mods = AbilityModifiers(str=6, dex=0, con=5, int=2, wis=0, cha=4)
 medium_footprint = Footprint(width=1, height=1)
 large_footprint = Footprint(width=2, height=2)
 huge_footprint = Footprint(width=3, height=3)
@@ -2496,6 +2497,53 @@ MONSTER_DEFINITIONS.update(
             damage_immunities=("cold",),
             extra_resource_pools={"opening_landing_uses": 1, "cold_breath_available": 1},
         ),
+        "young_red_dragon": MonsterDefinition(
+            base_creature_id="young_red_dragon",
+            variant_id="young_red_dragon",
+            display_name="Young Red Dragon",
+            combat_role="young_red_dragon",
+            ai_profile_id="dragon",
+            max_hp=178,
+            ac=18,
+            speed=40,
+            initiative_mod=4,
+            passive_perception=18,
+            ability_mods=young_red_dragon_ability_mods,
+            size_category="large",
+            footprint=large_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=10,
+                    ability_modifier=6,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="slashing",
+                            damage_dice=[DiceSpec(count=2, sides=6)],
+                            damage_modifier=6,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="fire",
+                            damage_dice=[DiceSpec(count=1, sides=6)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                    reach=10,
+                )
+            },
+            tags=("dragon", "chromatic", "red", "melee"),
+            creature_tags=("dragon",),
+            movement_modes=("walk", "climb", "fly"),
+            action_ids=("multiattack", "fire_breath"),
+            special_action_ids=("fire_breath",),
+            trait_ids=("opening_flight_landing",),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),),
+            default_melee_attack_action_id="multiattack",
+            damage_immunities=("fire",),
+            extra_resource_pools={"opening_landing_uses": 1, "fire_breath_available": 1},
+        ),
         "berserker": MonsterDefinition(
             base_creature_id="berserker",
             variant_id="berserker",
@@ -3407,6 +3455,29 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
         ),
         terrain_features=(build_rock_terrain_feature(),),
     ),
+    "berserker_overrun": EnemyPresetDefinition(
+        preset_id="berserker_overrun",
+        display_name="Berserker Overrun",
+        description="A staggered goblin wave floods the lane while berserkers crash through any gap the party leaves open.",
+        units=(
+            EnemyPresetUnit("E1", "goblin_raider", GridPosition(x=9, y=4)),
+            EnemyPresetUnit("E2", "goblin_raider", GridPosition(x=9, y=6)),
+            EnemyPresetUnit("E3", "goblin_raider", GridPosition(x=9, y=8)),
+            EnemyPresetUnit("E4", "goblin_raider", GridPosition(x=9, y=10)),
+            EnemyPresetUnit("E5", "goblin_raider", GridPosition(x=9, y=12)),
+            EnemyPresetUnit("E6", "goblin_raider", GridPosition(x=10, y=5)),
+            EnemyPresetUnit("E7", "goblin_raider", GridPosition(x=10, y=7)),
+            EnemyPresetUnit("E8", "goblin_raider", GridPosition(x=10, y=9)),
+            EnemyPresetUnit("E9", "goblin_raider", GridPosition(x=10, y=11)),
+            EnemyPresetUnit("E10", "goblin_raider", GridPosition(x=11, y=6)),
+            EnemyPresetUnit("E11", "goblin_raider", GridPosition(x=11, y=10)),
+            EnemyPresetUnit("E12", "berserker", GridPosition(x=12, y=7)),
+            EnemyPresetUnit("E13", "berserker", GridPosition(x=12, y=9)),
+            EnemyPresetUnit("E14", "goblin_archer", GridPosition(x=14, y=5)),
+            EnemyPresetUnit("E15", "goblin_archer", GridPosition(x=14, y=11)),
+        ),
+        terrain_features=(build_rock_terrain_feature(),),
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
@@ -3462,6 +3533,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "griffon",
     "hippopotamus",
     "young_white_dragon",
+    "young_red_dragon",
     "berserker",
     "gnoll_warrior",
     "giant_hyena",

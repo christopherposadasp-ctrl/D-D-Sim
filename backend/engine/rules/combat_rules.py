@@ -2605,7 +2605,7 @@ def build_cone_breath_targeting(
     )
 
 
-def choose_cold_breath_targeting(
+def choose_cone_breath_targeting(
     state: EncounterState,
     actor_id: str,
     *,
@@ -2613,6 +2613,7 @@ def choose_cold_breath_targeting(
     required_primary_target_id: str | None = None,
     minimum_enemy_targets: int = 1,
     allow_allies: bool = True,
+    range_squares: int = 6,
 ) -> ConeBreathTargeting | None:
     actor = state.units[actor_id]
     position = actor_position or actor.position
@@ -2629,7 +2630,7 @@ def choose_cold_breath_targeting(
                 actor_position=position,
                 origin=origin,
                 direction=direction,
-                range_squares=6,
+                range_squares=range_squares,
                 required_primary_target_id=required_primary_target_id,
             )
             if not targeting:
@@ -2656,6 +2657,26 @@ def choose_cold_breath_targeting(
             targeting.target_ids,
         ),
     )[0]
+
+
+def choose_cold_breath_targeting(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    actor_position: GridPosition | None = None,
+    required_primary_target_id: str | None = None,
+    minimum_enemy_targets: int = 1,
+    allow_allies: bool = True,
+) -> ConeBreathTargeting | None:
+    return choose_cone_breath_targeting(
+        state,
+        actor_id,
+        actor_position=actor_position,
+        required_primary_target_id=required_primary_target_id,
+        minimum_enemy_targets=minimum_enemy_targets,
+        allow_allies=allow_allies,
+        range_squares=6,
+    )
 
 
 def choose_burning_hands_targeting(

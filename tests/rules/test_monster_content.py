@@ -209,6 +209,10 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert "cold_breath" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("cold_breath_available") == 1
 
+    if "fire_breath" in expectation.special_mechanics:
+        assert "fire_breath" in definition.special_action_ids
+        assert runtime_unit.resource_pools.get("fire_breath_available") == 1
+
     if "no_legendary_actions" in expectation.special_mechanics:
         legendary_fields = (
             definition.action_ids,
@@ -275,7 +279,8 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         ]
 
 
-def test_young_white_dragon_workbook_is_marked_modeled() -> None:
+@pytest.mark.parametrize("creature_name", ("Young White Dragon", "Young Red Dragon"))
+def test_completed_dragon_workbook_rows_are_marked_modeled(creature_name: str) -> None:
     workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
     sheet = workbook.active
     headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
@@ -283,8 +288,8 @@ def test_young_white_dragon_workbook_is_marked_modeled() -> None:
     modeled_index = headers.index("Modeled")
 
     for row in sheet.iter_rows(min_row=2, values_only=True):
-        if row[creature_index] == "Young White Dragon":
+        if row[creature_index] == creature_name:
             assert row[modeled_index] == "Yes"
             return
 
-    raise AssertionError("Young White Dragon row not found in SRD creature workbook")
+    raise AssertionError(f"{creature_name} row not found in SRD creature workbook")

@@ -17,6 +17,20 @@ class SpecialActionDefinition:
     description: str
 
 
+@dataclass(frozen=True)
+class DragonBreathActionDefinition:
+    action_id: str
+    display_name: str
+    resource_pool_id: str
+    save_ability: str
+    save_dc: int
+    range_squares: int
+    damage_die_count: int
+    damage_die_sides: int
+    damage_type: str
+    recharge_threshold: int = 5
+
+
 SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
     "swallow": SpecialActionDefinition(
         action_id="swallow",
@@ -28,10 +42,41 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
         display_name="Cold Breath",
         description="Exhale a freezing cone that forces Constitution saves for half cold damage.",
     ),
+    "fire_breath": SpecialActionDefinition(
+        action_id="fire_breath",
+        display_name="Fire Breath",
+        description="Exhale a fiery cone that forces Dexterity saves for half fire damage.",
+    ),
     "natures_wrath": SpecialActionDefinition(
         action_id="natures_wrath",
         display_name="Nature's Wrath",
         description="Channel Divinity action that restrains nearby chosen enemies with spectral vines.",
+    ),
+}
+
+
+DRAGON_BREATH_ACTIONS: dict[str, DragonBreathActionDefinition] = {
+    "cold_breath": DragonBreathActionDefinition(
+        action_id="cold_breath",
+        display_name="Cold Breath",
+        resource_pool_id="cold_breath_available",
+        save_ability="con",
+        save_dc=15,
+        range_squares=6,
+        damage_die_count=9,
+        damage_die_sides=8,
+        damage_type="cold",
+    ),
+    "fire_breath": DragonBreathActionDefinition(
+        action_id="fire_breath",
+        display_name="Fire Breath",
+        resource_pool_id="fire_breath_available",
+        save_ability="dex",
+        save_dc=17,
+        range_squares=6,
+        damage_die_count=16,
+        damage_die_sides=6,
+        damage_type="fire",
     ),
 }
 
