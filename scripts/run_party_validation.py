@@ -25,8 +25,13 @@ from backend.engine.models.state import (
 )
 from scripts.audit_common import collect_git_context, write_json_report, write_text_report
 
-DEFAULT_SCENARIO_IDS = ("hobgoblin_kill_box", "bugbear_dragnet", "deadwatch_phalanx")
-DEFAULT_BATCH_SIZE = 400
+DEFAULT_SCENARIO_IDS = (
+    "reaction_bastion",
+    "skyhunter_pincer",
+    "hobgoblin_command_screen",
+    "berserker_overrun",
+)
+DEFAULT_BATCH_SIZE = 300
 DEFAULT_PLAYER_BEHAVIOR = "balanced"
 DEFAULT_MONSTER_BEHAVIOR = "combined"
 DEFAULT_REPLAY_MONSTER_BEHAVIOR = "balanced"

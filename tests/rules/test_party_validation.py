@@ -34,20 +34,25 @@ def make_batch_summary(seed: str = "party-validation-test") -> BatchSummary:
 
 
 def test_party_validation_defaults_are_focused_on_current_party() -> None:
-    assert run_party_validation.DEFAULT_SCENARIO_IDS == ("hobgoblin_kill_box", "bugbear_dragnet", "deadwatch_phalanx")
-    assert run_party_validation.DEFAULT_BATCH_SIZE == 400
+    assert run_party_validation.DEFAULT_SCENARIO_IDS == (
+        "reaction_bastion",
+        "skyhunter_pincer",
+        "hobgoblin_command_screen",
+        "berserker_overrun",
+    )
+    assert run_party_validation.DEFAULT_BATCH_SIZE == 300
     assert run_party_validation.DEFAULT_PLAYER_BEHAVIOR == "balanced"
     assert run_party_validation.DEFAULT_MONSTER_BEHAVIOR == "combined"
     assert run_party_validation.DEFAULT_REPLAY_SMOKE_RUNS == 2
 
 
 def test_party_validation_combined_batch_plan_preserves_requested_total_runs() -> None:
-    assert run_party_validation.build_batch_run_plan(400, "combined") == (
-        ("kind", 133),
-        ("balanced", 134),
-        ("evil", 133),
+    assert run_party_validation.build_batch_run_plan(300, "combined") == (
+        ("kind", 100),
+        ("balanced", 100),
+        ("evil", 100),
     )
-    assert run_party_validation.build_batch_run_plan(400, "balanced") == (("balanced", 400),)
+    assert run_party_validation.build_batch_run_plan(300, "balanced") == (("balanced", 300),)
 
 
 def test_party_validation_report_shape_is_stable(monkeypatch) -> None:
@@ -272,16 +277,16 @@ def test_batch_health_splits_combined_totals_evenly(monkeypatch) -> None:
     rows, issues, _ = run_party_validation.run_batch_health(
         "martial_mixed_party",
         ("hobgoblin_kill_box",),
-        400,
+        300,
         "balanced",
         "combined",
         True,
         None,
     )
 
-    assert calls == [("kind", 133), ("balanced", 134), ("evil", 133)]
+    assert calls == [("kind", 100), ("balanced", 100), ("evil", 100)]
     assert rows[0]["monsterBehavior"] == "combined"
-    assert rows[0]["totalRuns"] == 400
+    assert rows[0]["totalRuns"] == 300
     assert [entry["monsterBehavior"] for entry in rows[0]["behaviorBreakdown"]] == ["kind", "balanced", "evil"]
     assert issues == []
 
