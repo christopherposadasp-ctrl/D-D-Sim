@@ -120,6 +120,13 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
             "hobgoblin_longbow_attack",
         ),
     ),
+    "berserker_overrun": ScenarioDefinition(
+        scenario_id="berserker_overrun",
+        display_name="Berserker Overrun",
+        description=ENEMY_PRESETS["berserker_overrun"].description,
+        enemy_preset_id="berserker_overrun",
+        audit_expectation_ids=("berserker_greataxe_attack", "goblin_melee_engagement", "goblin_shortbow_attack"),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS

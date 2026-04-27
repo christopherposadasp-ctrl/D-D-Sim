@@ -252,6 +252,10 @@ def build_signature_checks() -> dict[str, list[SignatureCheck]]:
             "goblinShortbowAttack",
             lambda result: any_attack_with_weapon(result, {"goblin_archer"}, "shortbow"),
         ),
+        "berserker_greataxe_attack": SignatureCheck(
+            "berserkerGreataxeAttack",
+            lambda result: any_attack_with_weapon(result, {"berserker"}, "greataxe"),
+        ),
         "bandit_melee_attack": SignatureCheck(
             "banditMeleeAttack",
             lambda result: any_attack_with_weapon(result, {"bandit_melee"}, "club"),

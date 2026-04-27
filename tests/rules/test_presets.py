@@ -169,6 +169,35 @@ def test_hobgoblin_command_screen_builds_layered_leader_shell() -> None:
     assert encounter.units["E12"].combat_role == "hobgoblin_archer"
 
 
+def test_berserker_overrun_builds_staggered_mob_and_hammers() -> None:
+    encounter = create_encounter(EncounterConfig(seed="berserker-overrun", enemy_preset_id="berserker_overrun"))
+
+    assert sorted(encounter.units) == [
+        "E1",
+        "E10",
+        "E11",
+        "E12",
+        "E13",
+        "E14",
+        "E15",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+    ]
+    assert encounter.units["E1"].combat_role == "goblin_melee"
+    assert encounter.units["E12"].combat_role == "berserker"
+    assert encounter.units["E14"].combat_role == "goblin_archer"
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(
@@ -331,6 +360,21 @@ def test_hobgoblin_command_screen_preset_runs_in_combined_batch_mode() -> None:
         EncounterConfig(
             seed="hobgoblin-command-screen-combined-batch",
             enemy_preset_id="hobgoblin_command_screen",
+            batch_size=1,
+            player_behavior="balanced",
+            monster_behavior="combined",
+        )
+    )
+
+    assert summary.total_runs == 3
+    assert summary.combination_summaries is not None
+
+
+def test_berserker_overrun_preset_runs_in_combined_batch_mode() -> None:
+    summary = run_batch(
+        EncounterConfig(
+            seed="berserker-overrun-combined-batch",
+            enemy_preset_id="berserker_overrun",
             batch_size=1,
             player_behavior="balanced",
             monster_behavior="combined",

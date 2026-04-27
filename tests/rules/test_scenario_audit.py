@@ -243,3 +243,39 @@ def test_audit_scenario_supports_staged_hobgoblin_command_screen() -> None:
         "hobgoblinLongswordAttack",
         "hobgoblinLongbowAttack",
     }
+
+
+def test_berserker_overrun_scenario_definition_is_staged_with_expected_expectations() -> None:
+    definition = get_scenario_definition("berserker_overrun")
+
+    assert definition.display_name == "Berserker Overrun"
+    assert definition.enemy_preset_id == "berserker_overrun"
+    assert definition.audit_expectation_ids == (
+        "berserker_greataxe_attack",
+        "goblin_melee_engagement",
+        "goblin_shortbow_attack",
+    )
+
+
+def test_audit_scenario_supports_staged_berserker_overrun() -> None:
+    row = audit_scenario(
+        "berserker_overrun",
+        ScenarioAuditConfig(
+            smart_smoke_runs=1,
+            dumb_smoke_runs=1,
+            mechanic_runs=1,
+            health_batch_size=1,
+            seed_prefix="test-berserker-overrun-audit",
+        ),
+    )
+
+    payload = row.to_report_dict()
+
+    assert row.scenario_id == "berserker_overrun"
+    assert row.unit_count == 19
+    assert payload["scenarioId"] == "berserker_overrun"
+    assert set(payload["signatureBreakdown"]) == {
+        "berserkerGreataxeAttack",
+        "goblinMeleeEngagement",
+        "goblinShortbowAttack",
+    }
