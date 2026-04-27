@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from openpyxl import load_workbook
 
 from backend.content.enemies import (
     BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT,
@@ -15,6 +18,10 @@ from backend.content.enemies import (
 )
 from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRD_CREATURES_WORKBOOK = REPO_ROOT / "docs" / "reference" / "srd_Creatures_Trimmed_V4.xlsx"
 
 
 def serialize_damage_components(
@@ -202,6 +209,17 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert "cold_breath" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("cold_breath_available") == 1
 
+    if "no_legendary_actions" in expectation.special_mechanics:
+        legendary_fields = (
+            definition.action_ids,
+            definition.special_action_ids,
+            definition.bonus_action_ids,
+            definition.reaction_ids,
+            definition.trait_ids,
+            tuple(pool_id for pool_id, _uses in expectation.resource_pools),
+        )
+        assert not any("legendary" in item for field in legendary_fields for item in field)
+
     if "grappled_target_advantage" in expectation.special_mechanics:
         hammer = definition.attacks["light_hammer"]
         thrown_hammer = definition.attacks["light_hammer_throw"]
@@ -255,3 +273,18 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert [(effect.kind, effect.max_target_size) for effect in weapon.on_hit_effects] == [
             ("prone_on_hit", expected_size)
         ]
+
+
+def test_young_white_dragon_workbook_is_marked_modeled() -> None:
+    workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
+    sheet = workbook.active
+    headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+    creature_index = headers.index("Creature")
+    modeled_index = headers.index("Modeled")
+
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        if row[creature_index] == "Young White Dragon":
+            assert row[modeled_index] == "Yes"
+            return
+
+    raise AssertionError("Young White Dragon row not found in SRD creature workbook")

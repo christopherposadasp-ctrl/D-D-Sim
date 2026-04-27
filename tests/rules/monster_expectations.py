@@ -1631,6 +1631,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
             "opening_flight_landing",
             "cold_breath",
             "recharge_5_6",
+            "no_legendary_actions",
         ),
         benchmark_preset_id="young_white_dragon_benchmark",
         benchmark_count=1,
