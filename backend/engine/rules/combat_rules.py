@@ -1748,7 +1748,7 @@ def choose_divine_smite_spell_level(
         return None
     if is_opportunity_attack or maneuver_id == "riposte":
         return None
-    if attacker._bonus_action_used_this_turn:
+    if attacker._bonus_action_used_this_turn or attacker._bonus_action_reserved_this_turn:
         return None
 
     has_level_1_slot = attacker.resources.spell_slots_level_1 > 0

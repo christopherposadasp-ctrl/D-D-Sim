@@ -437,6 +437,7 @@ class UnitState(CamelModel):
     _rage_extended_this_turn: bool = PrivateAttr(default=False)
     _cleave_used_this_turn: bool = PrivateAttr(default=False)
     _bonus_action_used_this_turn: bool = PrivateAttr(default=False)
+    _bonus_action_reserved_this_turn: bool = PrivateAttr(default=False)
     _great_weapon_master_hewing_used_this_turn: bool = PrivateAttr(default=False)
     _savage_attacker_used_this_turn: bool = PrivateAttr(default=False)
     _reckless_attack_available_this_turn: bool = PrivateAttr(default=False)

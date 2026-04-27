@@ -638,11 +638,40 @@ def test_paladin_uses_lay_on_hands_for_downed_adjacent_ally() -> None:
     encounter.units["F1"].current_hp = 0
     encounter.units["F1"].conditions.unconscious = True
     encounter.units["F1"].conditions.prone = True
+    encounter.units["G1"].position = GridPosition(x=2, y=8)
+    defeat_other_enemies(encounter, "G1")
 
     decision = choose_turn_decision(encounter, "F2")
 
     assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "before_action", "target_id": "F1"}
-    assert decision.action["kind"] == "skip"
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "longsword"}
+
+
+def test_paladin_moves_to_rescue_downed_ally_and_still_acts_from_rescue_square() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-move-rescue-action",
+            placements=build_placements(
+                F1={"x": 4, "y": 4},
+                F2={"x": 1, "y": 4},
+                G1={"x": 3, "y": 4},
+            ),
+        )
+    )
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+    encounter.units["F2"].temporary_effects.append(
+        ConcentrationEffect(kind="concentration", source_id="F2", spell_id="bless", remaining_rounds=10)
+    )
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.path[-1] == GridPosition(x=3, y=3)
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "longsword"}
+    assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "after_action", "target_id": "F1"}
 
 
 def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:

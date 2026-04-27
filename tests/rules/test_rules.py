@@ -2475,6 +2475,49 @@ def test_lay_on_hands_living_target_heals_to_half_hp_when_triggered() -> None:
     assert encounter.units["F1"].resources.lay_on_hands_points == 2
 
 
+def test_adjacent_lay_on_hands_rescue_executes_before_paladin_attack() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-adjacent-rescue-exec", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+    encounter.units["G1"].position = GridPosition(x=2, y=8)
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F2")
+    events: list = []
+    execute_decision(encounter, "F2", decision, events, rescue_mode=False)
+
+    heal_index = next(index for index, event in enumerate(events) if event.event_type == "heal")
+    attack_index = next(index for index, event in enumerate(events) if event.event_type == "attack")
+    assert heal_index < attack_index
+    assert encounter.units["F1"].current_hp > 0
+    assert events[attack_index].target_ids == ["G1"]
+
+
+def test_movement_lay_on_hands_rescue_preserves_after_action_heal() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-movement-rescue-exec", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=1, y=4)
+    encounter.units["G1"].position = GridPosition(x=3, y=4)
+    encounter.units["F1"].current_hp = 0
+    encounter.units["F1"].conditions.unconscious = True
+    encounter.units["F1"].conditions.prone = True
+    encounter.units["G1"].ac = 1
+    encounter.units["G1"].current_hp = 13
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F2")
+    events: list = []
+    execute_decision(encounter, "F2", decision, events, rescue_mode=False)
+
+    movement_index = next(index for index, event in enumerate(events) if event.event_type == "move")
+    attack_index = next(index for index, event in enumerate(events) if event.event_type == "attack")
+    heal_index = next(index for index, event in enumerate(events) if event.event_type == "heal")
+    assert movement_index < attack_index < heal_index
+    assert encounter.units["F1"].current_hp > 0
+    assert events[attack_index].resolved_totals.get("divineSmiteApplied") is None
+
+
 def test_bless_applies_to_weapon_attacks_and_saving_throws() -> None:
     encounter = create_encounter(build_paladin_config("paladin-bless-attack-save"))
     bless_event = resolve_bless(encounter, "F1", ["F1", "F2", "F3"])
@@ -3422,6 +3465,23 @@ def test_divine_smite_rejects_ranged_opportunity_no_slot_and_used_bonus_action_c
         ),
     )
     assert used_bonus_event.resolved_totals.get("divineSmiteApplied") is None
+
+    reserved_bonus = create_encounter(build_level2_paladin_config("paladin-smite-bonus-reserved"))
+    reserved_bonus.units["F1"].position = GridPosition(x=4, y=4)
+    reserved_bonus.units["E1"].position = GridPosition(x=5, y=4)
+    reserved_bonus.units["E1"].current_hp = 100
+    reserved_bonus.units["F1"]._bonus_action_reserved_this_turn = True
+    reserved_bonus_event, _ = resolve_attack(
+        reserved_bonus,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+    assert reserved_bonus_event.resolved_totals.get("divineSmiteApplied") is None
 
 
 def test_paladin_level2_sample_trio_smoke_run_completes() -> None:

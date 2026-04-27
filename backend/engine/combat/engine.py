@@ -418,6 +418,7 @@ def update_encounter_phase(state: EncounterState, actor_id: str) -> list[CombatE
 def clear_turn_flags(actor: UnitState) -> None:
     actor._cleave_used_this_turn = False
     actor._bonus_action_used_this_turn = False
+    actor._bonus_action_reserved_this_turn = False
     actor._great_weapon_master_hewing_used_this_turn = False
     actor._savage_attacker_used_this_turn = False
     actor._rage_extended_this_turn = False
@@ -2701,6 +2702,10 @@ def execute_decision(
     if decision.bonus_action and decision.bonus_action["kind"] == "steady_aim" and decision_movement_distance(decision) > 0:
         events.append(create_skip_event(state, actor_id, "Steady Aim cannot be used on a turn with planned movement."))
         return
+
+    state.units[actor_id]._bonus_action_reserved_this_turn = bool(
+        decision.bonus_action and decision.bonus_action["timing"] == "after_action"
+    )
 
     if decision.bonus_action and decision.bonus_action["timing"] == "before_action":
         events.extend(resolve_bonus_action_events(state, actor_id, decision.bonus_action))

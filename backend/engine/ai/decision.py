@@ -2883,6 +2883,81 @@ def choose_natures_wrath_plan(
     )[0]
 
 
+def build_paladin_rescue_followup_action(
+    state: EncounterState,
+    actor: UnitState,
+    position: GridPosition | None,
+    melee_weapon_id: str | None,
+    ranged_weapon_id: str | None,
+) -> dict:
+    if not position:
+        return {"kind": "skip", "reason": "Using Lay on Hands to restore a downed ally."}
+
+    natures_wrath_target_ids = get_natures_wrath_target_ids_from_position(state, actor, position) if can_use_paladin_natures_wrath(actor) else []
+    if len(natures_wrath_target_ids) >= 4:
+        return {
+            "kind": "special_action",
+            "action_id": "natures_wrath",
+            "target_id": natures_wrath_target_ids[0],
+            "target_ids": natures_wrath_target_ids,
+        }
+
+    projected_state = state.model_copy(deep=True)
+    projected_actor = projected_state.units[actor.id]
+    projected_actor.position = position
+    projected_position_index = build_position_index(projected_state)
+    conscious_enemies = sort_player_combat_targets(
+        projected_state,
+        projected_actor,
+        [unit for unit in get_units_by_faction(projected_state, "goblins") if not unit.conditions.dead],
+        "smart",
+    )
+
+    if can_use_player_weapon(projected_actor, melee_weapon_id):
+        melee_weapon = projected_actor.attacks[melee_weapon_id]
+        melee_targets = sort_player_melee_targets(
+            projected_state,
+            projected_actor,
+            conscious_enemies,
+            "smart",
+            melee_weapon_id=melee_weapon_id,
+            position_index=projected_position_index,
+        )
+        for target in melee_targets:
+            if get_attack_context(projected_state, projected_actor.id, target.id, melee_weapon).legal:
+                return {"kind": "attack", "target_id": target.id, "weapon_id": melee_weapon_id}
+
+    if can_use_player_weapon(projected_actor, ranged_weapon_id):
+        ranged_weapon = projected_actor.attacks[ranged_weapon_id]
+        ranged_targets = sort_player_ranged_targets(
+            projected_state,
+            projected_actor,
+            conscious_enemies,
+            "smart",
+            ranged_weapon_id=ranged_weapon_id,
+            position_index=projected_position_index,
+        )
+        for target in ranged_targets:
+            if get_attack_context(projected_state, projected_actor.id, target.id, ranged_weapon).legal:
+                return {"kind": "attack", "target_id": target.id, "weapon_id": ranged_weapon_id}
+
+    bless_targets = choose_paladin_bless_targets(projected_state, projected_actor)
+    if (
+        can_cast_combat_spell(actor, "bless")
+        and not unit_is_concentrating_on(actor, "bless")
+        and len(bless_targets) >= 2
+    ):
+        return {
+            "kind": "cast_spell",
+            "spell_id": "bless",
+            "spell_level": choose_paladin_bless_spell_level(actor),
+            "target_id": bless_targets[0],
+            "target_ids": bless_targets,
+        }
+
+    return {"kind": "skip", "reason": "Using Lay on Hands to restore a downed ally."}
+
+
 def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     move_squares = get_move_squares(actor, state)
     dash_squares = get_total_move_squares(actor, 1, state=state)
@@ -2903,13 +2978,19 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
             if actor.position and ally.position and get_distance_between_units(actor, ally) <= 1:
                 return TurnDecision(
                     bonus_action={"kind": "lay_on_hands", "timing": "before_action", "target_id": ally.id},
-                    action={"kind": "skip", "reason": f"Using Lay on Hands to restore {ally.id}."},
+                    action=build_paladin_rescue_followup_action(state, actor, actor.position, melee_weapon_id, ranged_weapon_id),
                 )
             rescue_path = find_survivable_touch_path_to_downed_ally(state, actor, ally, move_squares, position_index)
             if rescue_path:
                 return TurnDecision(
                     pre_action_movement=MovementPlan(path=rescue_path.path, mode="move"),
-                    action={"kind": "skip", "reason": f"Moving to restore {ally.id} with Lay on Hands."},
+                    action=build_paladin_rescue_followup_action(
+                        state,
+                        actor,
+                        rescue_path.path[-1] if rescue_path.path else actor.position,
+                        melee_weapon_id,
+                        ranged_weapon_id,
+                    ),
                     bonus_action={"kind": "lay_on_hands", "timing": "after_action", "target_id": ally.id},
                 )
 
