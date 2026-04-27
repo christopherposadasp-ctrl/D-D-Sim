@@ -259,6 +259,18 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert breath.damage_type == "cold"
         assert breath.recharge_threshold == 5
 
+    if "adult_fire_breath" in expectation.special_mechanics:
+        breath = DRAGON_BREATH_ACTIONS["adult_red_fire_breath"]
+        assert breath.action_id == "fire_breath"
+        assert breath.resource_pool_id == "fire_breath_available"
+        assert breath.save_ability == "dex"
+        assert breath.save_dc == 21
+        assert breath.range_squares == 12
+        assert breath.damage_die_count == 17
+        assert breath.damage_die_sides == 6
+        assert breath.damage_type == "fire"
+        assert breath.recharge_threshold == 5
+
     if "fire_breath" in expectation.special_mechanics:
         assert "fire_breath" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("fire_breath_available") == 1
@@ -343,3 +355,18 @@ def test_completed_dragon_workbook_rows_are_marked_modeled(creature_name: str) -
             return
 
     raise AssertionError(f"{creature_name} row not found in SRD creature workbook")
+
+
+def test_incomplete_adult_red_dragon_workbook_row_remains_unmodeled() -> None:
+    workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
+    sheet = workbook.active
+    headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+    creature_index = headers.index("Creature")
+    modeled_index = headers.index("Modeled")
+
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        if row[creature_index] == "Adult Red Dragon":
+            assert row[modeled_index] != "Yes"
+            return
+
+    raise AssertionError("Adult Red Dragon row not found in SRD creature workbook")

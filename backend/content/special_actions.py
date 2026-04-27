@@ -125,6 +125,17 @@ DRAGON_BREATH_ACTIONS: dict[str, DragonBreathActionDefinition] = {
         damage_die_sides=6,
         damage_type="fire",
     ),
+    "adult_red_fire_breath": DragonBreathActionDefinition(
+        action_id="fire_breath",
+        display_name="Fire Breath",
+        resource_pool_id="fire_breath_available",
+        save_ability="dex",
+        save_dc=21,
+        range_squares=12,
+        damage_die_count=17,
+        damage_die_sides=6,
+        damage_type="fire",
+    ),
 }
 
 

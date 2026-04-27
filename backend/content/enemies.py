@@ -171,6 +171,7 @@ knight_ability_mods = AbilityModifiers(str=3, dex=0, con=2, int=0, wis=0, cha=2)
 young_white_dragon_ability_mods = AbilityModifiers(str=4, dex=0, con=4, int=-2, wis=0, cha=1)
 young_red_dragon_ability_mods = AbilityModifiers(str=6, dex=0, con=5, int=2, wis=0, cha=4)
 adult_white_dragon_ability_mods = AbilityModifiers(str=6, dex=0, con=6, int=-1, wis=1, cha=1)
+adult_red_dragon_ability_mods = AbilityModifiers(str=8, dex=0, con=7, int=3, wis=1, cha=6)
 medium_footprint = Footprint(width=1, height=1)
 large_footprint = Footprint(width=2, height=2)
 huge_footprint = Footprint(width=3, height=3)
@@ -2603,6 +2604,60 @@ MONSTER_DEFINITIONS.update(
                 "frightful_presence_available": 1,
             },
         ),
+        "adult_red_dragon": MonsterDefinition(
+            base_creature_id="adult_red_dragon",
+            variant_id="adult_red_dragon",
+            display_name="Adult Red Dragon",
+            combat_role="adult_red_dragon",
+            ai_profile_id="dragon",
+            max_hp=256,
+            ac=19,
+            speed=40,
+            initiative_mod=12,
+            passive_perception=23,
+            ability_mods=adult_red_dragon_ability_mods,
+            size_category="huge",
+            footprint=huge_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=14,
+                    ability_modifier=8,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="slashing",
+                            damage_dice=[DiceSpec(count=1, sides=10)],
+                            damage_modifier=8,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="fire",
+                            damage_dice=[DiceSpec(count=2, sides=4)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                    reach=10,
+                )
+            },
+            tags=("dragon", "chromatic", "red", "melee"),
+            creature_tags=("dragon",),
+            movement_modes=("walk", "climb", "fly"),
+            action_ids=("multiattack", "fire_breath"),
+            special_action_ids=("fire_breath",),
+            dragon_breath_profile_ids={"fire_breath": "adult_red_fire_breath"},
+            legendary_action_ids=("pounce",),
+            trait_ids=("opening_flight_landing", "legendary_resistance"),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),),
+            default_melee_attack_action_id="multiattack",
+            damage_immunities=("fire",),
+            extra_resource_pools={
+                "opening_landing_uses": 1,
+                "fire_breath_available": 1,
+                "legendary_resistance_uses": 3,
+                "legendary_action_uses": 3,
+            },
+        ),
         "berserker": MonsterDefinition(
             base_creature_id="berserker",
             variant_id="berserker",
@@ -3594,6 +3649,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "young_white_dragon",
     "young_red_dragon",
     "adult_white_dragon",
+    "adult_red_dragon",
     "berserker",
     "gnoll_warrior",
     "giant_hyena",
