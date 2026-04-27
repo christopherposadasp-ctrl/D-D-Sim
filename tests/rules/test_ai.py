@@ -615,6 +615,35 @@ def test_level4_evoker_wizard_keeps_existing_spell_priority_and_ignores_mage_arm
     assert set(decision.action["target_ids"]) == {"G1", "G2"}
 
 
+def test_evoker_wizard_shatter_plans_only_mutually_legal_cluster_targets() -> None:
+    for behavior in ("smart", "dumb"):
+        encounter = create_encounter(
+            EncounterConfig(
+                seed=f"wizard-shatter-mutual-cluster-{behavior}",
+                placements=build_trio_placements(
+                    F1={"x": 1, "y": 1},
+                    G1={"x": 8, "y": 1},
+                    G2={"x": 6, "y": 1},
+                    G3={"x": 10, "y": 1},
+                ),
+                player_preset_id="wizard_level4_evoker_sample_trio",
+                player_behavior=behavior,
+            )
+        )
+        keep_only_active_units(encounter, "F1", "G1", "G2", "G3")
+        encounter.units["G1"].current_hp = 20
+        encounter.units["G2"].current_hp = 20
+        encounter.units["G3"].current_hp = 20
+
+        decision = choose_turn_decision(encounter, "F1")
+
+        assert decision.action
+        assert decision.action["kind"] == "cast_spell"
+        assert decision.action["spell_id"] == "shatter"
+        assert len(decision.action["target_ids"]) == 2
+        assert set(decision.action["target_ids"]) != {"G1", "G2", "G3"}
+
+
 def test_level3_evoker_wizard_uses_shatter_over_scorching_ray_for_ally_safe_cluster() -> None:
     encounter = create_encounter(
         EncounterConfig(
@@ -1525,6 +1554,53 @@ def test_smart_level2_ranged_rogue_uses_bonus_dash_when_a_normal_move_cannot_rea
     assert decision.pre_action_movement is not None
     assert decision.pre_action_movement.mode == "dash"
     assert len(decision.pre_action_movement.path) - 1 > 6
+
+
+def test_ranged_rogue_uses_defensive_bonus_dash_after_shortbow_attack_for_both_behaviors() -> None:
+    decisions = []
+    for behavior in ("smart", "dumb"):
+        encounter = create_encounter(
+            EncounterConfig(
+                seed=f"rogue-defensive-bonus-dash-{behavior}",
+                placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 13, "y": 1}),
+                player_preset_id="rogue_level5_ranged_assassin_trio",
+                player_behavior=behavior,
+            )
+        )
+        encounter.round = 2
+        encounter.units["F1"].attacks["shortbow"].range = WeaponRange(normal=30, long=60)
+        defeat_other_enemies(encounter, "G1")
+
+        decisions.append(choose_turn_decision(encounter, "F1"))
+
+    for decision in decisions:
+        assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+        assert decision.pre_action_movement is not None
+        assert decision.bonus_action == {"kind": "bonus_dash", "timing": "after_action"}
+        assert decision.post_action_movement is not None
+        assert decision.post_action_movement.mode == "dash"
+        assert decision.post_action_movement.path[-1] == GridPosition(x=1, y=1)
+
+
+def test_ranged_rogue_defensive_bonus_dash_preserves_future_shortbow_line() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-defensive-bonus-dash-preserve-shot",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 13, "y": 1}),
+            player_preset_id="rogue_level5_ranged_assassin_trio",
+            player_behavior="smart",
+        )
+    )
+    encounter.round = 2
+    encounter.units["F1"].attacks["shortbow"].range = WeaponRange(normal=30, long=35)
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+    assert decision.pre_action_movement is not None
+    assert decision.bonus_action is None
+    assert decision.post_action_movement is None
 
 
 def test_level2_melee_rogue_uses_bonus_dash_to_turn_distance_into_a_rapier_attack() -> None:

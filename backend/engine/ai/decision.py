@@ -6,8 +6,8 @@ from backend.content.enemies import (
     MonsterSphereSpellDefinition,
     get_attack_action_definition_for_unit,
     get_monster_definition_for_unit,
-    get_monster_sphere_spell_for_unit,
     get_monster_spell_attack_profile_for_unit,
+    get_monster_sphere_spell_for_unit,
     unit_has_bonus_action,
     unit_has_reaction,
     unit_has_trait,
@@ -39,8 +39,8 @@ from backend.engine.rules.combat_rules import (
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
     choose_cone_breath_targeting,
-    choose_sphere_targeting,
     choose_selectable_damage_type,
+    choose_sphere_targeting,
     get_active_bless_effect,
     get_damage_defense_flags,
     get_rage_damage_bonus,
@@ -76,6 +76,7 @@ from backend.engine.rules.spatial import (
     is_within_bounds,
     path_provokes_opportunity_attack,
 )
+from backend.engine.rules.spell_resolvers import targets_are_within_spell_cluster
 from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions, unit_sort_key
 
 SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN = 2
@@ -1101,6 +1102,7 @@ def finalize_player_bonus_action_decision(
     decision = apply_monk_martial_arts(state, actor, decision)
     decision = apply_rogue_cunning_action(state, actor, decision, position_index)
     decision = apply_rogue_steady_aim(state, actor, decision, position_index)
+    decision = apply_rogue_defensive_bonus_dash(state, actor, decision, position_index)
     decision = apply_barbarian_opening_rage(state, actor, decision, position_index)
     decision = apply_barbarian_rage_upkeep(actor, decision)
     return apply_fighter_tactical_shift(state, actor, decision, position_index)
@@ -3111,6 +3113,7 @@ def build_shatter_decision(
     if not actor.position or not can_cast_combat_spell(actor, "shatter"):
         return None
 
+    spell = get_spell_definition("shatter")
     shatter_profile = build_spell_attack_context_profile("shatter")
     prioritized_targets = sort_player_ranged_targets(
         state,
@@ -3143,7 +3146,9 @@ def build_shatter_decision(
             if not target_context.legal or not target_context.within_normal_range:
                 continue
             if get_distance_between_units(primary, target) <= 2:
-                cluster.append(target.id)
+                candidate_cluster = [*cluster, target.id]
+                if targets_are_within_spell_cluster(state, candidate_cluster, spell.target_cluster_feet):
+                    cluster.append(target.id)
 
         if len(cluster) >= 2:
             return TurnDecision(
@@ -3151,7 +3156,7 @@ def build_shatter_decision(
                     "kind": "cast_spell",
                     "spell_id": "shatter",
                     "target_id": primary.id,
-                    "target_ids": cluster[: get_spell_definition("shatter").max_targets],
+                    "target_ids": cluster[: spell.max_targets],
                 }
             )
 
@@ -4557,6 +4562,150 @@ def apply_rogue_steady_aim(
         return decision
 
     decision.bonus_action = {"kind": "steady_aim", "timing": "before_action"}
+    return decision
+
+
+def has_legal_ranged_attack_from_position(
+    state: EncounterState,
+    actor: UnitState,
+    weapon: WeaponProfile,
+    position: GridPosition,
+    target_faction: str,
+    position_index: PositionIndex | None = None,
+) -> bool:
+    return any(
+        target.position
+        and not target.conditions.dead
+        and get_attack_context(state, actor.id, target.id, weapon, position, target.position, position_index).legal
+        for target in get_units_by_faction(state, target_faction)
+    )
+
+
+def build_rogue_defensive_bonus_dash_movement(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    position_index: PositionIndex | None = None,
+) -> MovementPlan | None:
+    if (
+        actor.class_id != "rogue"
+        or not is_player_ranged_skirmisher(actor)
+        or decision.bonus_action
+        or decision.action["kind"] != "attack"
+        or decision.action.get("weapon_id") != "shortbow"
+        or not can_use_player_bonus_dash(actor)
+        or unit_is_hidden(actor)
+    ):
+        return None
+
+    attack_position = get_planned_attack_position(actor, decision)
+    if not attack_position:
+        return None
+
+    weapon = actor.attacks.get("shortbow")
+    if not weapon:
+        return None
+
+    move_squares = get_move_squares(actor, state)
+    used_before_action = get_movement_distance(decision.pre_action_movement) + get_movement_distance(
+        decision.between_action_movement
+    )
+    normal_remaining_squares = max(0, move_squares - used_before_action)
+    dash_remaining_squares = max(0, (move_squares * 2) - used_before_action)
+    if dash_remaining_squares <= normal_remaining_squares:
+        return None
+
+    projected_state = state.model_copy(deep=True)
+    projected_actor = projected_state.units[actor.id]
+    projected_actor.position = attack_position.model_copy(deep=True)
+    projected_index = build_position_index(projected_state)
+    threatened_by_faction = "goblins" if actor.faction == "fighters" else "fighters"
+
+    current_distance = get_min_distance_to_faction(
+        projected_state,
+        attack_position,
+        threatened_by_faction,
+        projected_index,
+        get_unit_footprint(actor),
+    )
+    current_final_position = get_planned_final_position(actor, decision) or attack_position
+    current_final_distance = get_min_distance_to_faction(
+        projected_state,
+        current_final_position,
+        threatened_by_faction,
+        projected_index,
+        get_unit_footprint(actor),
+    )
+    current_final_hide_valid = can_attempt_hide_from_position(
+        projected_state,
+        actor.id,
+        current_final_position,
+        projected_index,
+    )
+
+    candidates: list[tuple[ReachableSquare, int, bool]] = []
+    for square in get_safe_reachable_squares(
+        projected_state,
+        actor.id,
+        dash_remaining_squares,
+        False,
+        projected_index,
+    ):
+        if square.distance <= normal_remaining_squares:
+            continue
+        if not has_legal_ranged_attack_from_position(
+            projected_state,
+            projected_actor,
+            weapon,
+            square.position,
+            threatened_by_faction,
+            projected_index,
+        ):
+            continue
+        final_distance = get_min_distance_to_faction(
+            projected_state,
+            square.position,
+            threatened_by_faction,
+            projected_index,
+            get_unit_footprint(actor),
+        )
+        hide_valid = can_attempt_hide_from_position(projected_state, actor.id, square.position, projected_index)
+        if not hide_valid and final_distance < current_distance + 2:
+            continue
+        if not hide_valid and final_distance <= current_final_distance:
+            continue
+        if hide_valid and current_final_hide_valid and final_distance <= current_final_distance:
+            continue
+        candidates.append((square, final_distance, hide_valid))
+
+    if not candidates:
+        return None
+
+    best_square, _, _ = sorted(
+        candidates,
+        key=lambda item: (
+            -int(item[2]),
+            -item[1],
+            item[0].distance,
+            item[0].position.x,
+            item[0].position.y,
+        ),
+    )[0]
+    return MovementPlan(path=best_square.path, mode="dash")
+
+
+def apply_rogue_defensive_bonus_dash(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    position_index: PositionIndex | None = None,
+) -> TurnDecision:
+    movement = build_rogue_defensive_bonus_dash_movement(state, actor, decision, position_index)
+    if not movement:
+        return decision
+
+    decision.bonus_action = {"kind": "bonus_dash", "timing": "after_action"}
+    decision.post_action_movement = movement
     return decision
 
 
