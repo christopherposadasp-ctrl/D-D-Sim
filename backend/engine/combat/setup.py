@@ -237,6 +237,9 @@ def create_encounter(config: EncounterConfig) -> EncounterState:
         terminal_state="ongoing",
         rescue_subphase=False,
         terrain_features=terrain_features,
+        smart_targeting_policy=config.smart_targeting_policy,
+        enable_end_turn_flanking=config.enable_end_turn_flanking,
+        enable_frontline_body_blocking=config.enable_frontline_body_blocking,
     )
 
     for player_unit_id in player_unit_ids:

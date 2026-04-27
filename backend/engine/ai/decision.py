@@ -79,10 +79,15 @@ DUMB_PRECISION_ATTACK_MAX_MISS_MARGIN = 8
 # generic smart-vs-dumb behavior is tuned. Add one key back here when we want to
 # reintroduce that class-specific delta deliberately.
 ENABLED_CLASS_SMART_DELTAS: frozenset[str] = frozenset()
+SmartTargetPriority = tuple[int | float | str, ...]
 
 
 def use_class_smart_delta(state: EncounterState, key: str) -> bool:
     return state.player_behavior == "smart" and key in ENABLED_CLASS_SMART_DELTAS
+
+
+def use_old_smart_targeting(state: EncounterState) -> bool:
+    return state.smart_targeting_policy == "old"
 
 
 @dataclass
@@ -557,6 +562,8 @@ def should_consider_end_turn_flanking_support(
 ) -> bool:
     if state.player_behavior != "smart":
         return False
+    if not state.enable_end_turn_flanking and not state.enable_frontline_body_blocking:
+        return False
     if actor.id not in {"F1", "F2"} or not (is_player_fighter(actor) or is_player_paladin(actor)):
         return False
     if not is_unit_conscious(actor) or not actor.position:
@@ -756,8 +763,12 @@ def choose_end_turn_body_blocking_square(
     remaining_move_squares: int,
     baseline_position: GridPosition,
     action_target_id: str | None,
+    suppress_when_flanking_available: bool,
 ) -> ReachableSquare | None:
-    if get_end_turn_flanking_support_value(state, actor, baseline_position, action_target_id)[0] > 0:
+    if (
+        suppress_when_flanking_available
+        and get_end_turn_flanking_support_value(state, actor, baseline_position, action_target_id)[0] > 0
+    ):
         return None
 
     origin_adjacent_enemy_count = len(get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, origin))
@@ -817,17 +828,19 @@ def apply_end_turn_flanking_support_movement(
         else origin
     )
 
-    best_square = choose_end_turn_flanking_support_square(
-        state,
-        actor,
-        projected_state,
-        projected_actor,
-        projected_index,
-        remaining_move_squares,
-        baseline_position,
-        action_target_id,
-    )
-    if not best_square:
+    best_square = None
+    if state.enable_end_turn_flanking:
+        best_square = choose_end_turn_flanking_support_square(
+            state,
+            actor,
+            projected_state,
+            projected_actor,
+            projected_index,
+            remaining_move_squares,
+            baseline_position,
+            action_target_id,
+        )
+    if not best_square and state.enable_frontline_body_blocking:
         best_square = choose_end_turn_body_blocking_square(
             state,
             actor,
@@ -838,6 +851,7 @@ def apply_end_turn_flanking_support_movement(
             remaining_move_squares,
             baseline_position,
             action_target_id,
+            state.enable_end_turn_flanking,
         )
     if not best_square:
         return decision
@@ -1824,7 +1838,19 @@ def build_smart_target_priority(
     attacker_position: GridPosition | None = None,
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
-) -> tuple[int, int, int, int, float, float, int, int, str]:
+) -> SmartTargetPriority:
+    if use_old_smart_targeting(state):
+        return build_old_smart_ranged_target_priority(
+            state,
+            actor,
+            target,
+            attack_step_weapon_profiles=attack_step_weapon_profiles,
+            preferred_weapon_id=preferred_weapon_id,
+            attacker_position=attacker_position,
+            target_position=target_position,
+            position_index=position_index,
+        )
+
     facts = build_smart_target_facts(
         state,
         actor,
@@ -1848,6 +1874,74 @@ def build_smart_target_priority(
     )
 
 
+def build_old_smart_melee_target_priority(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> SmartTargetPriority:
+    kill_band, kill_probability = classify_target_kill_band(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
+    immediacy = get_target_immediacy(state, actor, target)
+    threat_tier = get_target_threat_tier(state, actor, target, immediacy)
+    return (
+        -kill_band,
+        -immediacy,
+        get_distance_for_priority(state, actor, target),
+        -threat_tier,
+        -kill_probability,
+        target.current_hp,
+        target.id,
+    )
+
+
+def build_old_smart_ranged_target_priority(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    *,
+    attack_step_weapon_profiles: tuple[tuple[WeaponProfile, ...], ...] | None = None,
+    preferred_weapon_id: str | None = None,
+    attacker_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> SmartTargetPriority:
+    kill_band, kill_probability = classify_target_kill_band(
+        state,
+        actor,
+        target,
+        attack_step_weapon_profiles,
+        preferred_weapon_id=preferred_weapon_id,
+        attacker_position=attacker_position,
+        target_position=target_position,
+        position_index=position_index,
+    )
+    immediacy = get_target_immediacy(state, actor, target)
+    threat_tier = get_target_threat_tier(state, actor, target, immediacy)
+    return (
+        -kill_band,
+        -threat_tier,
+        -immediacy,
+        -kill_probability,
+        target.current_hp,
+        get_distance_for_priority(state, actor, target),
+        target.id,
+    )
+
+
 def build_smart_melee_target_priority(
     state: EncounterState,
     actor: UnitState,
@@ -1858,7 +1952,19 @@ def build_smart_melee_target_priority(
     attacker_position: GridPosition | None = None,
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
-) -> tuple[int, int, int, int, float, float, int, int, str]:
+) -> SmartTargetPriority:
+    if use_old_smart_targeting(state):
+        return build_old_smart_melee_target_priority(
+            state,
+            actor,
+            target,
+            attack_step_weapon_profiles=attack_step_weapon_profiles,
+            preferred_weapon_id=preferred_weapon_id,
+            attacker_position=attacker_position,
+            target_position=target_position,
+            position_index=position_index,
+        )
+
     return build_smart_target_priority(
         state,
         actor,
@@ -1881,7 +1987,19 @@ def build_smart_ranged_target_priority(
     attacker_position: GridPosition | None = None,
     target_position: GridPosition | None = None,
     position_index: PositionIndex | None = None,
-) -> tuple[int, int, int, int, float, float, int, int, str]:
+) -> SmartTargetPriority:
+    if use_old_smart_targeting(state):
+        return build_old_smart_ranged_target_priority(
+            state,
+            actor,
+            target,
+            attack_step_weapon_profiles=attack_step_weapon_profiles,
+            preferred_weapon_id=preferred_weapon_id,
+            attacker_position=attacker_position,
+            target_position=target_position,
+            position_index=position_index,
+        )
+
     return build_smart_target_priority(
         state,
         actor,
@@ -2435,8 +2553,8 @@ def get_smart_melee_attack_option(
 
     attack_step_weapon_profiles = build_repeated_weapon_step_profiles(actor, melee_weapon_id)
 
-    def option_priority(option: MeleeAttackOption) -> tuple[int, int, int, int, float, float, int, int, str, int, int, int, int]:
-        target_priority = build_smart_target_priority(
+    def option_priority(option: MeleeAttackOption) -> SmartTargetPriority:
+        target_priority = build_smart_melee_target_priority(
             state,
             actor,
             option.target,

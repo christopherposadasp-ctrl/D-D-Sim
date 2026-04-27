@@ -41,6 +41,9 @@ class BatchChunkTask:
     requested_monster_behavior: MonsterBehavior
     enemy_preset_id: str | None
     player_preset_id: str | None
+    smart_targeting_policy: str
+    enable_end_turn_flanking: bool
+    enable_frontline_body_blocking: bool
     start_index: int
     run_count: int
     preserve_history: bool
@@ -193,6 +196,9 @@ def build_batch_encounter_config(
     requested_monster_behavior: MonsterBehavior,
     enemy_preset_id: str | None,
     player_preset_id: str | None,
+    smart_targeting_policy: str,
+    enable_end_turn_flanking: bool,
+    enable_frontline_body_blocking: bool,
     run_index: int,
 ) -> tuple[EncounterConfig, ResolvedPlayerBehavior]:
     derived_seed = f"{(seed.strip() or DEFAULT_SEED)}#{run_index + 1}"
@@ -204,6 +210,9 @@ def build_batch_encounter_config(
         monster_behavior=requested_monster_behavior,
         enemy_preset_id=enemy_preset_id,
         player_preset_id=player_preset_id,
+        smart_targeting_policy=smart_targeting_policy,
+        enable_end_turn_flanking=enable_end_turn_flanking,
+        enable_frontline_body_blocking=enable_frontline_body_blocking,
     )
     return encounter_config, resolved_behavior
 
@@ -215,6 +224,9 @@ def summarize_batch_run(
     requested_monster_behavior: MonsterBehavior,
     enemy_preset_id: str | None,
     player_preset_id: str | None,
+    smart_targeting_policy: str,
+    enable_end_turn_flanking: bool,
+    enable_frontline_body_blocking: bool,
     run_index: int,
     preserve_history: bool,
 ) -> tuple[EncounterSummary, ResolvedPlayerBehavior]:
@@ -225,6 +237,9 @@ def summarize_batch_run(
         requested_monster_behavior,
         enemy_preset_id,
         player_preset_id,
+        smart_targeting_policy,
+        enable_end_turn_flanking,
+        enable_frontline_body_blocking,
         run_index,
     )
 
@@ -285,6 +300,9 @@ def run_batch_chunk(task: BatchChunkTask) -> BatchChunkResult:
             task.requested_monster_behavior,
             task.enemy_preset_id,
             task.player_preset_id,
+            task.smart_targeting_policy,
+            task.enable_end_turn_flanking,
+            task.enable_frontline_body_blocking,
             run_index,
             task.preserve_history,
         )
@@ -361,6 +379,9 @@ def build_batch_chunk_tasks(
     requested_monster_behavior: MonsterBehavior,
     enemy_preset_id: str | None,
     player_preset_id: str | None,
+    smart_targeting_policy: str,
+    enable_end_turn_flanking: bool,
+    enable_frontline_body_blocking: bool,
     requested_size: int,
     preserve_history: bool,
     worker_count: int,
@@ -378,6 +399,9 @@ def build_batch_chunk_tasks(
                 requested_monster_behavior=requested_monster_behavior,
                 enemy_preset_id=enemy_preset_id,
                 player_preset_id=player_preset_id,
+                smart_targeting_policy=smart_targeting_policy,
+                enable_end_turn_flanking=enable_end_turn_flanking,
+                enable_frontline_body_blocking=enable_frontline_body_blocking,
                 start_index=start_index,
                 run_count=min(chunk_size, requested_size - start_index),
                 preserve_history=preserve_history,
@@ -417,6 +441,9 @@ def run_single_batch_accumulator(
             requested_monster_behavior,
             config.enemy_preset_id,
             config.player_preset_id,
+            config.smart_targeting_policy,
+            config.enable_end_turn_flanking,
+            config.enable_frontline_body_blocking,
             run_index,
             preserve_history,
         )
@@ -435,6 +462,7 @@ def run_batch_serial(
     requested_monster_behavior: MonsterBehaviorSelection,
     seed: str,
     progress_callback: Callable[[int, int, MonsterBehavior], None] | None = None,
+    capture_history: bool | None = None,
 ) -> BatchSummary:
     total_runs = get_total_batch_runs(requested_size, requested_monster_behavior)
     accumulators_by_monster: dict[MonsterBehavior, dict[str, float]] = {}
@@ -445,6 +473,7 @@ def run_batch_serial(
             config,
             requested_player_behavior,
             monster_behavior,
+            capture_history=capture_history,
             progress_callback=progress_callback,
             completed_offset=completed_offset,
             total_runs=total_runs,
@@ -491,11 +520,12 @@ def run_batch_parallel(
     seed: str,
     progress_callback: Callable[[int, int, MonsterBehavior], None] | None = None,
     worker_count: int | None = None,
+    capture_history: bool | None = None,
 ) -> BatchSummary:
     placements = resolve_placements(config)
     total_runs = get_total_batch_runs(requested_size, requested_monster_behavior)
     resolved_worker_count = get_parallel_worker_count(total_runs, worker_count)
-    preserve_history = should_capture_batch_history(requested_size)
+    preserve_history = should_capture_batch_history(requested_size, capture_history)
     accumulators_by_monster = {
         monster_behavior: create_empty_batch_accumulator()
         for monster_behavior in get_batch_behaviors(requested_monster_behavior)
@@ -511,6 +541,9 @@ def run_batch_parallel(
                 monster_behavior,
                 config.enemy_preset_id,
                 config.player_preset_id,
+                config.smart_targeting_policy,
+                config.enable_end_turn_flanking,
+                config.enable_frontline_body_blocking,
                 requested_size,
                 preserve_history,
                 resolved_worker_count,
@@ -568,6 +601,7 @@ def run_batch(
     *,
     force_serial: bool = False,
     worker_count: int | None = None,
+    capture_history: bool | None = None,
 ) -> BatchSummary:
     requested_size = config.batch_size or DEFAULT_BATCH_SIZE
     requested_player_behavior = config.player_behavior or DEFAULT_BATCH_PLAYER_BEHAVIOR
@@ -589,6 +623,7 @@ def run_batch(
             seed,
             progress_callback,
             worker_count=execution_plan.worker_count,
+            capture_history=capture_history,
         )
 
     return run_batch_serial(
@@ -598,4 +633,5 @@ def run_batch(
         requested_monster_behavior,
         seed,
         progress_callback,
+        capture_history=capture_history,
     )

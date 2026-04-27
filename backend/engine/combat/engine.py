@@ -13,6 +13,7 @@ from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     LEGENDARY_CONE_FEAR_ACTIONS,
     LEGENDARY_SPHERE_ACTIONS,
+    MONSTER_COMMAND_ACTIONS,
     DragonBreathActionDefinition,
     LegendaryConeFearActionDefinition,
     LegendarySphereActionDefinition,
@@ -34,6 +35,7 @@ from backend.engine.ai.decision import (
 from backend.engine.combat.setup import create_encounter
 from backend.engine.models.state import (
     CombatEvent,
+    CommandedEffect,
     ConcentrationEffect,
     DamageCandidate,
     DamageComponentResult,
@@ -204,6 +206,8 @@ def reset_legendary_action_uses_at_turn_start(state: EncounterState, actor_id: s
             actor.resource_pools[fear_action.resource_pool_id] = 1
         if action_id == "fiery_rays" and "fiery_rays_available" in actor.resource_pools:
             actor.resource_pools["fiery_rays_available"] = 1
+        if action_id == "commanding_presence" and "commanding_presence_available" in actor.resource_pools:
+            actor.resource_pools["commanding_presence_available"] = 1
 
 
 def choose_legendary_pounce_option(state: EncounterState, actor: UnitState):
@@ -726,6 +730,275 @@ def resolve_legendary_frightful_presence(
     return events
 
 
+def get_monster_command_action_for_unit(unit: UnitState, action_id: str):
+    try:
+        definition = get_monster_definition_for_unit(unit)
+    except ValueError:
+        return None
+    if action_id not in definition.special_action_ids:
+        return None
+    return MONSTER_COMMAND_ACTIONS.get(action_id)
+
+
+def unit_is_command_immune(unit: UnitState) -> bool:
+    return "undead" in unit.creature_tags
+
+
+def unit_has_active_command_from_source(unit: UnitState, source_id: str) -> bool:
+    return any(effect.kind == "commanded_by" and effect.source_id == source_id for effect in unit.temporary_effects)
+
+
+def command_target_is_in_range(state: EncounterState, source_id: str, target_id: str, range_squares: int) -> bool:
+    source = state.units[source_id]
+    target = state.units[target_id]
+    if not source.position or not target.position:
+        return False
+    distance = get_min_chebyshev_distance_between_footprints(
+        source.position,
+        get_unit_footprint(source),
+        target.position,
+        get_unit_footprint(target),
+    )
+    return distance <= range_squares and has_line_of_sight_between_units(state, source_id, target_id)
+
+
+def command_target_is_candidate(
+    state: EncounterState,
+    source_id: str,
+    target_id: str,
+    range_squares: int,
+    *,
+    include_immune: bool = False,
+) -> bool:
+    source = state.units[source_id]
+    target = state.units.get(target_id)
+    if not target or target.faction == source.faction:
+        return False
+    if target.current_hp <= 0 or target.conditions.dead or target.conditions.unconscious:
+        return False
+    if unit_has_active_command_from_source(target, source_id):
+        return False
+    if not include_immune and unit_is_command_immune(target):
+        return False
+    return command_target_is_in_range(state, source_id, target_id, range_squares)
+
+
+def choose_command_target_ids(
+    state: EncounterState,
+    actor_id: str,
+    action,
+    *,
+    preferred_target_ids: list[str] | None = None,
+    minimum_targets: int = 1,
+    include_immune_preferred_targets: bool = False,
+) -> tuple[str, ...]:
+    actor = state.units[actor_id]
+    selected: list[str] = []
+    preferred_target_ids = preferred_target_ids or []
+
+    for target_id in preferred_target_ids:
+        if target_id in selected or target_id not in state.units:
+            continue
+        if command_target_is_candidate(
+            state,
+            actor_id,
+            target_id,
+            action.range_squares,
+            include_immune=include_immune_preferred_targets,
+        ):
+            selected.append(target_id)
+        if len(selected) >= action.target_count:
+            break
+
+    if len(selected) < action.target_count:
+        for target in get_ranked_attack_targets(state, actor):
+            if target.id in selected:
+                continue
+            if command_target_is_candidate(state, actor_id, target.id, action.range_squares):
+                selected.append(target.id)
+            if len(selected) >= action.target_count:
+                break
+
+    if len(selected) < minimum_targets:
+        return ()
+    return tuple(selected[: action.target_count])
+
+
+def apply_commanded_effect(state: EncounterState, source_id: str, target_id: str, command_word: str) -> tuple[bool, list[str]]:
+    target = state.units[target_id]
+    if unit_is_command_immune(target):
+        return False, [f"{target_id} is unaffected by Command because it is undead."]
+    if unit_has_active_command_from_source(target, source_id):
+        return False, [f"{target_id} is already commanded by {source_id}."]
+
+    target.temporary_effects.append(
+        CommandedEffect(
+            kind="commanded_by",
+            source_id=source_id,
+            command="flee",
+            expires_at_turn_end_of=target_id,
+        )
+    )
+    return True, [f"{target_id} is commanded by {source_id} to {command_word}."]
+
+
+def resolve_command(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    overrides: AttackRollOverrides | None = None,
+    *,
+    include_phase: bool = True,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    command = get_monster_command_action_for_unit(actor, "command")
+    if not command:
+        return [create_skip_event(state, actor_id, "Command is not available to this creature.")]
+
+    raw_target_ids = action.get("target_ids")
+    preferred_target_ids: list[str] = []
+    if isinstance(raw_target_ids, list):
+        preferred_target_ids = [str(target_id) for target_id in raw_target_ids]
+    elif isinstance(action.get("target_id"), str):
+        preferred_target_ids = [str(action["target_id"])]
+
+    target_ids = choose_command_target_ids(
+        state,
+        actor_id,
+        command,
+        preferred_target_ids=preferred_target_ids,
+        include_immune_preferred_targets=True,
+    )
+    if not target_ids:
+        return [create_skip_event(state, actor_id, "Command has no legal target.")]
+
+    events: list[CombatEvent] = []
+    if include_phase:
+        events.append(
+            add_unit_phase_event(
+                state,
+                actor_id,
+                target_ids[0],
+                f"{actor_id} casts {command.display_name}.",
+                condition_deltas=[f"{actor_id} commands up to {command.target_count} targets to {command.command_word}."],
+                resolved_totals={
+                    "specialAction": command.action_id,
+                    "spellLikeAction": True,
+                    "saveAbility": command.save_ability,
+                    "saveDc": command.save_dc,
+                    "targetCount": len(target_ids),
+                    "commandWord": command.command_word,
+                },
+            )
+        )
+
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    for target_id in target_ids:
+        target = state.units[target_id]
+        if unit_is_command_immune(target):
+            events.append(
+                add_unit_phase_event(
+                    state,
+                    actor_id,
+                    target_id,
+                    f"{target_id} is unaffected by {command.display_name}.",
+                    condition_deltas=[f"{target_id} is unaffected by Command because it is undead."],
+                    resolved_totals={
+                        "specialAction": command.action_id,
+                        "commandApplied": False,
+                        "commandImmune": True,
+                        "commandImmuneReason": "undead",
+                    },
+                )
+            )
+            continue
+
+        save_mode, _, _ = get_saving_throw_mode(target, command.save_ability, state=state)
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=target_id,
+                ability=command.save_ability,
+                dc=command.save_dc,
+                reason=command.display_name,
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        command_applied = False
+        if not save_success:
+            command_applied, command_deltas = apply_commanded_effect(
+                state,
+                actor_id,
+                target_id,
+                command.command_word,
+            )
+            save_event.condition_deltas.extend(command_deltas)
+        save_event.resolved_totals["specialAction"] = command.action_id
+        save_event.resolved_totals["commandApplied"] = command_applied
+        save_event.resolved_totals["commandWord"] = command.command_word
+        save_event.resolved_totals["commandImmune"] = False
+        events.append(save_event)
+
+    return events
+
+
+def resolve_legendary_commanding_presence(
+    state: EncounterState,
+    actor_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if "commanding_presence" not in get_legendary_action_ids_for_unit(actor):
+        return []
+    if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+        return []
+    if actor.resource_pools.get("commanding_presence_available", 0) <= 0:
+        return []
+
+    command = get_monster_command_action_for_unit(actor, "command")
+    if not command:
+        return []
+    target_ids = choose_command_target_ids(state, actor_id, command, minimum_targets=2)
+    if len(target_ids) < 2:
+        return []
+
+    actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    actor.resource_pools["commanding_presence_available"] = 0
+    events = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            target_ids[0],
+            f"{actor_id} uses Legendary Action: Commanding Presence.",
+            condition_deltas=[
+                f"{actor_id} spends 1 legendary action use on Commanding Presence.",
+                f"{actor_id} cannot use Commanding Presence again until the start of its next turn.",
+            ],
+            resolved_totals={
+                "legendaryAction": "commanding_presence",
+                "specialAction": "command",
+                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+                "commandingPresenceAvailable": actor.resource_pools.get("commanding_presence_available", 0),
+                "targetCount": len(target_ids),
+                "commandWord": command.command_word,
+            },
+        )
+    ]
+    events.extend(
+        resolve_command(
+            state,
+            actor_id,
+            {"action_id": "command", "target_ids": list(target_ids)},
+            overrides,
+            include_phase=False,
+        )
+    )
+    return events
+
+
 SCORCHING_RAY_RAY_COUNT = 3
 
 
@@ -950,6 +1223,13 @@ def resolve_legendary_actions_after_turn(state: EncounterState, triggering_actor
                 if fighters_defeated(state) or goblins_defeated(state):
                     break
                 continue
+        if "commanding_presence" in legendary_action_ids:
+            command_events = resolve_legendary_commanding_presence(state, actor.id)
+            if command_events:
+                events.extend(command_events)
+                if fighters_defeated(state) or goblins_defeated(state):
+                    break
+                continue
         if "fiery_rays" in legendary_action_ids:
             fiery_events = resolve_legendary_fiery_rays(state, actor.id)
             if fiery_events:
@@ -961,6 +1241,52 @@ def resolve_legendary_actions_after_turn(state: EncounterState, triggering_actor
             events.extend(resolve_legendary_pounce(state, actor.id))
         if fighters_defeated(state) or goblins_defeated(state):
             break
+    return events
+
+
+def get_active_commanded_effect(actor: UnitState) -> CommandedEffect | None:
+    if actor.conditions.dead or actor.current_hp <= 0 or actor.conditions.unconscious:
+        return None
+    for effect in actor.temporary_effects:
+        if effect.kind == "commanded_by" and effect.command == "flee":
+            return effect
+    return None
+
+
+def resolve_commanded_forced_turn(state: EncounterState, actor_id: str) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    effect = get_active_commanded_effect(actor)
+    if not effect:
+        return []
+
+    source_id = effect.source_id
+    events = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            source_id,
+            f"{actor_id} is commanded by {source_id} to flee.",
+            condition_deltas=[f"{actor_id} uses its action to Dash away from {source_id}."],
+            resolved_totals={
+                "forcedByCondition": "commanded",
+                "sourceId": source_id,
+                "commandWord": effect.command,
+                "normalActionSkipped": True,
+            },
+        )
+    ]
+    dash_path = choose_frightened_dash_path(state, actor, source_id)
+    if dash_path:
+        movement_events, _movement_halted = execute_movement(
+            state,
+            actor_id,
+            MovementPlan(path=dash_path, mode="dash"),
+            False,
+            "commanded",
+        )
+        events.extend(movement_events)
+    else:
+        events.append(create_skip_event(state, actor_id, "Commanded to flee but nowhere farther to move."))
     return events
 
 
@@ -2419,6 +2745,8 @@ def resolve_special_action_events(
         return resolve_dragon_cone_breath(state, actor_id, action, overrides)
     if action.get("action_id") == "scorching_ray":
         return resolve_scorching_ray(state, actor_id, action, overrides)
+    if action.get("action_id") == "command":
+        return resolve_command(state, actor_id, action, overrides)
     return [resolve_special_action(state, actor_id, action)]
 
 
@@ -3703,11 +4031,15 @@ def step_encounter_internal(
         else:
             events.append(resolve_death_save(next_state, actor_id))
     else:
-        frightened_events = resolve_frightened_forced_turn(next_state, actor_id)
-        if frightened_events:
-            events.extend(frightened_events)
+        commanded_events = resolve_commanded_forced_turn(next_state, actor_id)
+        if commanded_events:
+            events.extend(commanded_events)
         else:
-            execute_decision(next_state, actor_id, choose_turn_decision(next_state, actor_id), events, rescue_mode=False)
+            frightened_events = resolve_frightened_forced_turn(next_state, actor_id)
+            if frightened_events:
+                events.extend(frightened_events)
+            else:
+                execute_decision(next_state, actor_id, choose_turn_decision(next_state, actor_id), events, rescue_mode=False)
 
     events.extend(resolve_turn_end_rage(next_state, actor_id))
     poisoned_save_event = resolve_poisoned_end_of_turn_save(next_state, actor_id)
@@ -3938,6 +4270,7 @@ def run_batch_serial(
     requested_monster_behavior: str,
     seed: str,
     progress_callback=None,
+    capture_history: bool | None = None,
 ):
     """Compatibility wrapper for the extracted serial batch executor."""
 
@@ -3950,6 +4283,7 @@ def run_batch_serial(
         requested_monster_behavior,
         seed,
         progress_callback,
+        capture_history=capture_history,
     )
 
 
@@ -3961,6 +4295,7 @@ def run_batch_parallel(
     seed: str,
     progress_callback=None,
     worker_count=None,
+    capture_history: bool | None = None,
 ):
     """Compatibility wrapper for the extracted parallel batch executor."""
 
@@ -3974,6 +4309,7 @@ def run_batch_parallel(
         seed,
         progress_callback,
         worker_count=worker_count,
+        capture_history=capture_history,
     )
 
 
@@ -3983,9 +4319,16 @@ def run_batch(
     *,
     force_serial: bool = False,
     worker_count: int | None = None,
+    capture_history: bool | None = None,
 ):
     """Compatibility wrapper for the extracted batch module."""
 
     from backend.engine.combat.batch import run_batch as run_batch_impl
 
-    return run_batch_impl(config, progress_callback, force_serial=force_serial, worker_count=worker_count)
+    return run_batch_impl(
+        config,
+        progress_callback,
+        force_serial=force_serial,
+        worker_count=worker_count,
+        capture_history=capture_history,
+    )

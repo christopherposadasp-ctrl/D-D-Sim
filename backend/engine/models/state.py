@@ -29,6 +29,7 @@ PlayerBehavior: TypeAlias = Literal["smart", "dumb", "balanced"]
 ResolvedPlayerBehavior: TypeAlias = Literal["smart", "dumb"]
 MonsterBehavior: TypeAlias = Literal["kind", "balanced", "evil"]
 MonsterBehaviorSelection: TypeAlias = Literal["kind", "balanced", "evil", "combined"]
+SmartTargetingPolicy: TypeAlias = Literal["old", "new"]
 RoleTag: TypeAlias = Literal["healer", "caster", "controller"]
 AttackId: TypeAlias = str
 SizeCategory: TypeAlias = Literal["tiny", "small", "medium", "large", "huge", "gargantuan"]
@@ -361,6 +362,13 @@ class FrightenedEffect(CamelModel):
     save_dc: int
 
 
+class CommandedEffect(CamelModel):
+    kind: Literal["commanded_by"]
+    source_id: str
+    command: Literal["flee"]
+    expires_at_turn_end_of: str
+
+
 TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
@@ -388,6 +396,7 @@ TemporaryEffect: TypeAlias = (
     | HaltedEffect
     | SpeedZeroEffect
     | FrightenedEffect
+    | CommandedEffect
 )
 
 
@@ -551,6 +560,9 @@ class EncounterState(CamelModel):
     # Terrain is runtime-only for now. The engine needs it for pathing and cover,
     # while the UI reads fixed terrain from the preset catalog instead of combat state.
     terrain_features: list[TerrainFeature] = Field(default_factory=list, exclude=True)
+    smart_targeting_policy: SmartTargetingPolicy = Field(default="new", exclude=True)
+    enable_end_turn_flanking: bool = Field(default=True, exclude=True)
+    enable_frontline_body_blocking: bool = Field(default=True, exclude=True)
 
 
 class ReplayFrame(CamelModel):
@@ -569,6 +581,9 @@ class EncounterConfig(CamelModel):
     monster_behavior: MonsterBehaviorSelection | None = None
     enemy_preset_id: str | None = None
     player_preset_id: str | None = None
+    smart_targeting_policy: SmartTargetingPolicy = "new"
+    enable_end_turn_flanking: bool = True
+    enable_frontline_body_blocking: bool = True
 
 
 class RunEncounterResult(CamelModel):
