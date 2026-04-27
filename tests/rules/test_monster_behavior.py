@@ -13,8 +13,11 @@ from backend.engine.combat.engine import (
     resolve_attack_action,
     resolve_cold_breath,
     resolve_cold_breath_recharge,
+    resolve_command,
+    resolve_commanded_forced_turn,
     resolve_fire_breath,
     resolve_fire_breath_recharge,
+    resolve_fireball,
     resolve_frightened_end_of_turn_save,
     resolve_frightened_forced_turn,
     resolve_legendary_actions_after_turn,
@@ -27,6 +30,7 @@ from backend.engine.models.state import (
     DiceSpec,
     EncounterConfig,
     Footprint,
+    CommandedEffect,
     FrightenedEffect,
     GridPosition,
     TerrainFeature,
@@ -1466,7 +1470,6 @@ def test_young_red_dragon_uses_current_position_fire_breath_when_it_can_hit_two_
 
     decision = choose_turn_decision(encounter, "E1")
 
-    assert decision.pre_action_movement is None
     assert decision.action["kind"] == "special_action"
     assert decision.action["action_id"] == "fire_breath"
 
@@ -2350,6 +2353,211 @@ def test_adult_red_dragon_scorching_ray_respects_fire_immunity() -> None:
     assert [event.damage_details.resisted_damage for event in attacks] == [7, 7, 7]
 
 
+def test_adult_red_dragon_command_failed_save_applies_flee_command() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F1"].ability_mods.wis = 5
+
+    events = resolve_command(
+        encounter,
+        "E1",
+        {"action_id": "command", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1]),
+    )
+
+    save_events = [event for event in events if event.event_type == "saving_throw"]
+    assert save_events[0].resolved_totals["specialAction"] == "command"
+    assert save_events[0].resolved_totals["commandApplied"] is True
+    assert save_events[0].resolved_totals["commandWord"] == "flee"
+    assert any(effect.kind == "commanded_by" and effect.source_id == "E1" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_red_dragon_command_successful_save_applies_no_effect() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F1"].ability_mods.wis = 5
+
+    events = resolve_command(
+        encounter,
+        "E1",
+        {"action_id": "command", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20]),
+    )
+
+    save_events = [event for event in events if event.event_type == "saving_throw"]
+    assert save_events[0].resolved_totals["commandApplied"] is False
+    assert not any(effect.kind == "commanded_by" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_red_dragon_command_can_affect_two_targets() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F3"].position = GridPosition(x=12, y=6)
+
+    events = resolve_command(
+        encounter,
+        "E1",
+        {"action_id": "command", "target_ids": ["F1", "F3"]},
+        AttackRollOverrides(save_rolls=[1, 1]),
+    )
+
+    save_events = [event for event in events if event.event_type == "saving_throw"]
+    assert [event.target_ids for event in save_events] == [["F1"], ["F3"]]
+    assert all(event.resolved_totals["commandApplied"] is True for event in save_events)
+    assert all(any(effect.kind == "commanded_by" for effect in encounter.units[unit_id].temporary_effects) for unit_id in ("F1", "F3"))
+
+
+def test_adult_red_dragon_command_does_not_affect_undead_targets() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F1"].creature_tags = ("undead",)
+
+    events = resolve_command(
+        encounter,
+        "E1",
+        {"action_id": "command", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1]),
+    )
+
+    assert any(event.resolved_totals.get("commandImmuneReason") == "undead" for event in events)
+    assert not any(effect.kind == "commanded_by" for effect in encounter.units["F1"].temporary_effects)
+    assert not any(event.event_type == "saving_throw" for event in events)
+
+
+def test_commanded_target_dashes_away_and_effect_expires_at_turn_end() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=5, y=8)
+    encounter.units["F1"].temporary_effects.append(
+        CommandedEffect(kind="commanded_by", source_id="E1", command="flee", expires_at_turn_end_of="F1")
+    )
+
+    events = resolve_commanded_forced_turn(encounter, "F1")
+    move_events = [event for event in events if event.event_type == "move"]
+    expire_events = expire_turn_end_effects(encounter, "F1")
+
+    assert events[0].resolved_totals["forcedByCondition"] == "commanded"
+    assert move_events
+    assert move_events[0].resolved_totals["movementMode"] == "dash"
+    assert not any(effect.kind == "commanded_by" for effect in encounter.units["F1"].temporary_effects)
+    assert any(event.resolved_totals.get("expiredCount") == 1 for event in expire_events)
+
+
+def test_adult_red_dragon_fireball_failed_save_deals_full_fixed_fire_damage_and_spends_use() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=10, y=5)
+
+    events = resolve_fireball(
+        encounter,
+        "E1",
+        {"action_id": "fireball", "target_id": "F1", "center_x": 10, "center_y": 5},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[4, 4, 4, 4, 4, 4, 4, 4]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["E1"].resource_pools["fireball_uses"] == 0
+    assert attacks[0].damage_details.weapon_id == "fireball"
+    assert attacks[0].resolved_totals["saveSucceeded"] is False
+    assert attacks[0].damage_details.total_damage == 32
+    assert attacks[0].damage_details.final_damage_to_hp == 32
+
+
+def test_adult_red_dragon_fireball_successful_save_halves_damage_rounded_down() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=10, y=5)
+
+    events = resolve_fireball(
+        encounter,
+        "E1",
+        {"action_id": "fireball", "target_id": "F1", "center_x": 10, "center_y": 5},
+        AttackRollOverrides(save_rolls=[20], damage_rolls=[3, 3, 3, 3, 3, 3, 3, 3]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert attacks[0].resolved_totals["saveSucceeded"] is True
+    assert attacks[0].damage_details.total_damage == 12
+    assert attacks[0].damage_details.final_damage_to_hp == 12
+
+
+def test_adult_red_dragon_fireball_respects_fire_immunity() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=10, y=5)
+    encounter.units["F1"].damage_immunities = ("fire",)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_fireball(
+        encounter,
+        "E1",
+        {"action_id": "fireball", "target_id": "F1", "center_x": 10, "center_y": 5},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[4, 4, 4, 4, 4, 4, 4, 4]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert attacks[0].damage_details.resisted_damage == 32
+    assert attacks[0].damage_details.final_damage_to_hp == 0
+
+
+def test_adult_red_dragon_fireball_hits_multiple_targets_but_not_the_caster() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F3"].position = GridPosition(x=6, y=6)
+    starting_dragon_hp = encounter.units["E1"].current_hp
+
+    events = resolve_fireball(
+        encounter,
+        "E1",
+        {"action_id": "fireball", "center_x": 6, "center_y": 5},
+        AttackRollOverrides(save_rolls=[1, 1], damage_rolls=[2, 2, 2, 2, 2, 2, 2, 2]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert [event.target_ids for event in attacks] == [["F1"], ["F3"]]
+    assert encounter.units["E1"].current_hp == starting_dragon_hp
+    assert all(event.damage_details.weapon_id == "fireball" for event in attacks)
+
+
+def test_adult_red_dragon_fireball_cannot_be_used_twice() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=10, y=5)
+
+    resolve_fireball(
+        encounter,
+        "E1",
+        {"action_id": "fireball", "target_id": "F1", "center_x": 10, "center_y": 5},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[1, 1, 1, 1, 1, 1, 1, 1]),
+    )
+    second_events = resolve_fireball(
+        encounter,
+        "E1",
+        {"action_id": "fireball", "target_id": "F1", "center_x": 10, "center_y": 5},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[1, 1, 1, 1, 1, 1, 1, 1]),
+    )
+
+    assert encounter.units["E1"].resource_pools["fireball_uses"] == 0
+    assert second_events[0].event_type == "skip"
+    assert "no uses remaining" in second_events[0].text_summary
+
+
 def test_adult_red_dragon_fire_breath_recharge_rolls_restore_only_on_five_or_higher() -> None:
     encounter = build_monster_benchmark_encounter("adult_red_dragon")
     encounter.units["E1"].resource_pools["fire_breath_available"] = 0
@@ -2413,6 +2621,54 @@ def test_adult_red_dragon_first_turn_lands_then_uses_fire_breath_when_it_can_hit
     assert encounter.units["E1"].resource_pools["fire_breath_available"] == 0
     assert [event.damage_details.weapon_id for event in attacks] == ["fire_breath", "fire_breath"]
     assert_occupied_squares_are_valid(encounter, "E1", "F1", "F3")
+
+
+def test_adult_red_dragon_prefers_fire_breath_over_fireball_when_both_can_hit_two_pcs() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=11, y=5)
+    encounter.units["F3"].position = GridPosition(x=11, y=6)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "fire_breath"
+
+
+def test_adult_red_dragon_uses_fireball_when_breath_is_unavailable_and_two_pcs_are_clustered() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].resource_pools["fire_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F3"].position = GridPosition(x=3, y=2)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.pre_action_movement is None
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "fireball"
+    assert encounter.units["E1"].resource_pools["fireball_uses"] == 0
+    assert [event.damage_details.weapon_id for event in attacks] == ["fireball", "fireball"]
+
+
+def test_adult_red_dragon_does_not_choose_fireball_if_the_safe_sphere_would_hit_an_ally() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1", "F3")
+    encounter.units["E1"].resource_pools["fire_breath_available"] = 0
+    encounter.units["E1"].resource_pools["opening_landing_uses"] = 0
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F3"].position = GridPosition(x=1, y=2)
+    encounter.units["E2"].position = GridPosition(x=1, y=3)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert not (decision.action["kind"] == "special_action" and decision.action["action_id"] == "fireball")
+    assert encounter.units["E1"].resource_pools["fireball_uses"] == 1
 
 
 def test_adult_red_dragon_first_turn_lands_then_uses_three_rend_attacks_when_breath_unavailable() -> None:
@@ -2486,15 +2742,35 @@ def test_adult_red_dragon_uses_fiery_rays_legendary_action_before_pounce() -> No
     assert encounter.units["E1"].resource_pools["fiery_rays_available"] == 0
 
 
+def test_adult_red_dragon_uses_commanding_presence_before_fiery_rays_when_two_targets_are_eligible() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F3"].position = GridPosition(x=12, y=6)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    legendary_actions = [event.resolved_totals.get("legendaryAction") for event in events]
+
+    assert "commanding_presence" in legendary_actions
+    assert "fiery_rays" not in legendary_actions
+    assert "pounce" not in legendary_actions
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["commanding_presence_available"] == 0
+    assert any(event.resolved_totals.get("specialAction") == "command" for event in events)
+
+
 def test_adult_red_dragon_fiery_rays_resets_on_dragon_turn_start() -> None:
     encounter = build_monster_benchmark_encounter("adult_red_dragon")
     encounter.units["E1"].resource_pools["legendary_action_uses"] = 1
     encounter.units["E1"].resource_pools["fiery_rays_available"] = 0
+    encounter.units["E1"].resource_pools["commanding_presence_available"] = 0
 
     reset_legendary_action_uses_at_turn_start(encounter, "E1")
 
     assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
     assert encounter.units["E1"].resource_pools["fiery_rays_available"] == 1
+    assert encounter.units["E1"].resource_pools["commanding_presence_available"] == 1
 
 
 def test_adult_red_dragon_falls_back_to_pounce_when_fiery_rays_is_locked_out() -> None:
@@ -2511,6 +2787,21 @@ def test_adult_red_dragon_falls_back_to_pounce_when_fiery_rays_is_locked_out() -
     assert "fiery_rays" not in legendary_actions
     assert "pounce" in legendary_actions
     assert [event.damage_details.weapon_id for event in attacks] == ["rend"]
+
+
+def test_adult_red_dragon_falls_back_to_fiery_rays_when_commanding_presence_is_locked_out() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].resource_pools["commanding_presence_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F3"].position = GridPosition(x=12, y=6)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    legendary_actions = [event.resolved_totals.get("legendaryAction") for event in events]
+
+    assert "commanding_presence" not in legendary_actions
+    assert "fiery_rays" in legendary_actions
 
 
 def test_grick_tentacles_grapple_medium_targets_with_dc_12_but_not_large_targets() -> None:

@@ -14,9 +14,11 @@ from backend.content.special_actions import (
     LEGENDARY_CONE_FEAR_ACTIONS,
     LEGENDARY_SPHERE_ACTIONS,
     MONSTER_COMMAND_ACTIONS,
+    MONSTER_SPHERE_ACTIONS,
     DragonBreathActionDefinition,
     LegendaryConeFearActionDefinition,
     LegendarySphereActionDefinition,
+    MonsterSphereSaveActionDefinition,
     get_special_action,
 )
 from backend.content.spell_definitions import get_spell_definition
@@ -997,6 +999,204 @@ def resolve_legendary_commanding_presence(
         )
     )
     return events
+
+
+def get_monster_sphere_action_for_unit(
+    unit: UnitState, action_id: str
+) -> MonsterSphereSaveActionDefinition | None:
+    try:
+        definition = get_monster_definition_for_unit(unit)
+    except ValueError:
+        return None
+    if action_id not in definition.special_action_ids:
+        return None
+    return MONSTER_SPHERE_ACTIONS.get(action_id)
+
+
+def build_monster_sphere_damage_component(
+    action: MonsterSphereSaveActionDefinition, base_rolls: list[int], applied_damage: int
+) -> list[DamageComponentResult]:
+    return [
+        DamageComponentResult(
+            damage_type=action.damage_type,
+            raw_rolls=list(base_rolls),
+            adjusted_rolls=list(base_rolls),
+            subtotal=sum(base_rolls),
+            flat_modifier=0,
+            total_damage=applied_damage,
+        )
+    ]
+
+
+def resolve_monster_sphere_save_action(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    action_id = str(action.get("action_id") or "")
+    actor = state.units[actor_id]
+    sphere = get_monster_sphere_action_for_unit(actor, action_id)
+    if not sphere:
+        return [create_skip_event(state, actor_id, "Sphere action is not available to this creature.")]
+    if actor.resource_pools.get(sphere.resource_pool_id, 0) <= 0:
+        return [create_skip_event(state, actor_id, f"{sphere.display_name} has no uses remaining.")]
+
+    target_id = action.get("target_id")
+    required_target_id = str(target_id) if isinstance(target_id, str) else None
+    targeting = None
+    if "center_x" in action and "center_y" in action:
+        targeting = build_sphere_targeting(
+            state,
+            actor_id,
+            center=GridPosition(x=int(action["center_x"]), y=int(action["center_y"])),
+            radius_squares=sphere.radius_squares,
+            range_squares=sphere.range_squares,
+            required_primary_target_id=required_target_id,
+            exclude_actor=sphere.exclude_actor,
+        )
+    else:
+        targeting = choose_sphere_targeting(
+            state,
+            actor_id,
+            required_primary_target_id=required_target_id,
+            minimum_enemy_targets=1,
+            allow_allies=True,
+            radius_squares=sphere.radius_squares,
+            range_squares=sphere.range_squares,
+            exclude_actor=sphere.exclude_actor,
+        )
+    if not targeting:
+        return [create_skip_event(state, actor_id, f"{sphere.display_name} has no legal sphere.")]
+
+    actor.resource_pools[sphere.resource_pool_id] = max(0, actor.resource_pools.get(sphere.resource_pool_id, 0) - 1)
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
+    damage_rolls = [
+        pull_die(state, sphere.damage_die_sides, damage_rolls_override.pop(0) if damage_rolls_override else None)
+        for _ in range(sphere.damage_die_count)
+    ]
+    full_damage = sum(damage_rolls)
+    remaining_uses = actor.resource_pools.get(sphere.resource_pool_id, 0)
+    uses_total_key = "fireballUsesRemaining" if sphere.action_id == "fireball" else "usesRemaining"
+
+    events: list[CombatEvent] = [
+        CombatEvent(
+            **event_base(state, actor_id),
+            target_ids=list(targeting.target_ids),
+            event_type="phase_change",
+            raw_rolls={},
+            resolved_totals={
+                "specialAction": sphere.action_id,
+                "spellLikeAction": True,
+                "center": format_position(targeting.center),
+                "enemyTargetCount": len(targeting.enemy_target_ids),
+                "allyTargetCount": len(targeting.ally_target_ids),
+                "usesRemaining": remaining_uses,
+                uses_total_key: remaining_uses,
+            },
+            movement_details=None,
+            damage_details=None,
+            condition_deltas=[f"{actor_id} spends one use of {sphere.display_name}."],
+            text_summary=(
+                f"{actor_id} casts {sphere.display_name}, catching "
+                f"{len(targeting.enemy_target_ids)} enemies and {len(targeting.ally_target_ids)} allies."
+            ),
+        )
+    ]
+
+    for resolved_target_id in targeting.target_ids:
+        target = state.units[resolved_target_id]
+        save_mode, _, _ = get_saving_throw_mode(target, sphere.save_ability, state=state)
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=resolved_target_id,
+                ability=sphere.save_ability,
+                dc=sphere.save_dc,
+                reason=sphere.display_name,
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        applied_damage = full_damage // 2 if save_success and sphere.half_damage_on_success else full_damage
+        damage_components = build_monster_sphere_damage_component(sphere, damage_rolls, applied_damage)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            damage_components,
+            False,
+            concentration_save_rolls=concentration_rolls_override,
+        )
+        events.append(save_event)
+
+        raw_rolls = {"damageRolls": list(damage_rolls)}
+        resolved_totals = {
+            "specialAction": sphere.action_id,
+            "saveAbility": sphere.save_ability,
+            "saveDc": sphere.save_dc,
+            "saveSucceeded": save_success,
+            "fullDamage": full_damage,
+            "halfOnSuccess": sphere.half_damage_on_success,
+        }
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
+        events.append(
+            CombatEvent(
+                **event_base(state, actor_id),
+                target_ids=[resolved_target_id],
+                event_type="attack",
+                raw_rolls=raw_rolls,
+                resolved_totals=resolved_totals,
+                movement_details=None,
+                damage_details=DamageDetails(
+                    weapon_id=sphere.action_id,
+                    weapon_name=sphere.display_name,
+                    damage_components=damage_components,
+                    primary_candidate=None,
+                    savage_candidate=None,
+                    chosen_candidate=None,
+                    critical_applied=False,
+                    critical_multiplier=1,
+                    flat_modifier=0,
+                    advantage_bonus_candidate=None,
+                    mastery_applied=None,
+                    mastery_notes=None,
+                    attack_riders_applied=None,
+                    total_damage=applied_damage,
+                    resisted_damage=damage_result.resisted_damage,
+                    amplified_damage=damage_result.amplified_damage or None,
+                    temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                    final_damage_to_hp=damage_result.final_damage_to_hp,
+                    hp_delta=damage_result.hp_delta,
+                ),
+                condition_deltas=list(damage_result.condition_deltas),
+                text_summary=(
+                    f"{actor_id}'s {sphere.display_name} hits {resolved_target_id} for "
+                    f"{applied_damage} {sphere.damage_type} damage"
+                    f"{' after a successful save' if save_success else ' after a failed save'}"
+                    f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                    f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+                ),
+            )
+        )
+
+        if state.units[resolved_target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+
+    return events
+
+
+def resolve_fireball(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    return resolve_monster_sphere_save_action(state, actor_id, {**action, "action_id": "fireball"}, overrides)
 
 
 SCORCHING_RAY_RAY_COUNT = 3
@@ -2747,6 +2947,8 @@ def resolve_special_action_events(
         return resolve_scorching_ray(state, actor_id, action, overrides)
     if action.get("action_id") == "command":
         return resolve_command(state, actor_id, action, overrides)
+    if action.get("action_id") in MONSTER_SPHERE_ACTIONS:
+        return resolve_monster_sphere_save_action(state, actor_id, action, overrides)
     return [resolve_special_action(state, actor_id, action)]
 
 

@@ -2654,11 +2654,11 @@ MONSTER_DEFINITIONS.update(
             tags=("dragon", "chromatic", "red", "melee"),
             creature_tags=("dragon",),
             movement_modes=("walk", "climb", "fly"),
-            action_ids=("multiattack", "fire_breath", "scorching_ray"),
-            special_action_ids=("fire_breath", "scorching_ray"),
+            action_ids=("multiattack", "fire_breath", "scorching_ray", "command", "fireball"),
+            special_action_ids=("fire_breath", "scorching_ray", "command", "fireball"),
             dragon_breath_profile_ids={"fire_breath": "adult_red_fire_breath"},
-            legendary_action_ids=("pounce", "fiery_rays"),
-            trait_ids=("opening_flight_landing", "legendary_resistance"),
+            legendary_action_ids=("pounce", "fiery_rays", "commanding_presence"),
+            trait_ids=("opening_flight_landing", "legendary_resistance", "detect_magic"),
             attack_actions=(
                 repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),
                 AttackActionDefinition(
@@ -2679,6 +2679,8 @@ MONSTER_DEFINITIONS.update(
                 "legendary_resistance_uses": 3,
                 "legendary_action_uses": 3,
                 "fiery_rays_available": 1,
+                "commanding_presence_available": 1,
+                "fireball_uses": 1,
             },
         ),
         "berserker": MonsterDefinition(

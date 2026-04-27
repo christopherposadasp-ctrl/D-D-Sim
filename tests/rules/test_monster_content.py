@@ -16,7 +16,13 @@ from backend.content.enemies import (
     unit_has_creature_tag,
     unit_is_undead,
 )
-from backend.content.special_actions import DRAGON_BREATH_ACTIONS, LEGENDARY_CONE_FEAR_ACTIONS, LEGENDARY_SPHERE_ACTIONS
+from backend.content.special_actions import (
+    DRAGON_BREATH_ACTIONS,
+    LEGENDARY_CONE_FEAR_ACTIONS,
+    LEGENDARY_SPHERE_ACTIONS,
+    MONSTER_COMMAND_ACTIONS,
+    MONSTER_SPHERE_ACTIONS,
+)
 from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
 
@@ -288,6 +294,39 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert "fiery_rays" in definition.legendary_action_ids
         assert runtime_unit.resource_pools.get("fiery_rays_available") == 1
 
+    if "command" in expectation.special_mechanics:
+        command = MONSTER_COMMAND_ACTIONS["command"]
+        assert "command" in definition.special_action_ids
+        assert command.save_ability == "wis"
+        assert command.save_dc == 20
+        assert command.range_squares == 12
+        assert command.target_count == 2
+        assert command.command_word == "flee"
+
+    if "commanding_presence" in expectation.special_mechanics:
+        assert "commanding_presence" in definition.legendary_action_ids
+        assert runtime_unit.resource_pools.get("commanding_presence_available") == 1
+
+    if "fireball" in expectation.special_mechanics:
+        fireball = MONSTER_SPHERE_ACTIONS["fireball"]
+        assert "fireball" in definition.special_action_ids
+        assert runtime_unit.resource_pools.get("fireball_uses") == 1
+        assert fireball.resource_pool_id == "fireball_uses"
+        assert fireball.save_ability == "dex"
+        assert fireball.save_dc == 20
+        assert fireball.range_squares == 30
+        assert fireball.radius_squares == 4
+        assert fireball.damage_die_count == 8
+        assert fireball.damage_die_sides == 6
+        assert fireball.damage_type == "fire"
+        assert fireball.half_damage_on_success is True
+
+    if "detect_magic" in expectation.special_mechanics:
+        assert "detect_magic" in definition.trait_ids
+        assert "detect_magic" not in definition.action_ids
+        assert "detect_magic" not in definition.special_action_ids
+        assert "detect_magic" not in definition.legendary_action_ids
+
     if "no_legendary_actions" in expectation.special_mechanics:
         legendary_fields = (
             definition.action_ids,
@@ -354,7 +393,10 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         ]
 
 
-@pytest.mark.parametrize("creature_name", ("Young White Dragon", "Young Red Dragon", "Adult White Dragon"))
+@pytest.mark.parametrize(
+    "creature_name",
+    ("Young White Dragon", "Young Red Dragon", "Adult White Dragon", "Adult Red Dragon"),
+)
 def test_completed_dragon_workbook_rows_are_marked_modeled(creature_name: str) -> None:
     workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
     sheet = workbook.active
@@ -368,18 +410,3 @@ def test_completed_dragon_workbook_rows_are_marked_modeled(creature_name: str) -
             return
 
     raise AssertionError(f"{creature_name} row not found in SRD creature workbook")
-
-
-def test_incomplete_adult_red_dragon_workbook_row_remains_unmodeled() -> None:
-    workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
-    sheet = workbook.active
-    headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-    creature_index = headers.index("Creature")
-    modeled_index = headers.index("Modeled")
-
-    for row in sheet.iter_rows(min_row=2, values_only=True):
-        if row[creature_index] == "Adult Red Dragon":
-            assert row[modeled_index] != "Yes"
-            return
-
-    raise AssertionError("Adult Red Dragon row not found in SRD creature workbook")

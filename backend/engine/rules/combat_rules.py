@@ -2780,25 +2780,28 @@ def build_sphere_targeting(
     state: EncounterState,
     actor_id: str,
     *,
+    actor_position: GridPosition | None = None,
     center: GridPosition,
     radius_squares: int,
     range_squares: int,
     required_primary_target_id: str | None = None,
+    exclude_actor: bool = False,
 ) -> SphereTargeting | None:
     actor = state.units[actor_id]
-    if not actor.position:
+    origin_position = actor_position or actor.position
+    if not origin_position:
         return None
     if not (1 <= center.x <= GRID_SIZE and 1 <= center.y <= GRID_SIZE):
         return None
 
-    actor_origins = get_occupied_squares_for_position(actor.position, get_unit_footprint(actor))
+    actor_origins = get_occupied_squares_for_position(origin_position, get_unit_footprint(actor))
     if all(chebyshev_distance(origin, center) > range_squares for origin in actor_origins):
         return None
 
     live_units = [
         unit
         for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id))
-        if unit.position and not unit.conditions.dead
+        if unit.position and not unit.conditions.dead and not (exclude_actor and unit.id == actor_id)
     ]
     hit_units = [
         unit
@@ -2829,11 +2832,13 @@ def choose_sphere_targeting(
     state: EncounterState,
     actor_id: str,
     *,
+    actor_position: GridPosition | None = None,
     required_primary_target_id: str | None = None,
     minimum_enemy_targets: int = 1,
     allow_allies: bool = True,
     radius_squares: int,
     range_squares: int,
+    exclude_actor: bool = False,
 ) -> SphereTargeting | None:
     viable: list[SphereTargeting] = []
     for x in range(1, GRID_SIZE + 1):
@@ -2841,10 +2846,12 @@ def choose_sphere_targeting(
             targeting = build_sphere_targeting(
                 state,
                 actor_id,
+                actor_position=actor_position,
                 center=GridPosition(x=x, y=y),
                 radius_squares=radius_squares,
                 range_squares=range_squares,
                 required_primary_target_id=required_primary_target_id,
+                exclude_actor=exclude_actor,
             )
             if not targeting:
                 continue

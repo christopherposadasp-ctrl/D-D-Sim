@@ -11,7 +11,12 @@ from backend.content.enemies import (
 )
 from backend.content.feature_definitions import unit_has_feature, unit_has_granted_action, unit_has_granted_bonus_action
 from backend.content.player_loadouts import get_player_primary_melee_weapon_id, get_player_primary_ranged_weapon_id
-from backend.content.special_actions import DRAGON_BREATH_ACTIONS, DragonBreathActionDefinition
+from backend.content.special_actions import (
+    DRAGON_BREATH_ACTIONS,
+    MONSTER_SPHERE_ACTIONS,
+    DragonBreathActionDefinition,
+    MonsterSphereSaveActionDefinition,
+)
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.profiles import get_monster_ai_profile
 from backend.engine.models.state import (
@@ -33,6 +38,7 @@ from backend.engine.rules.combat_rules import (
     can_use_battle_master_maneuver,
     choose_burning_hands_targeting,
     choose_cone_breath_targeting,
+    choose_sphere_targeting,
     choose_selectable_damage_type,
     get_active_bless_effect,
     get_damage_defense_flags,
@@ -5099,6 +5105,49 @@ def build_dragon_breath_action(breath: DragonBreathActionDefinition, targeting) 
     }
 
 
+def get_available_adult_red_fireball_action(actor: UnitState) -> MonsterSphereSaveActionDefinition | None:
+    if actor.combat_role != "adult_red_dragon":
+        return None
+    action = MONSTER_SPHERE_ACTIONS.get("fireball")
+    if not action:
+        return None
+    definition = get_monster_definition_for_unit(actor)
+    if action.action_id not in definition.special_action_ids:
+        return None
+    if actor.resource_pools.get(action.resource_pool_id, 0) <= 0:
+        return None
+    return action
+
+
+def build_monster_sphere_action(action: MonsterSphereSaveActionDefinition, targeting) -> dict[str, str]:
+    return {
+        "kind": "special_action",
+        "action_id": action.action_id,
+        "target_id": targeting.primary_target_id,
+        "center_x": str(targeting.center.x),
+        "center_y": str(targeting.center.y),
+    }
+
+
+def choose_adult_red_fireball_targeting(
+    state: EncounterState,
+    actor: UnitState,
+    fireball: MonsterSphereSaveActionDefinition,
+    *,
+    actor_position: GridPosition | None = None,
+):
+    return choose_sphere_targeting(
+        state,
+        actor.id,
+        actor_position=actor_position,
+        minimum_enemy_targets=2,
+        allow_allies=False,
+        radius_squares=fireball.radius_squares,
+        range_squares=fireball.range_squares,
+        exclude_actor=fireball.exclude_actor,
+    )
+
+
 def choose_adult_red_scorching_ray_multiattack_action(state: EncounterState, actor: UnitState) -> dict[str, str] | None:
     if actor.combat_role != "adult_red_dragon":
         return None
@@ -5169,6 +5218,37 @@ def choose_dragon_landing_breath_option(
     )[0]
 
 
+def choose_adult_red_landing_fireball_option(
+    state: EncounterState,
+    actor: UnitState,
+    position_index: PositionIndex,
+    fireball: MonsterSphereSaveActionDefinition,
+):
+    if not actor.position:
+        return None
+
+    candidates = []
+    for landing_position in get_legal_landing_positions(state, actor, position_index):
+        targeting = choose_adult_red_fireball_targeting(state, actor, fireball, actor_position=landing_position)
+        if targeting:
+            candidates.append((landing_position, targeting))
+
+    if not candidates:
+        return None
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            -len(candidate[1].enemy_target_ids),
+            candidate[0].x,
+            candidate[0].y,
+            candidate[1].center.x,
+            candidate[1].center.y,
+            candidate[1].target_ids,
+        ),
+    )[0]
+
+
 def get_dragon_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     position_index = build_position_index(state)
     breath_actions = get_available_dragon_breath_actions(actor)
@@ -5194,6 +5274,25 @@ def get_dragon_decision(state: EncounterState, actor: UnitState) -> TurnDecision
                     mode="landing",
                 ),
                 action=build_dragon_breath_action(breath, targeting),
+            )
+
+    fireball = get_available_adult_red_fireball_action(actor)
+    if fireball:
+        current_fireball = choose_adult_red_fireball_targeting(state, actor, fireball)
+        if current_fireball:
+            return TurnDecision(action=build_monster_sphere_action(fireball, current_fireball))
+
+    if fireball and can_use_opening_flight_landing(actor):
+        landing_fireball = choose_adult_red_landing_fireball_option(state, actor, position_index, fireball)
+        if landing_fireball:
+            landing_position, targeting = landing_fireball
+            actor.resource_pools["opening_landing_uses"] = max(0, actor.resource_pools.get("opening_landing_uses", 0) - 1)
+            return TurnDecision(
+                pre_action_movement=MovementPlan(
+                    path=[actor.position.model_copy(deep=True), landing_position.model_copy(deep=True)],
+                    mode="landing",
+                ),
+                action=build_monster_sphere_action(fireball, targeting),
             )
 
     scorching_ray_multiattack = choose_adult_red_scorching_ray_multiattack_action(state, actor)

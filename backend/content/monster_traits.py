@@ -103,6 +103,11 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
         display_name="Legendary Resistance",
         description="If this creature fails a saving throw, it can choose to succeed instead.",
     ),
+    "detect_magic": MonsterTraitDefinition(
+        trait_id="detect_magic",
+        display_name="Detect Magic",
+        description="This creature can detect magic outside the combat model; no runtime behavior is applied.",
+    ),
 }
 
 
