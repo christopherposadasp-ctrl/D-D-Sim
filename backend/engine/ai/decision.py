@@ -420,24 +420,35 @@ def choose_tactical_shift_movement(
     state: EncounterState,
     actor: UnitState,
     position_index: PositionIndex | None = None,
+    origin_position: GridPosition | None = None,
 ) -> MovementPlan | None:
-    if not actor.position:
+    resolved_origin = origin_position or actor.position
+    if not resolved_origin:
         return None
 
     budget = get_tactical_shift_budget_squares(actor, state)
     if budget <= 0:
         return None
 
+    working_state = state
+    working_actor = actor
+    working_index = position_index
+    if origin_position and actor.position != origin_position:
+        working_state = state.model_copy(deep=True)
+        working_actor = working_state.units[actor.id]
+        working_actor.position = origin_position.model_copy(deep=True)
+        working_index = build_position_index(working_state)
+
     enemy_faction = "goblins" if actor.faction == "fighters" else "fighters"
-    actor_footprint = get_unit_footprint(actor)
-    current_adjacent_count = len(get_adjacent_conscious_enemies_at_position(state, actor, actor.position))
-    current_distance = get_min_distance_to_faction(state, actor.position, enemy_faction, position_index, actor_footprint)
-    candidates = [square for square in get_reachable_squares(state, actor.id, budget, position_index) if square.distance > 0]
+    actor_footprint = get_unit_footprint(working_actor)
+    current_adjacent_count = len(get_adjacent_conscious_enemies_at_position(working_state, working_actor, resolved_origin))
+    current_distance = get_min_distance_to_faction(working_state, resolved_origin, enemy_faction, working_index, actor_footprint)
+    candidates = [square for square in get_reachable_squares(working_state, actor.id, budget, working_index) if square.distance > 0]
     improvements: list[tuple[ReachableSquare, int, int]] = []
 
     for square in candidates:
-        adjacent_count = len(get_adjacent_conscious_enemies_at_position(state, actor, square.position))
-        distance_to_enemy = get_min_distance_to_faction(state, square.position, enemy_faction, position_index, actor_footprint)
+        adjacent_count = len(get_adjacent_conscious_enemies_at_position(working_state, working_actor, square.position))
+        distance_to_enemy = get_min_distance_to_faction(working_state, square.position, enemy_faction, working_index, actor_footprint)
         if adjacent_count < current_adjacent_count or distance_to_enemy > current_distance:
             improvements.append((square, adjacent_count, distance_to_enemy))
 
@@ -469,12 +480,33 @@ def apply_fighter_tactical_shift(
 ) -> TurnDecision:
     if not can_use_tactical_shift(actor, decision):
         return decision
-    if decision.pre_action_movement or decision.between_action_movement or decision.post_action_movement:
+    if decision.post_action_movement and decision.post_action_movement.mode == "tactical_shift":
         return decision
 
-    tactical_shift = choose_tactical_shift_movement(state, actor, position_index)
+    tactical_shift_origin = actor.position
+    for movement in (decision.pre_action_movement, decision.between_action_movement):
+        if movement and movement.path:
+            tactical_shift_origin = movement.path[-1]
+
+    tactical_shift = choose_tactical_shift_movement(state, actor, position_index, tactical_shift_origin)
     if tactical_shift:
-        decision.post_action_movement = tactical_shift
+        if not decision.post_action_movement:
+            decision.post_action_movement = tactical_shift
+            return decision
+
+        existing_end = decision.post_action_movement.path[-1] if decision.post_action_movement.path else tactical_shift_origin
+        tactical_end = tactical_shift.path[-1] if tactical_shift.path else tactical_shift_origin
+        enemy_faction = "goblins" if actor.faction == "fighters" else "fighters"
+        existing_score = (
+            len(get_adjacent_conscious_enemies_at_position(state, actor, existing_end)),
+            -get_min_distance_to_faction(state, existing_end, enemy_faction, position_index, get_unit_footprint(actor)),
+        )
+        tactical_score = (
+            len(get_adjacent_conscious_enemies_at_position(state, actor, tactical_end)),
+            -get_min_distance_to_faction(state, tactical_end, enemy_faction, position_index, get_unit_footprint(actor)),
+        )
+        if decision.post_action_movement.mode == "move" and tactical_score < existing_score:
+            decision.post_action_movement = tactical_shift
     return decision
 
 
@@ -2193,6 +2225,7 @@ def build_post_action_retreat(
     actor: UnitState,
     attack_position: GridPosition,
     remaining_move_squares: int,
+    prefer_hide_positions: bool = False,
 ) -> MovementPlan | None:
     if remaining_move_squares <= 0:
         return None
@@ -2224,6 +2257,7 @@ def build_post_action_retreat(
     best_retreat = sorted(
         retreat_options,
         key=lambda square: (
+            -int(prefer_hide_positions and can_attempt_hide_from_position(projected_state, actor.id, square.position, projected_index)),
             -get_min_distance_to_faction(
                 projected_state,
                 square.position,
@@ -2244,8 +2278,14 @@ def build_post_action_retreat(
         projected_index,
         get_unit_footprint(actor),
     )
+    best_hide_valid = prefer_hide_positions and can_attempt_hide_from_position(
+        projected_state,
+        actor.id,
+        best_retreat.position,
+        projected_index,
+    )
 
-    if best_retreat.distance == 0 or best_distance <= current_distance:
+    if best_retreat.distance == 0 or (not best_hide_valid and best_distance <= current_distance):
         return None
 
     return MovementPlan(path=best_retreat.path, mode="move")
@@ -2287,13 +2327,36 @@ def build_player_ranged_attack_decision(
         position_index=position_index,
     )
     prefer_distance_from_faction = "goblins" if is_player_ranged_skirmisher(actor) else None
-    prefer_hide_positions = (
-        use_class_smart_delta(state, "rogue_hide_setup")
-        and is_player_ranged_skirmisher(actor)
-        and can_use_player_hide_bonus_action(actor)
-    )
+    prefer_hide_positions = is_player_ranged_skirmisher(actor) and can_use_player_hide_bonus_action(actor) and not bonus_action
+    weapon = actor.attacks.get(ranged_weapon_id)
 
     for target in ranged_targets:
+        if prefer_hide_positions and weapon and actor.position and target.position:
+            current_context = get_attack_context(
+                state,
+                actor.id,
+                target.id,
+                weapon,
+                actor.position,
+                target.position,
+                position_index,
+            )
+            if current_context.legal and (current_context.within_normal_range or not require_normal_range):
+                post_action_movement = build_post_action_retreat(
+                    state,
+                    actor,
+                    actor.position,
+                    move_squares,
+                    True,
+                )
+                final_position = post_action_movement.path[-1] if post_action_movement and post_action_movement.path else None
+                if final_position and can_attempt_hide_from_position(state, actor.id, final_position, position_index):
+                    return TurnDecision(
+                        bonus_action=bonus_action,
+                        post_action_movement=post_action_movement,
+                        action={"kind": "attack", "target_id": target.id, "weapon_id": ranged_weapon_id},
+                    )
+
         ranged_plan = build_ranged_attack_plan(
             state,
             actor,
@@ -2318,6 +2381,7 @@ def build_player_ranged_attack_decision(
                 actor,
                 attack_position,
                 move_squares - get_movement_distance(pre_action_movement),
+                prefer_hide_positions,
             )
             if attack_position and is_player_ranged_skirmisher(actor)
             else build_post_action_advance(
@@ -2958,6 +3022,80 @@ def build_paladin_rescue_followup_action(
     return {"kind": "skip", "reason": "Using Lay on Hands to restore a downed ally."}
 
 
+def apply_paladin_post_action_positioning(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    move_squares: int,
+    position_index: PositionIndex | None,
+) -> TurnDecision:
+    if decision.post_action_movement or not actor.position or decision.action.get("kind") == "dash":
+        return decision
+
+    action_position = get_planned_attack_position(actor, decision)
+    if not action_position:
+        return decision
+
+    remaining_move_squares = move_squares - get_movement_distance(decision.pre_action_movement)
+    if remaining_move_squares <= 0:
+        return decision
+
+    projected_state = state.model_copy(deep=True)
+    projected_actor = projected_state.units[actor.id]
+    projected_actor.position = action_position.model_copy(deep=True)
+    projected_index = build_position_index(projected_state)
+
+    if get_adjacent_conscious_enemies_at_position(projected_state, projected_actor, action_position):
+        return decision
+
+    enemy_faction = "goblins" if actor.faction == "fighters" else "fighters"
+    current_distance = get_min_distance_to_faction(
+        projected_state,
+        action_position,
+        enemy_faction,
+        projected_index,
+        get_unit_footprint(projected_actor),
+    )
+    if current_distance >= 9999:
+        return decision
+
+    candidates = get_safe_reachable_squares(projected_state, actor.id, remaining_move_squares, False, projected_index)
+    improvements = [
+        square
+        for square in candidates
+        if square.distance > 0
+        and get_min_distance_to_faction(
+            projected_state,
+            square.position,
+            enemy_faction,
+            projected_index,
+            get_unit_footprint(projected_actor),
+        )
+        < current_distance
+    ]
+    if not improvements:
+        return decision
+
+    best_square = sorted(
+        improvements,
+        key=lambda square: (
+            get_min_distance_to_faction(
+                projected_state,
+                square.position,
+                enemy_faction,
+                projected_index,
+                get_unit_footprint(projected_actor),
+            ),
+            -count_adjacent_allied_units_to_position(projected_state, projected_actor, square.position),
+            square.distance,
+            square.position.x,
+            square.position.y,
+        ),
+    )[0]
+    decision.post_action_movement = MovementPlan(path=best_square.path, mode="move")
+    return decision
+
+
 def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     move_squares = get_move_squares(actor, state)
     dash_squares = get_total_move_squares(actor, 1, state=state)
@@ -2976,22 +3114,40 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
     if can_use_lay_on_hands(actor):
         for ally in downed_allies:
             if actor.position and ally.position and get_distance_between_units(actor, ally) <= 1:
-                return TurnDecision(
-                    bonus_action={"kind": "lay_on_hands", "timing": "before_action", "target_id": ally.id},
-                    action=build_paladin_rescue_followup_action(state, actor, actor.position, melee_weapon_id, ranged_weapon_id),
+                return apply_paladin_post_action_positioning(
+                    state,
+                    actor,
+                    TurnDecision(
+                        bonus_action={"kind": "lay_on_hands", "timing": "before_action", "target_id": ally.id},
+                        action=build_paladin_rescue_followup_action(
+                            state,
+                            actor,
+                            actor.position,
+                            melee_weapon_id,
+                            ranged_weapon_id,
+                        ),
+                    ),
+                    move_squares,
+                    position_index,
                 )
             rescue_path = find_survivable_touch_path_to_downed_ally(state, actor, ally, move_squares, position_index)
             if rescue_path:
-                return TurnDecision(
-                    pre_action_movement=MovementPlan(path=rescue_path.path, mode="move"),
-                    action=build_paladin_rescue_followup_action(
-                        state,
-                        actor,
-                        rescue_path.path[-1] if rescue_path.path else actor.position,
-                        melee_weapon_id,
-                        ranged_weapon_id,
+                return apply_paladin_post_action_positioning(
+                    state,
+                    actor,
+                    TurnDecision(
+                        pre_action_movement=MovementPlan(path=rescue_path.path, mode="move"),
+                        action=build_paladin_rescue_followup_action(
+                            state,
+                            actor,
+                            rescue_path.path[-1] if rescue_path.path else actor.position,
+                            melee_weapon_id,
+                            ranged_weapon_id,
+                        ),
+                        bonus_action={"kind": "lay_on_hands", "timing": "after_action", "target_id": ally.id},
                     ),
-                    bonus_action={"kind": "lay_on_hands", "timing": "after_action", "target_id": ally.id},
+                    move_squares,
+                    position_index,
                 )
 
     bless_targets = choose_paladin_bless_targets(state, actor)
@@ -3000,14 +3156,20 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
         and not unit_is_concentrating_on(actor, "bless")
         and len(bless_targets) >= 2
     ):
-        return TurnDecision(
-            action={
-                "kind": "cast_spell",
-                "spell_id": "bless",
-                "spell_level": choose_paladin_bless_spell_level(actor),
-                "target_id": bless_targets[0],
-                "target_ids": bless_targets,
-            }
+        return apply_paladin_post_action_positioning(
+            state,
+            actor,
+            TurnDecision(
+                action={
+                    "kind": "cast_spell",
+                    "spell_id": "bless",
+                    "spell_level": choose_paladin_bless_spell_level(actor),
+                    "target_id": bless_targets[0],
+                    "target_ids": bless_targets,
+                }
+            ),
+            move_squares,
+            position_index,
         )
 
     bonus_action: dict[str, str] | None = None
@@ -3021,22 +3183,34 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
 
     cure_target = get_paladin_cure_target(state, actor)
     if cure_target:
-        return TurnDecision(action={"kind": "cast_spell", "spell_id": "cure_wounds", "target_id": cure_target.id})
+        return apply_paladin_post_action_positioning(
+            state,
+            actor,
+            TurnDecision(action={"kind": "cast_spell", "spell_id": "cure_wounds", "target_id": cure_target.id}),
+            move_squares,
+            position_index,
+        )
 
     natures_wrath_plan = choose_natures_wrath_plan(state, actor, move_squares, position_index)
     if natures_wrath_plan:
         natures_wrath_square, natures_wrath_target_ids = natures_wrath_plan
-        return TurnDecision(
-            bonus_action=bonus_action,
-            pre_action_movement=(
-                MovementPlan(path=natures_wrath_square.path, mode="move") if natures_wrath_square.distance > 0 else None
+        return apply_paladin_post_action_positioning(
+            state,
+            actor,
+            TurnDecision(
+                bonus_action=bonus_action,
+                pre_action_movement=(
+                    MovementPlan(path=natures_wrath_square.path, mode="move") if natures_wrath_square.distance > 0 else None
+                ),
+                action={
+                    "kind": "special_action",
+                    "action_id": "natures_wrath",
+                    "target_id": natures_wrath_target_ids[0],
+                    "target_ids": natures_wrath_target_ids,
+                },
             ),
-            action={
-                "kind": "special_action",
-                "action_id": "natures_wrath",
-                "target_id": natures_wrath_target_ids[0],
-                "target_ids": natures_wrath_target_ids,
-            },
+            move_squares,
+            position_index,
         )
 
     conscious_enemies = sort_player_combat_targets(
@@ -3056,15 +3230,21 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
 
     melee_option = get_smart_melee_attack_option(state, actor, melee_targets, move_squares, melee_weapon_id, position_index)
     if melee_option:
-        return finalize_player_turn_decision(
+        return apply_paladin_post_action_positioning(
             state,
             actor,
-            TurnDecision(
-                bonus_action=bonus_action,
-                pre_action_movement=MovementPlan(path=melee_option.path, mode="move") if melee_option.distance > 0 else None,
-                action={"kind": "attack", "target_id": melee_option.target.id, "weapon_id": melee_weapon_id},
+            finalize_player_turn_decision(
+                state,
+                actor,
+                TurnDecision(
+                    bonus_action=bonus_action,
+                    pre_action_movement=MovementPlan(path=melee_option.path, mode="move") if melee_option.distance > 0 else None,
+                    action={"kind": "attack", "target_id": melee_option.target.id, "weapon_id": melee_weapon_id},
+                ),
+                melee_weapon_id,
+                position_index,
             ),
-            melee_weapon_id,
+            move_squares,
             position_index,
         )
 
@@ -3080,11 +3260,23 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
             bonus_action,
         )
         if ranged_decision:
-            return finalize_player_turn_decision(state, actor, ranged_decision, melee_weapon_id, position_index)
+            return apply_paladin_post_action_positioning(
+                state,
+                actor,
+                finalize_player_turn_decision(state, actor, ranged_decision, melee_weapon_id, position_index),
+                move_squares,
+                position_index,
+            )
 
     nearest_target = melee_targets[0] if melee_targets else None
     if not nearest_target:
-        return TurnDecision(bonus_action=bonus_action, action={"kind": "skip", "reason": "No enemies remain."})
+        return apply_paladin_post_action_positioning(
+            state,
+            actor,
+            TurnDecision(bonus_action=bonus_action, action={"kind": "skip", "reason": "No enemies remain."}),
+            move_squares,
+            position_index,
+        )
 
     dash_path = find_preferred_advance_path(state, actor.id, nearest_target.id, dash_squares, False, position_index)
     if dash_path and dash_path.distance > 0:
@@ -3100,11 +3292,17 @@ def get_player_paladin_decision(state: EncounterState, actor: UnitState) -> Turn
             position_index,
         )
 
-    return finalize_player_turn_decision(
+    return apply_paladin_post_action_positioning(
         state,
         actor,
-        TurnDecision(bonus_action=bonus_action, action={"kind": "skip", "reason": "No legal movement remains."}),
-        melee_weapon_id,
+        finalize_player_turn_decision(
+            state,
+            actor,
+            TurnDecision(bonus_action=bonus_action, action={"kind": "skip", "reason": "No legal movement remains."}),
+            melee_weapon_id,
+            position_index,
+        ),
+        move_squares,
         position_index,
     )
 
@@ -3113,6 +3311,39 @@ def get_planned_attack_position(actor: UnitState, decision: TurnDecision) -> Gri
     if decision.pre_action_movement and decision.pre_action_movement.path:
         return decision.pre_action_movement.path[-1]
     return actor.position
+
+
+def get_planned_final_position(actor: UnitState, decision: TurnDecision) -> GridPosition | None:
+    for movement in (decision.post_action_movement, decision.between_action_movement, decision.pre_action_movement):
+        if movement and movement.path:
+            return movement.path[-1]
+    return actor.position
+
+
+def planned_attack_has_advantage(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    weapon: WeaponProfile,
+    attack_position: GridPosition,
+    position_index: PositionIndex | None = None,
+) -> bool:
+    target = state.units.get(decision.action.get("target_id", ""))
+    if not target or not target.position:
+        return False
+
+    context = get_attack_context(
+        state,
+        actor.id,
+        target.id,
+        weapon,
+        attack_position,
+        target.position,
+        position_index,
+    )
+    if not context.legal:
+        return False
+    return get_attack_mode_for_context(state, actor, target, weapon, context) == "advantage"
 
 
 def sort_monk_bonus_strike_targets(
@@ -3538,28 +3769,43 @@ def apply_rogue_cunning_action(
     attack_position = get_planned_attack_position(actor, decision)
     if not attack_position:
         return decision
+    final_position = get_planned_final_position(actor, decision)
 
     starts_in_hide_square = bool(
         actor.position and can_attempt_hide_from_position(state, actor.id, actor.position, position_index)
     )
     ends_in_hide_square = can_attempt_hide_from_position(state, actor.id, attack_position, position_index)
+    final_hide_square = bool(
+        final_position and decision.post_action_movement and can_attempt_hide_from_position(state, actor.id, final_position, position_index)
+    )
+    attack_has_advantage = planned_attack_has_advantage(state, actor, decision, weapon, attack_position, position_index)
 
     if is_player_ranged_skirmisher(actor):
-        if not decision.pre_action_movement and starts_in_hide_square:
+        if not decision.pre_action_movement and starts_in_hide_square and not attack_has_advantage:
             decision.bonus_action = {"kind": "hide", "timing": "before_action"}
             decision.post_action_movement = None
             return decision
 
-        if ends_in_hide_square and (
-            use_class_smart_delta(state, "rogue_hide_setup") or not decision.pre_action_movement
-        ):
+        if final_hide_square:
+            decision.bonus_action = {"kind": "hide", "timing": "after_movement"}
+            return decision
+
+        if not decision.pre_action_movement and starts_in_hide_square:
             decision.bonus_action = {"kind": "hide", "timing": "after_action"}
             decision.post_action_movement = None
             return decision
 
-    if is_player_melee_opportunist(actor) and use_class_smart_delta(state, "rogue_melee_hide") and ends_in_hide_square:
+        if ends_in_hide_square and not decision.post_action_movement:
+            decision.bonus_action = {"kind": "hide", "timing": "after_action"}
+            return decision
+
+    if (
+        is_player_melee_opportunist(actor)
+        and use_class_smart_delta(state, "rogue_melee_hide")
+        and ends_in_hide_square
+        and not decision.post_action_movement
+    ):
         decision.bonus_action = {"kind": "hide", "timing": "after_action"}
-        decision.post_action_movement = None
 
     return decision
 
@@ -4242,12 +4488,13 @@ def get_opening_flight_landing_decision(state: EncounterState, actor: UnitState)
 
 def get_available_dragon_breath_actions(actor: UnitState) -> tuple[DragonBreathActionDefinition, ...]:
     definition = get_monster_definition_for_unit(actor)
-    return tuple(
-        DRAGON_BREATH_ACTIONS[action_id]
-        for action_id in definition.special_action_ids
-        if action_id in DRAGON_BREATH_ACTIONS
-        and actor.resource_pools.get(DRAGON_BREATH_ACTIONS[action_id].resource_pool_id, 0) > 0
-    )
+    breath_actions: list[DragonBreathActionDefinition] = []
+    for action_id in definition.special_action_ids:
+        profile_id = definition.dragon_breath_profile_ids.get(action_id, action_id)
+        breath = DRAGON_BREATH_ACTIONS.get(profile_id)
+        if breath and actor.resource_pools.get(breath.resource_pool_id, 0) > 0:
+            breath_actions.append(breath)
+    return tuple(breath_actions)
 
 
 def build_dragon_breath_action(breath: DragonBreathActionDefinition, targeting) -> dict[str, str]:

@@ -37,6 +37,7 @@ from backend.engine.models.state import (
     DamageComponentResult,
     DivineFavorEffect,
     EncounterConfig,
+    FrightenedEffect,
     GrappledEffect,
     GridPosition,
     HeroismEffect,
@@ -2672,7 +2673,7 @@ def test_heroism_applies_concentration_effect_spends_slot_and_grants_start_turn_
     assert heroism_event.resolved_totals["temporaryHitPointAmount"] == encounter.units["F1"].ability_mods.cha
     assert heroism_event.resolved_totals["startOfTurnUpkeep"] is True
     assert heroism_event.resolved_totals["immediateTemporaryHitPointsApplied"] is False
-    assert heroism_event.resolved_totals["frightenedImmunityModeled"] is False
+    assert heroism_event.resolved_totals["frightenedImmunityModeled"] is True
     assert heroism_event.resolved_totals["spellSlotsLevel1Remaining"] == 1
     assert "Heroism" in heroism_event.text_summary
     assert any(effect.kind == "concentration" and effect.spell_id == "heroism" for effect in encounter.units["F1"].temporary_effects)
@@ -2686,8 +2687,30 @@ def test_heroism_applies_concentration_effect_spends_slot_and_grants_start_turn_
     assert start_event.resolved_totals["temporaryHitPointTotal"] == encounter.units["F1"].ability_mods.cha
     assert start_event.resolved_totals["temporaryHitPointsGained"] == encounter.units["F1"].ability_mods.cha
     assert start_event.resolved_totals["newTemporaryHitPoints"] == encounter.units["F1"].ability_mods.cha
-    assert start_event.resolved_totals["frightenedImmunityModeled"] is False
+    assert start_event.resolved_totals["frightenedImmunityModeled"] is True
     assert encounter.units["F2"].temporary_hit_points == encounter.units["F1"].ability_mods.cha
+
+
+def test_heroism_removes_existing_frightened_effect_and_models_immunity() -> None:
+    encounter = create_encounter(build_paladin_config("paladin-heroism-frightened"))
+    prepare_heroism_test_paladin(encounter)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F2"].temporary_effects.append(FrightenedEffect(kind="frightened_by", source_id="E1", save_dc=14))
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "heroism", "target_id": "F2"},
+    )
+
+    assert spell_events[0].resolved_totals["frightenedImmunityModeled"] is True
+    assert "F2 is no longer frightened." in spell_events[0].condition_deltas
+    assert not any(effect.kind == "frightened_by" for effect in encounter.units["F2"].temporary_effects)
+    assert any(
+        isinstance(effect, HeroismEffect) and effect.frightened_immunity_modeled is True
+        for effect in encounter.units["F2"].temporary_effects
+    )
 
 
 def test_heroism_start_turn_upkeep_does_not_replace_higher_temporary_hp() -> None:
@@ -5692,6 +5715,104 @@ def test_execute_decision_rejects_steady_aim_when_movement_is_planned() -> None:
     assert [event.event_type for event in events] == ["skip"]
     assert events[0].resolved_totals["reason"] == "Steady Aim cannot be used on a turn with planned movement."
     assert encounter.units["F1"]._steady_aim_active_this_turn is False
+
+
+def test_after_movement_hide_resolves_after_post_action_movement() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-after-movement-hide"))
+    encounter.units["F1"].position = GridPosition(x=3, y=8)
+    encounter.units["F1"].combat_skill_modifiers["stealth"] = 20
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+    encounter.units["E4"].current_hp = 100
+    defeat_other_enemies(encounter, "E4")
+    events: list = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"},
+            post_action_movement=MovementPlan(
+                path=[
+                    GridPosition(x=3, y=8),
+                    GridPosition(x=2, y=7),
+                    GridPosition(x=1, y=7),
+                ],
+                mode="move",
+            ),
+            bonus_action={"kind": "hide", "timing": "after_movement"},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert event_types == ["attack", "move", "phase_change"]
+    assert events[-1].raw_rolls["stealthRolls"]
+    assert events[-1].resolved_totals["success"] is True
+    assert any(effect.kind == "hidden" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_after_movement_hide_validates_the_final_square_after_interrupted_movement() -> None:
+    encounter = create_encounter(build_level3_rogue_config("rogue-after-movement-hide-invalid"))
+    encounter.units["F1"].position = GridPosition(x=3, y=8)
+    encounter.units["F1"].combat_skill_modifiers["stealth"] = 20
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+    encounter.units["E4"].current_hp = 100
+    defeat_other_enemies(encounter, "E4")
+    events: list = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"},
+            post_action_movement=MovementPlan(
+                path=[
+                    GridPosition(x=3, y=8),
+                    GridPosition(x=3, y=7),
+                ],
+                mode="move",
+            ),
+            bonus_action={"kind": "hide", "timing": "after_movement"},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    assert [event.event_type for event in events] == ["attack", "move", "skip"]
+    assert events[-1].resolved_totals["reason"] == "Cannot hide from the current position."
+    assert not any(effect.kind == "hidden" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_after_movement_disengage_does_not_retroactively_prevent_opportunity_attacks() -> None:
+    encounter = create_encounter(build_level2_rogue_config("rogue-after-movement-disengage-no-retroactive"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+    events: list = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "skip", "reason": "Testing after-movement Disengage timing."},
+            post_action_movement=MovementPlan(
+                path=[
+                    GridPosition(x=5, y=5),
+                    GridPosition(x=4, y=5),
+                    GridPosition(x=3, y=5),
+                ],
+                mode="move",
+            ),
+            bonus_action={"kind": "disengage", "timing": "after_movement"},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    assert any(event.event_type == "attack" and event.actor_id == "E1" for event in events)
+    move_event = next(event for event in events if event.event_type == "move")
+    assert move_event.resolved_totals["disengageApplied"] is False
 
 
 def test_sharpshooter_shortbow_ignores_half_cover_ac_bonus() -> None:

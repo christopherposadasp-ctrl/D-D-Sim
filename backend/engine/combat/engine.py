@@ -9,13 +9,24 @@ from backend.content.enemies import (
     unit_has_trait,
 )
 from backend.content.feature_definitions import unit_has_feature
-from backend.content.special_actions import DRAGON_BREATH_ACTIONS, DragonBreathActionDefinition, get_special_action
+from backend.content.special_actions import (
+    DRAGON_BREATH_ACTIONS,
+    LEGENDARY_CONE_FEAR_ACTIONS,
+    LEGENDARY_SPHERE_ACTIONS,
+    DragonBreathActionDefinition,
+    LegendaryConeFearActionDefinition,
+    LegendarySphereActionDefinition,
+    get_special_action,
+)
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.decision import (
     MovementPlan,
     TurnDecision,
+    build_melee_attack_options,
+    choose_closest_monster_melee_option,
     choose_turn_decision,
     get_enemy_melee_weapon_id,
+    get_move_squares,
     get_ranked_attack_targets,
     get_smart_precision_max_miss_margin,
     use_class_smart_delta,
@@ -23,6 +34,7 @@ from backend.engine.ai.decision import (
 from backend.engine.combat.setup import create_encounter
 from backend.engine.models.state import (
     CombatEvent,
+    ConcentrationEffect,
     DamageCandidate,
     DamageComponentResult,
     DamageDetails,
@@ -30,11 +42,13 @@ from backend.engine.models.state import (
     EncounterState,
     EncounterSummary,
     Footprint,
+    FrightenedEffect,
     GridPosition,
     MovementDetails,
     RageEffect,
     ReplayFrame,
     RunEncounterResult,
+    SpeedZeroEffect,
     StepEncounterResult,
     UnitState,
 )
@@ -55,10 +69,14 @@ from backend.engine.rules.combat_rules import (
     attempt_steady_aim,
     attempt_step_of_the_wind,
     build_cone_breath_targeting,
+    build_sphere_targeting,
     can_use_battle_master_maneuver,
     choose_cone_breath_targeting,
+    choose_sphere_targeting,
+    clear_frightened_effects,
     clear_invalid_hidden_effects,
     create_skip_event,
+    end_concentration,
     event_base,
     expire_turn_effects,
     format_effect_kinds,
@@ -80,6 +98,8 @@ from backend.engine.rules.combat_rules import (
     resolve_restrained_end_of_turn_save,
     resolve_saving_throw,
     resolve_single_target_save_spell,
+    unit_is_frightened_by_source,
+    unit_is_frightened_immune,
 )
 from backend.engine.rules.spatial import (
     build_position_index,
@@ -90,10 +110,13 @@ from backend.engine.rules.spatial import (
     get_melee_reach_squares,
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
+    get_reachable_squares,
     get_swallow_source_id,
     get_unit_footprint,
+    has_line_of_sight_between_units,
     is_active_grapple,
     is_unit_swallowed,
+    path_provokes_opportunity_attack,
 )
 from backend.engine.utils.helpers import (
     clone_value,
@@ -156,6 +179,737 @@ def add_unit_phase_event(
         condition_deltas=condition_deltas or [],
         text_summary=text_summary,
     )
+
+
+def get_legendary_action_ids_for_unit(unit: UnitState) -> tuple[str, ...]:
+    try:
+        return get_monster_definition_for_unit(unit).legendary_action_ids
+    except ValueError:
+        return ()
+
+
+def reset_legendary_action_uses_at_turn_start(state: EncounterState, actor_id: str) -> None:
+    actor = state.units[actor_id]
+    if actor.conditions.dead or actor.current_hp <= 0:
+        return
+    legendary_action_ids = get_legendary_action_ids_for_unit(actor)
+    if legendary_action_ids and "legendary_action_uses" in actor.resource_pools:
+        actor.resource_pools["legendary_action_uses"] = 3
+    for action_id in legendary_action_ids:
+        sphere_action = LEGENDARY_SPHERE_ACTIONS.get(action_id)
+        if sphere_action and sphere_action.resource_pool_id in actor.resource_pools:
+            actor.resource_pools[sphere_action.resource_pool_id] = 1
+        fear_action = LEGENDARY_CONE_FEAR_ACTIONS.get(action_id)
+        if fear_action and fear_action.resource_pool_id in actor.resource_pools:
+            actor.resource_pools[fear_action.resource_pool_id] = 1
+
+
+def choose_legendary_pounce_option(state: EncounterState, actor: UnitState):
+    if "pounce" not in get_legendary_action_ids_for_unit(actor):
+        return None
+    if "rend" not in actor.attacks or not actor.position:
+        return None
+
+    targets = sorted(
+        [
+            unit
+            for unit in state.units.values()
+            if unit.faction != actor.faction and is_unit_conscious(unit) and unit.position
+        ],
+        key=lambda unit: (get_min_chebyshev_distance_between_footprints(actor.position, actor.footprint, unit.position, unit.footprint), unit.current_hp, unit.id),
+    )
+    if not targets:
+        return None
+
+    position_index = build_position_index(state)
+    pounce_move_squares = max(0, get_move_squares(state, actor) // 2)
+    return choose_closest_monster_melee_option(
+        build_melee_attack_options(
+            state,
+            actor,
+            targets,
+            pounce_move_squares,
+            "rend",
+            False,
+            position_index,
+            allow_intentional_opportunity_attacks=False,
+        )
+    )
+
+
+def resolve_legendary_pounce(state: EncounterState, actor_id: str) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    option = choose_legendary_pounce_option(state, actor)
+    if not option:
+        return []
+
+    actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    events = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            option.target.id,
+            f"{actor_id} uses Legendary Action: Pounce.",
+            condition_deltas=[f"{actor_id} spends 1 legendary action use on Pounce."],
+            resolved_totals={
+                "legendaryAction": "pounce",
+                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+            },
+        )
+    ]
+
+    if option.distance > 0:
+        movement_events, movement_halted = execute_movement(
+            state,
+            actor_id,
+            MovementPlan(path=option.path, mode="move"),
+            False,
+            "legendary_action",
+        )
+        events.extend(movement_events)
+        if movement_halted or not can_act_after_movement(actor):
+            return events
+
+    if option.target.conditions.dead or option.target.current_hp <= 0:
+        return events
+    attack_event, _ = resolve_attack(
+        state,
+        ResolveAttackArgs(
+            attacker_id=actor_id,
+            target_id=option.target.id,
+            weapon_id="rend",
+            savage_attacker_available=False,
+            great_weapon_master_eligible=True,
+        ),
+    )
+    events.extend(build_attack_reaction_pre_events(state, attack_event))
+    events.extend(build_attack_reaction_phase_events(state, attack_event))
+    events.append(attack_event)
+    events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
+    events.extend(maybe_resolve_sentinel_guardian_follow_up(state, attack_event))
+    for target_id in attack_event.target_ids:
+        if state.units[target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, target_id))
+    return events
+
+
+def get_legendary_sphere_action_for_unit(
+    unit: UnitState, action_id: str
+) -> LegendarySphereActionDefinition | None:
+    if action_id not in get_legendary_action_ids_for_unit(unit):
+        return None
+    return LEGENDARY_SPHERE_ACTIONS.get(action_id)
+
+
+def choose_legendary_freezing_burst_targeting(state: EncounterState, actor: UnitState):
+    burst = get_legendary_sphere_action_for_unit(actor, "freezing_burst")
+    if not burst or actor.resource_pools.get(burst.resource_pool_id, 0) <= 0:
+        return None
+    return choose_sphere_targeting(
+        state,
+        actor.id,
+        minimum_enemy_targets=2,
+        allow_allies=False,
+        radius_squares=burst.radius_squares,
+        range_squares=burst.range_squares,
+    )
+
+
+def build_legendary_sphere_damage_component(
+    action: LegendarySphereActionDefinition, base_rolls: list[int], applied_damage: int
+) -> list[DamageComponentResult]:
+    return [
+        DamageComponentResult(
+            damage_type=action.damage_type,
+            raw_rolls=list(base_rolls),
+            adjusted_rolls=list(base_rolls),
+            subtotal=sum(base_rolls),
+            flat_modifier=0,
+            total_damage=applied_damage,
+        )
+    ]
+
+
+def apply_speed_zero_until_target_turn_end(state: EncounterState, source_id: str, target_id: str) -> list[str]:
+    target = state.units[target_id]
+    target.temporary_effects = [
+        effect
+        for effect in target.temporary_effects
+        if not (effect.kind == "speed_zero" and effect.source_id == source_id)
+    ]
+    target.temporary_effects.append(
+        SpeedZeroEffect(kind="speed_zero", source_id=source_id, expires_at_turn_end_of=target_id)
+    )
+    recalculate_effective_speed_for_unit(target)
+    return [f"{target_id}'s Speed becomes 0 until the end of its next turn."]
+
+
+def resolve_legendary_freezing_burst(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object] | None = None,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    burst = get_legendary_sphere_action_for_unit(actor, "freezing_burst")
+    if not burst:
+        return []
+    if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+        return []
+    if actor.resource_pools.get(burst.resource_pool_id, 0) <= 0:
+        return []
+
+    targeting = None
+    action = action or {}
+    if "center_x" in action and "center_y" in action:
+        target_id = action.get("target_id")
+        targeting = build_sphere_targeting(
+            state,
+            actor_id,
+            center=GridPosition(x=int(action["center_x"]), y=int(action["center_y"])),
+            radius_squares=burst.radius_squares,
+            range_squares=burst.range_squares,
+            required_primary_target_id=str(target_id) if isinstance(target_id, str) else None,
+        )
+    else:
+        targeting = choose_legendary_freezing_burst_targeting(state, actor)
+    if not targeting:
+        return []
+
+    actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    actor.resource_pools[burst.resource_pool_id] = 0
+
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
+    damage_rolls = [
+        pull_die(state, burst.damage_die_sides, damage_rolls_override.pop(0) if damage_rolls_override else None)
+        for _ in range(burst.damage_die_count)
+    ]
+    full_damage = sum(damage_rolls)
+
+    events: list[CombatEvent] = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            targeting.primary_target_id,
+            f"{actor_id} uses Legendary Action: {burst.display_name}.",
+            condition_deltas=[
+                f"{actor_id} spends 1 legendary action use on {burst.display_name}.",
+                f"{actor_id} cannot use {burst.display_name} again until the start of its next turn.",
+            ],
+            resolved_totals={
+                "legendaryAction": burst.action_id,
+                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+                "freezingBurstAvailable": actor.resource_pools.get(burst.resource_pool_id, 0),
+                "center": format_position(targeting.center),
+                "enemyTargetCount": len(targeting.enemy_target_ids),
+                "allyTargetCount": len(targeting.ally_target_ids),
+            },
+        )
+    ]
+
+    for resolved_target_id in targeting.target_ids:
+        target = state.units[resolved_target_id]
+        save_mode, _, _ = get_saving_throw_mode(target, burst.save_ability)
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=resolved_target_id,
+                ability=burst.save_ability,
+                dc=burst.save_dc,
+                reason=burst.display_name,
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        applied_damage = 0 if save_success else full_damage
+        damage_components = build_legendary_sphere_damage_component(burst, damage_rolls, applied_damage)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            damage_components,
+            False,
+            concentration_save_rolls=concentration_rolls_override,
+        )
+        events.append(save_event)
+
+        condition_deltas = list(damage_result.condition_deltas)
+        speed_zero_applied = False
+        target_after_damage = state.units[resolved_target_id]
+        if (
+            not save_success
+            and burst.speed_zero_on_failed_save
+            and target_after_damage.current_hp > 0
+            and not target_after_damage.conditions.dead
+            and not target_after_damage.conditions.unconscious
+        ):
+            condition_deltas.extend(apply_speed_zero_until_target_turn_end(state, actor_id, resolved_target_id))
+            speed_zero_applied = True
+
+        raw_rolls = {"damageRolls": list(damage_rolls)}
+        resolved_totals = {
+            "legendaryAction": burst.action_id,
+            "saveAbility": burst.save_ability,
+            "saveDc": burst.save_dc,
+            "saveSucceeded": save_success,
+            "fullDamage": full_damage,
+            "speedZeroApplied": speed_zero_applied,
+        }
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
+        events.append(
+            CombatEvent(
+                **event_base(state, actor_id),
+                target_ids=[resolved_target_id],
+                event_type="attack",
+                raw_rolls=raw_rolls,
+                resolved_totals=resolved_totals,
+                movement_details=None,
+                damage_details=DamageDetails(
+                    weapon_id=burst.action_id,
+                    weapon_name=burst.display_name,
+                    damage_components=damage_components,
+                    primary_candidate=None,
+                    savage_candidate=None,
+                    chosen_candidate=None,
+                    critical_applied=False,
+                    critical_multiplier=1,
+                    flat_modifier=0,
+                    advantage_bonus_candidate=None,
+                    mastery_applied=None,
+                    mastery_notes=None,
+                    attack_riders_applied=None,
+                    total_damage=applied_damage,
+                    resisted_damage=damage_result.resisted_damage,
+                    amplified_damage=damage_result.amplified_damage or None,
+                    temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                    final_damage_to_hp=damage_result.final_damage_to_hp,
+                    hp_delta=damage_result.hp_delta,
+                ),
+                condition_deltas=condition_deltas,
+                text_summary=(
+                    f"{actor_id}'s {burst.display_name} hits {resolved_target_id} for "
+                    f"{applied_damage} {burst.damage_type} damage"
+                    f"{' after a successful save' if save_success else ' after a failed save'}"
+                    f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                    f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+                ),
+            )
+        )
+
+        if state.units[resolved_target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+
+    return events
+
+
+FRIGHTFUL_PRESENCE_DIRECTIONS = ("e", "n", "ne", "nw", "s", "se", "sw", "w")
+
+
+def get_legendary_cone_fear_action_for_unit(
+    unit: UnitState, action_id: str
+) -> LegendaryConeFearActionDefinition | None:
+    if action_id not in get_legendary_action_ids_for_unit(unit):
+        return None
+    return LEGENDARY_CONE_FEAR_ACTIONS.get(action_id)
+
+
+def target_is_eligible_for_frightful_presence(state: EncounterState, source_id: str, target_id: str) -> bool:
+    target = state.units[target_id]
+    return (
+        target.current_hp > 0
+        and not target.conditions.dead
+        and not target.conditions.unconscious
+        and not unit_is_frightened_immune(state, target)
+        and not any(effect.kind == "frightened_by" and effect.source_id == source_id for effect in target.temporary_effects)
+    )
+
+
+def choose_legendary_frightful_presence_targeting(state: EncounterState, actor: UnitState):
+    fear = get_legendary_cone_fear_action_for_unit(actor, "frightful_presence")
+    if not fear or actor.resource_pools.get(fear.resource_pool_id, 0) <= 0 or not actor.position:
+        return None
+
+    candidates = []
+    for origin in get_occupied_squares_for_position(actor.position, get_unit_footprint(actor)):
+        for direction in FRIGHTFUL_PRESENCE_DIRECTIONS:
+            targeting = build_cone_breath_targeting(
+                state,
+                actor.id,
+                origin=origin,
+                direction=direction,
+                range_squares=fear.range_squares,
+            )
+            if not targeting or targeting.ally_target_ids:
+                continue
+            eligible_target_ids = tuple(
+                target_id
+                for target_id in targeting.enemy_target_ids
+                if target_is_eligible_for_frightful_presence(state, actor.id, target_id)
+            )
+            if len(eligible_target_ids) < 2:
+                continue
+            candidates.append((targeting, eligible_target_ids))
+
+    if not candidates:
+        return None
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            -len(candidate[1]),
+            candidate[0].primary_target_id,
+            candidate[0].origin.x,
+            candidate[0].origin.y,
+            candidate[0].direction,
+            candidate[0].target_ids,
+        ),
+    )[0][0]
+
+
+def apply_frightened_effect(
+    state: EncounterState,
+    source_id: str,
+    target_id: str,
+    save_dc: int,
+) -> tuple[bool, list[str]]:
+    target = state.units[target_id]
+    if unit_is_frightened_immune(state, target):
+        return False, [f"{target_id} is immune to being frightened."]
+    if any(effect.kind == "frightened_by" and effect.source_id == source_id for effect in target.temporary_effects):
+        return False, [f"{target_id} is already frightened by {source_id}."]
+
+    target.temporary_effects.append(FrightenedEffect(kind="frightened_by", source_id=source_id, save_dc=save_dc))
+    return True, [f"{target_id} is frightened by {source_id}."]
+
+
+def resolve_legendary_frightful_presence(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object] | None = None,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    fear = get_legendary_cone_fear_action_for_unit(actor, "frightful_presence")
+    if not fear:
+        return []
+    if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+        return []
+    if actor.resource_pools.get(fear.resource_pool_id, 0) <= 0:
+        return []
+
+    action = action or {}
+    targeting = None
+    if "origin_x" in action and "origin_y" in action and "direction" in action:
+        target_id = action.get("target_id")
+        targeting = build_cone_breath_targeting(
+            state,
+            actor_id,
+            origin=GridPosition(x=int(action["origin_x"]), y=int(action["origin_y"])),
+            direction=str(action["direction"]),
+            range_squares=fear.range_squares,
+            required_primary_target_id=str(target_id) if isinstance(target_id, str) else None,
+        )
+    else:
+        targeting = choose_legendary_frightful_presence_targeting(state, actor)
+    if not targeting:
+        return []
+
+    actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    actor.resource_pools[fear.resource_pool_id] = 0
+    concentration_deltas = end_concentration(
+        state,
+        actor_id,
+        reason=f"{actor_id}'s prior concentration ends before using {fear.display_name}.",
+    )
+    actor.temporary_effects.append(
+        ConcentrationEffect(kind="concentration", source_id=actor_id, spell_id="fear", remaining_rounds=fear.duration_rounds)
+    )
+
+    events: list[CombatEvent] = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            targeting.primary_target_id,
+            f"{actor_id} uses Legendary Action: {fear.display_name}.",
+            condition_deltas=concentration_deltas
+            + [
+                f"{actor_id} spends 1 legendary action use on {fear.display_name}.",
+                f"{actor_id} cannot use {fear.display_name} again until the start of its next turn.",
+            ],
+            resolved_totals={
+                "legendaryAction": fear.action_id,
+                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+                "frightfulPresenceAvailable": actor.resource_pools.get(fear.resource_pool_id, 0),
+                "origin": format_position(targeting.origin),
+                "direction": targeting.direction,
+                "enemyTargetCount": len(targeting.enemy_target_ids),
+                "allyTargetCount": len(targeting.ally_target_ids),
+                "concentration": True,
+                "spellId": "fear",
+            },
+        )
+    ]
+
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    for resolved_target_id in targeting.target_ids:
+        target = state.units[resolved_target_id]
+        if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+            continue
+        if unit_is_frightened_immune(state, target):
+            events.append(
+                add_unit_phase_event(
+                    state,
+                    actor_id,
+                    resolved_target_id,
+                    f"{resolved_target_id} is immune to {fear.display_name}.",
+                    condition_deltas=[f"{resolved_target_id} is immune to being frightened."],
+                    resolved_totals={
+                        "legendaryAction": fear.action_id,
+                        "frightenedApplied": False,
+                        "frightenedImmune": True,
+                    },
+                )
+            )
+            continue
+        if any(effect.kind == "frightened_by" and effect.source_id == actor_id for effect in target.temporary_effects):
+            events.append(
+                add_unit_phase_event(
+                    state,
+                    actor_id,
+                    resolved_target_id,
+                    f"{resolved_target_id} is already frightened by {actor_id}.",
+                    condition_deltas=[f"{resolved_target_id} is already frightened by {actor_id}."],
+                    resolved_totals={
+                        "legendaryAction": fear.action_id,
+                        "frightenedApplied": False,
+                        "frightenedAlreadyActive": True,
+                    },
+                )
+            )
+            continue
+
+        save_mode, _, _ = get_saving_throw_mode(target, fear.save_ability)
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=resolved_target_id,
+                ability=fear.save_ability,
+                dc=fear.save_dc,
+                reason=fear.display_name,
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        frightened_applied = False
+        if not save_success:
+            frightened_applied, frightened_deltas = apply_frightened_effect(
+                state,
+                actor_id,
+                resolved_target_id,
+                fear.save_dc,
+            )
+            save_event.condition_deltas.extend(frightened_deltas)
+        save_event.resolved_totals["legendaryAction"] = fear.action_id
+        save_event.resolved_totals["frightenedApplied"] = frightened_applied
+        save_event.resolved_totals["frightenedImmune"] = False
+        events.append(save_event)
+
+    return events
+
+
+def resolve_legendary_actions_after_turn(state: EncounterState, triggering_actor_id: str) -> list[CombatEvent]:
+    triggering_actor = state.units[triggering_actor_id]
+    if "dragon" in triggering_actor.creature_tags:
+        return []
+    if fighters_defeated(state) or goblins_defeated(state):
+        return []
+
+    events: list[CombatEvent] = []
+    for actor in sorted(state.units.values(), key=lambda unit: unit_sort_key(unit.id)):
+        if actor.id == triggering_actor_id:
+            continue
+        if actor.conditions.dead or actor.conditions.unconscious or actor.current_hp <= 0:
+            continue
+        if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+            continue
+        legendary_action_ids = get_legendary_action_ids_for_unit(actor)
+        if "freezing_burst" in legendary_action_ids:
+            freezing_events = resolve_legendary_freezing_burst(state, actor.id)
+            if freezing_events:
+                events.extend(freezing_events)
+                if fighters_defeated(state) or goblins_defeated(state):
+                    break
+                continue
+        if "frightful_presence" in legendary_action_ids:
+            frightful_events = resolve_legendary_frightful_presence(state, actor.id)
+            if frightful_events:
+                events.extend(frightful_events)
+                if fighters_defeated(state) or goblins_defeated(state):
+                    break
+                continue
+        if "pounce" in legendary_action_ids:
+            events.extend(resolve_legendary_pounce(state, actor.id))
+        if fighters_defeated(state) or goblins_defeated(state):
+            break
+    return events
+
+
+def get_active_visible_frightened_effect(state: EncounterState, actor: UnitState) -> FrightenedEffect | None:
+    if actor.conditions.dead or actor.current_hp <= 0 or actor.conditions.unconscious:
+        return None
+    for effect in actor.temporary_effects:
+        if effect.kind == "frightened_by" and unit_is_frightened_by_source(state, actor, effect.source_id):
+            return effect
+    return None
+
+
+def choose_frightened_dash_path(state: EncounterState, actor: UnitState, source_id: str) -> list[GridPosition] | None:
+    source = state.units.get(source_id)
+    if not actor.position or not source or not source.position:
+        return None
+
+    position_index = build_position_index(state)
+    current_distance = get_min_chebyshev_distance_between_footprints(
+        actor.position,
+        get_unit_footprint(actor),
+        source.position,
+        get_unit_footprint(source),
+    )
+    reachable = get_reachable_squares(state, actor.id, get_move_squares(state, actor) * 2, position_index)
+    candidates = [
+        square
+        for square in reachable
+        if square.distance > 0
+        and get_min_chebyshev_distance_between_footprints(
+            square.position,
+            get_unit_footprint(actor),
+            source.position,
+            get_unit_footprint(source),
+        )
+        > current_distance
+    ]
+    if not candidates:
+        return None
+
+    return sorted(
+        candidates,
+        key=lambda square: (
+            path_provokes_opportunity_attack(state, actor.id, square.path, position_index),
+            -get_min_chebyshev_distance_between_footprints(
+                square.position,
+                get_unit_footprint(actor),
+                source.position,
+                get_unit_footprint(source),
+            ),
+            square.distance,
+            square.position.x,
+            square.position.y,
+        ),
+    )[0].path
+
+
+def resolve_frightened_forced_turn(state: EncounterState, actor_id: str) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    effect = get_active_visible_frightened_effect(state, actor)
+    if not effect:
+        return []
+
+    source_id = effect.source_id
+    events = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            source_id,
+            f"{actor_id} is frightened by {source_id} and must Dash away.",
+            condition_deltas=[f"{actor_id} uses its action to Dash away from {source_id}."],
+            resolved_totals={
+                "forcedByCondition": "frightened",
+                "sourceId": source_id,
+                "normalActionSkipped": True,
+            },
+        )
+    ]
+    dash_path = choose_frightened_dash_path(state, actor, source_id)
+    if dash_path:
+        movement_events, _movement_halted = execute_movement(
+            state,
+            actor_id,
+            MovementPlan(path=dash_path, mode="dash"),
+            False,
+            "frightened",
+        )
+        events.extend(movement_events)
+    else:
+        events.append(create_skip_event(state, actor_id, "Frightened but nowhere safer to move."))
+    return events
+
+
+def resolve_frightened_end_of_turn_save(state: EncounterState, actor_id: str) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if not actor.temporary_effects:
+        return []
+
+    events: list[CombatEvent] = []
+    for effect in list(actor.temporary_effects):
+        if effect.kind != "frightened_by":
+            continue
+
+        source = state.units.get(effect.source_id)
+        if (
+            not source
+            or source.conditions.dead
+            or source.current_hp <= 0
+            or unit_is_frightened_immune(state, actor)
+        ):
+            removed_count = clear_frightened_effects(actor, effect.source_id)
+            if removed_count:
+                events.append(
+                    add_unit_phase_event(
+                        state,
+                        actor_id,
+                        effect.source_id,
+                        f"{actor_id} is no longer frightened by {effect.source_id}.",
+                        condition_deltas=[f"{actor_id} is no longer frightened by {effect.source_id}."],
+                        resolved_totals={
+                            "frightenedRemoved": True,
+                            "sourceId": effect.source_id,
+                            "reason": "source_gone_or_immune",
+                        },
+                    )
+                )
+            continue
+
+        if has_line_of_sight_between_units(state, actor_id, effect.source_id):
+            continue
+
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=actor_id,
+                ability="wis",
+                dc=effect.save_dc,
+                reason="Fear",
+                overrides=SavingThrowOverrides(),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        if save_success:
+            clear_frightened_effects(actor, effect.source_id)
+            save_event.condition_deltas.append(f"{actor_id} is no longer frightened by {effect.source_id}.")
+        else:
+            save_event.condition_deltas.append(f"{actor_id} remains frightened by {effect.source_id}.")
+        save_event.resolved_totals["sourceId"] = effect.source_id
+        save_event.resolved_totals["frightenedRemoved"] = save_success
+        events.append(save_event)
+
+    return events
 
 
 def build_attack_reaction_pre_events(state: EncounterState, attack_event: CombatEvent) -> list[CombatEvent]:
@@ -653,6 +1407,18 @@ def bonus_action_applies_disengage(bonus_action: dict[str, str] | None) -> bool:
     return action_prevents_opportunity_attacks(bonus_action["kind"])
 
 
+def bonus_action_applies_disengage_for_phase(bonus_action: dict[str, str] | None, phase: str) -> bool:
+    if not bonus_action_applies_disengage(bonus_action):
+        return False
+
+    timing = bonus_action.get("timing")
+    if timing == "before_action":
+        return phase in {"before_action", "between_actions", "after_action"}
+    if timing == "after_action":
+        return phase == "after_action"
+    return False
+
+
 def resolve_turn_start_posture(state: EncounterState, actor_id: str) -> list[CombatEvent]:
     actor = state.units[actor_id]
     actor._turn_stand_up_cost_squares = 0
@@ -1040,6 +1806,15 @@ def _breath_availability_total_key(action_id: str) -> str:
     return f"{prefix}BreathAvailable"
 
 
+def get_dragon_breath_profile_for_action(actor: UnitState, action_id: str) -> DragonBreathActionDefinition | None:
+    try:
+        definition = get_monster_definition_for_unit(actor)
+    except ValueError:
+        return None
+    profile_id = definition.dragon_breath_profile_ids.get(action_id, action_id)
+    return DRAGON_BREATH_ACTIONS.get(profile_id)
+
+
 def resolve_dragon_breath_recharge(
     state: EncounterState,
     actor_id: str,
@@ -1048,7 +1823,9 @@ def resolve_dragon_breath_recharge(
     roll_override: int | None = None,
 ) -> CombatEvent | None:
     actor = state.units[actor_id]
-    breath = DRAGON_BREATH_ACTIONS[action_id]
+    breath = get_dragon_breath_profile_for_action(actor, action_id)
+    if not breath:
+        return None
     if actor.current_hp <= 0 or actor.conditions.dead:
         return None
     if breath.resource_pool_id not in actor.resource_pools:
@@ -1111,10 +1888,9 @@ def resolve_dragon_breath_recharges(state: EncounterState, actor_id: str) -> lis
         return []
     events: list[CombatEvent] = []
     for action_id in definition.special_action_ids:
-        if action_id in DRAGON_BREATH_ACTIONS:
-            event = resolve_dragon_breath_recharge(state, actor_id, action_id)
-            if event:
-                events.append(event)
+        event = resolve_dragon_breath_recharge(state, actor_id, action_id)
+        if event:
+            events.append(event)
     return events
 
 
@@ -1248,14 +2024,18 @@ def resolve_dragon_cone_breath(
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
     action_id = str(action.get("action_id") or "")
-    if action_id not in DRAGON_BREATH_ACTIONS:
-        return [create_skip_event(state, actor_id, "Dragon breath action is not configured.")]
-    breath = DRAGON_BREATH_ACTIONS[action_id]
     actor = state.units[actor_id]
+    try:
+        definition = get_monster_definition_for_unit(actor)
+    except ValueError:
+        return [create_skip_event(state, actor_id, "Dragon breath action is not configured.")]
+    breath = get_dragon_breath_profile_for_action(actor, action_id)
+    if not breath:
+        return [create_skip_event(state, actor_id, "Dragon breath action is not configured.")]
     target_id = action.get("target_id")
     required_target_id = str(target_id) if isinstance(target_id, str) else None
 
-    if action_id not in get_monster_definition_for_unit(actor).special_action_ids:
+    if action_id not in definition.special_action_ids:
         return [create_skip_event(state, actor_id, f"{breath.display_name} is not available to this creature.")]
     if actor.resource_pools.get(breath.resource_pool_id, 0) <= 0:
         return [create_skip_event(state, actor_id, f"{breath.display_name} has not recharged.")]
@@ -1529,6 +2309,53 @@ def choose_attack_step_target_and_weapon(
             return target.id, selected_weapon_id
 
     return None
+
+
+def fighter_action_surge_has_baseline_value(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, str],
+    actor_position: GridPosition | None = None,
+) -> bool:
+    actor = state.units[actor_id]
+    if not unit_has_feature(actor, "action_surge") or action.get("kind") != "attack":
+        return True
+
+    preferred_target_id = action.get("target_id")
+    preferred_weapon_id = action.get("weapon_id")
+    preferred_weapon = actor.attacks.get(preferred_weapon_id or "")
+
+    # This Fighter is a great-weapon striker. Spend Action Surge freely when the
+    # current board still allows a preferred melee weapon attack.
+    if preferred_weapon and preferred_weapon.kind == "melee":
+        for target in get_ranked_attack_targets(
+            state,
+            actor,
+            preferred_target_id,
+            preferred_weapon_id=preferred_weapon_id,
+            action_id=action.get("attack_action_id"),
+        ):
+            if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+                continue
+            if get_attack_context(state, actor_id, target.id, preferred_weapon, attacker_position=actor_position).legal:
+                return True
+
+    # Ranged Action Surge is only a baseline exception when the surge was
+    # explicitly planned as a ranged finisher. Do not convert a stale greatsword
+    # surge into a two-javelin fallback after the melee target drops.
+    if not preferred_weapon or preferred_weapon.kind != "ranged" or not preferred_target_id:
+        return False
+
+    target = state.units.get(preferred_target_id)
+    if not target or target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+        return False
+    if preferred_weapon.resource_pool_id and actor.resources.get_pool(preferred_weapon.resource_pool_id) <= 0:
+        return False
+    if not get_attack_context(state, actor_id, target.id, preferred_weapon, attacker_position=actor_position).legal:
+        return False
+
+    attack_mode, _, _ = get_attack_mode(state, actor, actor_id, target, target.id, preferred_weapon)
+    return target.current_hp <= get_expected_weapon_damage(preferred_weapon, attack_mode)
 
 
 def choose_rampage_follow_up(state: EncounterState, actor_id: str, weapon_id: str) -> tuple[str, list[GridPosition]] | None:
@@ -2638,6 +3465,7 @@ def step_encounter_internal(
 
     events.extend(expire_turn_effects(next_state, actor_id))
     next_state.units[actor_id].reaction_available = True
+    reset_legendary_action_uses_at_turn_start(next_state, actor_id)
     events.extend(resolve_turn_start_posture(next_state, actor_id))
     events.extend(release_invalid_grappled_targets_at_turn_start(next_state, actor_id))
     events.extend(apply_start_of_turn_ongoing_effects(next_state, actor_id))
@@ -2659,7 +3487,11 @@ def step_encounter_internal(
         else:
             events.append(resolve_death_save(next_state, actor_id))
     else:
-        execute_decision(next_state, actor_id, choose_turn_decision(next_state, actor_id), events, rescue_mode=False)
+        frightened_events = resolve_frightened_forced_turn(next_state, actor_id)
+        if frightened_events:
+            events.extend(frightened_events)
+        else:
+            execute_decision(next_state, actor_id, choose_turn_decision(next_state, actor_id), events, rescue_mode=False)
 
     events.extend(resolve_turn_end_rage(next_state, actor_id))
     poisoned_save_event = resolve_poisoned_end_of_turn_save(next_state, actor_id)
@@ -2668,7 +3500,10 @@ def step_encounter_internal(
     restrained_save_event = resolve_restrained_end_of_turn_save(next_state, actor_id)
     if restrained_save_event:
         events.append(restrained_save_event)
+    events.extend(resolve_frightened_end_of_turn_save(next_state, actor_id))
     events.extend(expire_turn_end_effects(next_state, actor_id))
+    if not fighters_defeated(next_state) and not goblins_defeated(next_state):
+        events.extend(resolve_legendary_actions_after_turn(next_state, actor_id))
     events.extend(update_encounter_phase(next_state, actor_id))
     if record_log:
         next_state.combat_log.extend(events)
@@ -2704,7 +3539,7 @@ def execute_decision(
         return
 
     state.units[actor_id]._bonus_action_reserved_this_turn = bool(
-        decision.bonus_action and decision.bonus_action["timing"] == "after_action"
+        decision.bonus_action and decision.bonus_action["timing"] in {"after_action", "after_movement"}
     )
 
     if decision.bonus_action and decision.bonus_action["timing"] == "before_action":
@@ -2716,7 +3551,7 @@ def execute_decision(
         state,
         actor_id,
         decision.pre_action_movement,
-        bonus_action_applies_disengage(decision.bonus_action) and decision.bonus_action["timing"] == "before_action",
+        bonus_action_applies_disengage_for_phase(decision.bonus_action, "before_action"),
         "before_action",
     )
     events.extend(pre_events)
@@ -2725,7 +3560,16 @@ def execute_decision(
     if can_act_after_movement(state.units[actor_id]):
         resolve_turn_action(state, actor_id, decision.action, events, rescue_mode=rescue_mode)
 
-    if can_act_after_movement(state.units[actor_id]) and decision.surged_action:
+    surged_action_position = (
+        decision.between_action_movement.path[-1]
+        if decision.between_action_movement and decision.between_action_movement.path
+        else state.units[actor_id].position
+    )
+    if (
+        can_act_after_movement(state.units[actor_id])
+        and decision.surged_action
+        and fighter_action_surge_has_baseline_value(state, actor_id, decision.surged_action, surged_action_position)
+    ):
         action_surge_event = resolve_action_surge(state, actor_id)
         if action_surge_event:
             events.append(action_surge_event)
@@ -2735,7 +3579,7 @@ def execute_decision(
                 state,
                 actor_id,
                 decision.between_action_movement,
-                bonus_action_applies_disengage(decision.bonus_action),
+                bonus_action_applies_disengage_for_phase(decision.bonus_action, "between_actions"),
                 "between_actions",
             )
             events.extend(between_events)
@@ -2767,10 +3611,17 @@ def execute_decision(
             state,
             actor_id,
             post_action_movement,
-            bonus_action_applies_disengage(decision.bonus_action),
+            bonus_action_applies_disengage_for_phase(decision.bonus_action, "after_action"),
             "after_action",
         )
         events.extend(post_events)
+
+    if (
+        can_act_after_movement(state.units[actor_id])
+        and decision.bonus_action
+        and decision.bonus_action["timing"] == "after_movement"
+    ):
+        events.extend(resolve_bonus_action_events(state, actor_id, decision.bonus_action))
 
 
 def run_encounter(config: EncounterConfig) -> RunEncounterResult:

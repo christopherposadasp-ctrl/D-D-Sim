@@ -27,6 +27,7 @@ from backend.engine.rules.combat_rules import (
     can_trigger_attack_reaction,
     choose_burning_hands_targeting,
     choose_redirect_attack_ally,
+    clear_frightened_effects,
     consume_harried_effect,
     consume_sap_effects,
     consume_vex_effect,
@@ -1555,17 +1556,20 @@ def resolve_heroism(state: EncounterState, actor_id: str, target_id: str) -> Com
         for effect in target.temporary_effects
         if not (effect.kind == "heroism" and effect.source_id == actor_id)
     ]
+    removed_frightened_count = clear_frightened_effects(target)
     target.temporary_effects.append(
         HeroismEffect(
             kind="heroism",
             source_id=actor_id,
             temporary_hit_points=temporary_hp_amount,
-            frightened_immunity_modeled=False,
+            frightened_immunity_modeled=True,
         )
     )
     condition_deltas.append(
         f"{target_id} will gain {temporary_hp_amount} temporary HP at the start of each turn from {spell.display_name}."
     )
+    if removed_frightened_count:
+        condition_deltas.append(f"{target_id} is no longer frightened.")
 
     return CombatEvent(
         **event_base(state, actor_id),
@@ -1581,7 +1585,7 @@ def resolve_heroism(state: EncounterState, actor_id: str, target_id: str) -> Com
             "temporaryHitPointAmount": temporary_hp_amount,
             "startOfTurnUpkeep": True,
             "immediateTemporaryHitPointsApplied": False,
-            "frightenedImmunityModeled": False,
+            "frightenedImmunityModeled": True,
             "durationRounds": spell.duration_rounds,
             "spellSlotsLevel1Remaining": actor.resources.spell_slots_level_1,
         },

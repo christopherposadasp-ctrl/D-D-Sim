@@ -95,6 +95,11 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
         display_name="Ice Walk",
         description="This creature moves across ice safely; ice terrain is not modeled by the live simulator.",
     ),
+    "legendary_resistance": MonsterTraitDefinition(
+        trait_id="legendary_resistance",
+        display_name="Legendary Resistance",
+        description="If this creature fails a saving throw, it can choose to succeed instead.",
+    ),
 }
 
 

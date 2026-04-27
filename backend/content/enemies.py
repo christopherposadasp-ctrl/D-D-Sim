@@ -59,6 +59,8 @@ class MonsterDefinition:
     role_tags: tuple[RoleTag, ...] = ()
     action_ids: tuple[str, ...] = ()
     special_action_ids: tuple[str, ...] = ()
+    dragon_breath_profile_ids: dict[str, str] = field(default_factory=dict)
+    legendary_action_ids: tuple[str, ...] = ()
     bonus_action_ids: tuple[str, ...] = ()
     reaction_ids: tuple[str, ...] = ("opportunity_attack",)
     trait_ids: tuple[str, ...] = ()
@@ -168,6 +170,7 @@ warrior_veteran_ability_mods = AbilityModifiers(str=3, dex=1, con=2, int=0, wis=
 knight_ability_mods = AbilityModifiers(str=3, dex=0, con=2, int=0, wis=0, cha=2)
 young_white_dragon_ability_mods = AbilityModifiers(str=4, dex=0, con=4, int=-2, wis=0, cha=1)
 young_red_dragon_ability_mods = AbilityModifiers(str=6, dex=0, con=5, int=2, wis=0, cha=4)
+adult_white_dragon_ability_mods = AbilityModifiers(str=6, dex=0, con=6, int=-1, wis=1, cha=1)
 medium_footprint = Footprint(width=1, height=1)
 large_footprint = Footprint(width=2, height=2)
 huge_footprint = Footprint(width=3, height=3)
@@ -2544,6 +2547,62 @@ MONSTER_DEFINITIONS.update(
             damage_immunities=("fire",),
             extra_resource_pools={"opening_landing_uses": 1, "fire_breath_available": 1},
         ),
+        "adult_white_dragon": MonsterDefinition(
+            base_creature_id="adult_white_dragon",
+            variant_id="adult_white_dragon",
+            display_name="Adult White Dragon",
+            combat_role="adult_white_dragon",
+            ai_profile_id="dragon",
+            max_hp=200,
+            ac=18,
+            speed=40,
+            initiative_mod=10,
+            passive_perception=21,
+            ability_mods=adult_white_dragon_ability_mods,
+            size_category="huge",
+            footprint=huge_footprint,
+            attacks={
+                "rend": WeaponProfile(
+                    id="rend",
+                    display_name="Rend",
+                    attack_bonus=11,
+                    ability_modifier=6,
+                    damage_components=[
+                        WeaponDamageComponent(
+                            damage_type="slashing",
+                            damage_dice=[DiceSpec(count=2, sides=6)],
+                            damage_modifier=6,
+                        ),
+                        WeaponDamageComponent(
+                            damage_type="cold",
+                            damage_dice=[DiceSpec(count=1, sides=8)],
+                            damage_modifier=0,
+                        ),
+                    ],
+                    kind="melee",
+                    reach=10,
+                )
+            },
+            tags=("dragon", "chromatic", "white", "melee"),
+            creature_tags=("dragon",),
+            movement_modes=("walk", "burrow", "fly", "swim"),
+            action_ids=("multiattack", "cold_breath"),
+            special_action_ids=("cold_breath",),
+            dragon_breath_profile_ids={"cold_breath": "adult_white_cold_breath"},
+            legendary_action_ids=("pounce", "freezing_burst", "frightful_presence"),
+            trait_ids=("ice_walk", "opening_flight_landing", "legendary_resistance"),
+            attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),),
+            default_melee_attack_action_id="multiattack",
+            damage_immunities=("cold",),
+            extra_resource_pools={
+                "opening_landing_uses": 1,
+                "cold_breath_available": 1,
+                "legendary_resistance_uses": 3,
+                "legendary_action_uses": 3,
+                "freezing_burst_available": 1,
+                "frightful_presence_available": 1,
+            },
+        ),
         "berserker": MonsterDefinition(
             base_creature_id="berserker",
             variant_id="berserker",
@@ -3534,6 +3593,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "hippopotamus",
     "young_white_dragon",
     "young_red_dragon",
+    "adult_white_dragon",
     "berserker",
     "gnoll_warrior",
     "giant_hyena",

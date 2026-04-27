@@ -56,6 +56,8 @@ class MonsterExpectation:
     creature_tags: tuple[str, ...] = ()
     movement_modes: tuple[str, ...] = ()
     resource_pools: tuple[tuple[str, int], ...] = ()
+    dragon_breath_profile_ids: tuple[tuple[str, str], ...] = ()
+    legendary_action_ids: tuple[str, ...] = ()
 
 
 MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
@@ -1683,6 +1685,63 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         creature_tags=("dragon",),
         movement_modes=("walk", "climb", "fly"),
         resource_pools=(("opening_landing_uses", 1), ("fire_breath_available", 1)),
+    ),
+    "adult_white_dragon": MonsterExpectation(
+        ai_profile_id="dragon",
+        max_hp=200,
+        ac=18,
+        speed=40,
+        initiative_mod=10,
+        passive_perception=21,
+        size_category="huge",
+        footprint=(3, 3),
+        ability_mods={"str": 6, "dex": 0, "con": 6, "int": -1, "wis": 1, "cha": 1},
+        trait_ids=("ice_walk", "opening_flight_landing", "legendary_resistance"),
+        attacks={
+            "rend": AttackExpectation(
+                kind="melee",
+                attack_bonus=11,
+                ability_modifier=6,
+                damage_modifier=0,
+                damage_type=None,
+                reach=10,
+                damage_components=(
+                    DamageComponentExpectation("slashing", ((2, 6),), 6),
+                    DamageComponentExpectation("cold", ((1, 8),), 0),
+                ),
+            )
+        },
+        opening_weapon_id="rend",
+        melee_fallback_weapon_id="rend",
+        special_mechanics=(
+            "multiattack",
+            "triple_multiattack",
+            "ice_walk",
+            "opening_flight_landing",
+            "cold_breath",
+            "adult_cold_breath",
+            "recharge_5_6",
+            "legendary_resistance",
+            "pounce",
+            "freezing_burst",
+            "frightful_presence",
+        ),
+        benchmark_preset_id="adult_white_dragon_benchmark",
+        benchmark_count=1,
+        special_action_ids=("cold_breath",),
+        damage_immunities=("cold",),
+        creature_tags=("dragon",),
+        movement_modes=("walk", "burrow", "fly", "swim"),
+        resource_pools=(
+            ("opening_landing_uses", 1),
+            ("cold_breath_available", 1),
+            ("legendary_resistance_uses", 3),
+            ("legendary_action_uses", 3),
+            ("freezing_burst_available", 1),
+            ("frightful_presence_available", 1),
+        ),
+        dragon_breath_profile_ids=(("cold_breath", "adult_white_cold_breath"),),
+        legendary_action_ids=("pounce", "freezing_burst", "frightful_presence"),
     ),
     "berserker": MonsterExpectation(
         ai_profile_id="melee_brute",

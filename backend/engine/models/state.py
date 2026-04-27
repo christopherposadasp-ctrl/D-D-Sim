@@ -349,6 +349,18 @@ class HaltedEffect(CamelModel):
     expires_at_turn_end_of: str
 
 
+class SpeedZeroEffect(CamelModel):
+    kind: Literal["speed_zero"]
+    source_id: str
+    expires_at_turn_end_of: str
+
+
+class FrightenedEffect(CamelModel):
+    kind: Literal["frightened_by"]
+    source_id: str
+    save_dc: int
+
+
 TemporaryEffect: TypeAlias = (
     SapEffect
     | SlowEffect
@@ -374,6 +386,8 @@ TemporaryEffect: TypeAlias = (
     | VexEffect
     | HarriedEffect
     | HaltedEffect
+    | SpeedZeroEffect
+    | FrightenedEffect
 )
 
 

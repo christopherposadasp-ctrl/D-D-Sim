@@ -3,6 +3,7 @@ from __future__ import annotations
 from backend.content.enemies import create_enemy, get_monster_definition_for_unit, unit_has_bonus_action, unit_has_trait
 from backend.engine import create_encounter
 from backend.engine.ai.decision import (
+    TurnDecision,
     can_intentionally_provoke_opportunity_attack,
     choose_turn_decision,
     get_ranked_attack_targets,
@@ -162,6 +163,24 @@ def test_level5_fighter_uses_baseline_auto_maneuvers_when_already_in_melee() -> 
     }
 
 
+def test_level5_fighter_can_tactical_shift_after_second_wind_and_normal_movement() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-tactical-shift-after-move", placements=DEFAULT_POSITIONS))
+    encounter.units["F1"].current_hp = 20
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["G1"].position = GridPosition(x=5, y=1)
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.bonus_action == {"kind": "second_wind", "timing": "before_action"}
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.path[-1] == GridPosition(x=4, y=1)
+    assert decision.action["kind"] == "attack"
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "tactical_shift"
+    assert len(decision.post_action_movement.path) - 1 <= 3
+
+
 def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-no-double-javelin", placements=DEFAULT_POSITIONS))
     encounter.units["F1"].position = GridPosition(x=1, y=1)
@@ -173,6 +192,59 @@ def test_level2_fighter_does_not_spend_action_surge_for_double_javelin_turns() -
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "javelin"
     assert decision.surged_action is None
+
+
+def test_level5_fighter_holds_action_surge_when_only_non_finisher_javelins_remain() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-hold-surge-after-melee-kill", placements=DEFAULT_POSITIONS))
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["G1"].position = GridPosition(x=6, y=5)
+    encounter.units["G1"].current_hp = 0
+    encounter.units["G1"].conditions.dead = True
+    encounter.units["G2"].position = GridPosition(x=12, y=5)
+    encounter.units["G2"].current_hp = 30
+    events = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "skip", "reason": "normal action already resolved in this setup"},
+            surged_action={"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    assert encounter.units["F1"].resources.action_surge_uses == 1
+    assert not any(event.event_type == "phase_change" and "Action Surge" in event.text_summary for event in events)
+
+
+def test_level5_fighter_allows_action_surge_javelin_finisher_when_melee_is_gone() -> None:
+    encounter = create_encounter(EncounterConfig(seed="fighter-surge-ranged-finisher", placements=DEFAULT_POSITIONS))
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["G1"].position = GridPosition(x=6, y=5)
+    encounter.units["G1"].current_hp = 0
+    encounter.units["G1"].conditions.dead = True
+    encounter.units["G2"].position = GridPosition(x=12, y=5)
+    encounter.units["G2"].current_hp = 5
+    events = []
+
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "skip", "reason": "normal action already resolved in this setup"},
+            surged_action={"kind": "attack", "target_id": "G2", "weapon_id": "javelin"},
+        ),
+        events,
+        rescue_mode=False,
+    )
+
+    assert encounter.units["F1"].resources.action_surge_uses == 0
+    assert any(event.event_type == "phase_change" and "Action Surge" in event.text_summary for event in events)
+    assert any(event.event_type == "attack" and "with Javelin" in event.text_summary for event in events)
 
 
 def test_level3_fighter_uses_baseline_auto_maneuver_when_no_action_surge_followup_is_available() -> None:
@@ -613,6 +685,10 @@ def test_paladin_opens_with_level2_bless_on_full_mixed_party() -> None:
     assert decision.action["spell_id"] == "bless"
     assert decision.action["spell_level"] == 2
     assert decision.action["target_ids"] == ["F2", "F1", "F3", "F4"]
+    assert decision.post_action_movement is not None
+    assert decision.post_action_movement.mode == "move"
+    assert decision.post_action_movement.path[0] == encounter.units["F2"].position
+    assert decision.post_action_movement.path[-1] != encounter.units["F2"].position
 
 
 def test_paladin_trio_does_not_recast_redundant_bless() -> None:
@@ -1001,8 +1077,8 @@ def test_ranged_assassin_rogue_does_not_use_steady_aim_when_assassinate_already_
             player_behavior="smart",
         )
     )
-    encounter.units["F1"].position = GridPosition(x=1, y=1)
-    encounter.units["E4"].position = GridPosition(x=8, y=1)
+    encounter.units["F1"].position = GridPosition(x=3, y=8)
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
     encounter.initiative_order = ["F1", "E4"]
     encounter.active_combatant_index = 0
     encounter.round = 1
@@ -1011,7 +1087,34 @@ def test_ranged_assassin_rogue_does_not_use_steady_aim_when_assassinate_already_
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
-    assert decision.bonus_action is None
+    assert decision.bonus_action == {"kind": "hide", "timing": "after_movement"}
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is not None
+
+
+def test_ranged_assassin_rogue_uses_after_action_hide_when_already_set_and_attack_has_advantage() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="rogue-level3-assassinate-defensive-hide",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="rogue_level3_ranged_assassin_trio",
+            player_behavior="dumb",
+        )
+    )
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["F1"].effective_speed = 0
+    encounter.units["E4"].position = GridPosition(x=8, y=8)
+    encounter.initiative_order = ["F1", "E4"]
+    encounter.active_combatant_index = 0
+    encounter.round = 1
+    defeat_other_enemies(encounter, "E4")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert decision.bonus_action == {"kind": "hide", "timing": "after_action"}
+    assert decision.pre_action_movement is None
+    assert decision.post_action_movement is None
 
 
 def test_ranged_assassin_rogue_does_not_use_steady_aim_when_hidden_already_grants_advantage() -> None:
@@ -1126,7 +1229,7 @@ def test_level5_ranged_assassin_does_not_select_cunning_strike_in_normal_ai() ->
     assert "cunning_strike_id" not in decision.action
 
 
-def test_smart_level2_ranged_rogue_uses_baseline_no_hide_setup_movement() -> None:
+def test_level2_ranged_rogue_uses_baseline_after_movement_hide_setup_for_both_behaviors() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="rogue-level2-smart-hide-setup",
@@ -1145,7 +1248,7 @@ def test_smart_level2_ranged_rogue_uses_baseline_no_hide_setup_movement() -> Non
     )
 
     for encounter in (smart, dumb):
-        encounter.units["F1"].position = GridPosition(x=3, y=8)
+        encounter.units["F1"].position = GridPosition(x=3, y=7)
         encounter.units["E4"].position = GridPosition(x=8, y=8)
         for enemy_id, enemy in encounter.units.items():
             if not enemy_id.startswith("E") or enemy_id == "E4":
@@ -1156,8 +1259,12 @@ def test_smart_level2_ranged_rogue_uses_baseline_no_hide_setup_movement() -> Non
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.bonus_action is None
-    assert dumb_decision.bonus_action is None
+    assert smart_decision.bonus_action == {"kind": "hide", "timing": "after_movement"}
+    assert dumb_decision.bonus_action == {"kind": "hide", "timing": "after_movement"}
+    assert smart_decision.pre_action_movement is None
+    assert dumb_decision.pre_action_movement is None
+    assert smart_decision.post_action_movement is not None
+    assert dumb_decision.post_action_movement is not None
 
 
 def test_smart_level2_ranged_rogue_uses_disengage_to_escape_melee_into_a_shortbow_turn() -> None:

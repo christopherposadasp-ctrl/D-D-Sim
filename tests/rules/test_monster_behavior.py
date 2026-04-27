@@ -8,18 +8,36 @@ from backend.engine.ai.decision import choose_turn_decision
 from backend.engine.ai.profiles import get_monster_ai_profile
 from backend.engine.combat.engine import (
     execute_decision,
+    expire_turn_end_effects,
+    reset_legendary_action_uses_at_turn_start,
     resolve_attack_action,
     resolve_cold_breath,
     resolve_cold_breath_recharge,
     resolve_fire_breath,
     resolve_fire_breath_recharge,
+    resolve_frightened_end_of_turn_save,
+    resolve_frightened_forced_turn,
+    resolve_legendary_actions_after_turn,
+    resolve_legendary_freezing_burst,
+    resolve_legendary_frightful_presence,
 )
-from backend.engine.models.state import DiceSpec, EncounterConfig, Footprint, GridPosition, WeaponProfile, WeaponRange
+from backend.engine.models.state import (
+    DamageComponentResult,
+    DiceSpec,
+    EncounterConfig,
+    Footprint,
+    FrightenedEffect,
+    GridPosition,
+    TerrainFeature,
+    WeaponProfile,
+    WeaponRange,
+)
 from backend.engine.rules.combat_rules import (
     AttackRollOverrides,
     ResolveAttackArgs,
     ResolveSavingThrowArgs,
     SavingThrowOverrides,
+    apply_damage,
     resolve_attack,
     resolve_saving_throw,
 )
@@ -103,6 +121,7 @@ FIXED_ATTACK_CASES = (
     ("hippopotamus", "bite", [5, 6], ["piercing"], [16]),
     ("young_white_dragon", "rend", [3, 4, 2], ["slashing", "cold"], [11, 2]),
     ("young_red_dragon", "rend", [4, 5, 3], ["slashing", "fire"], [15, 3]),
+    ("adult_white_dragon", "rend", [4, 5, 6], ["slashing", "cold"], [15, 6]),
     ("berserker", "greataxe", [6], ["slashing"], [9]),
     ("gnoll_warrior", "rend", [3], ["piercing"], [5]),
     ("gnoll_warrior", "bone_bow", [5], ["piercing"], [6]),
@@ -1354,6 +1373,700 @@ def test_young_red_dragon_avoids_fire_breath_when_best_current_cone_includes_an_
     decision = choose_turn_decision(encounter, "E1")
 
     assert decision.action["kind"] != "special_action"
+
+
+def test_adult_white_dragon_multiattack_resolves_three_rend_attacks_and_uses_legal_huge_footprint() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "rend"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend", "rend"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_adult_white_dragon_cold_breath_failed_save_deals_full_fixed_cold_damage_and_spends_use() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+
+    events = resolve_cold_breath(
+        encounter,
+        "E1",
+        {"action_id": "cold_breath", "target_id": "F1", "origin_x": 7, "origin_y": 5, "direction": "e"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[4] * 12),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 0
+    assert attacks[0].damage_details.weapon_id == "cold_breath"
+    assert attacks[0].resolved_totals["saveAbility"] == "con"
+    assert attacks[0].resolved_totals["saveDc"] == 19
+    assert attacks[0].resolved_totals["saveSucceeded"] is False
+    assert attacks[0].damage_details.total_damage == 48
+    assert attacks[0].damage_details.final_damage_to_hp == 48
+
+
+def test_adult_white_dragon_cold_breath_successful_save_halves_damage_rounded_down() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+
+    events = resolve_cold_breath(
+        encounter,
+        "E1",
+        {"action_id": "cold_breath", "target_id": "F1", "origin_x": 7, "origin_y": 5, "direction": "e"},
+        AttackRollOverrides(save_rolls=[20], damage_rolls=[3] * 12),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert attacks[0].resolved_totals["saveSucceeded"] is True
+    assert attacks[0].damage_details.total_damage == 18
+    assert attacks[0].damage_details.final_damage_to_hp == 18
+
+
+def test_adult_white_dragon_cold_breath_respects_cold_immunity() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F1"].damage_immunities = ("cold",)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_cold_breath(
+        encounter,
+        "E1",
+        {"action_id": "cold_breath", "target_id": "F1", "origin_x": 7, "origin_y": 5, "direction": "e"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[4] * 12),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert attacks[0].damage_details.resisted_damage == 48
+    assert attacks[0].damage_details.final_damage_to_hp == 0
+
+
+def test_adult_white_dragon_cold_breath_recharge_rolls_restore_only_on_five_or_higher() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+
+    failed_event = resolve_cold_breath_recharge(encounter, "E1", roll_override=4)
+
+    assert failed_event is not None
+    assert failed_event.raw_rolls["rechargeRoll"] == 4
+    assert failed_event.resolved_totals["rechargeSucceeded"] is False
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 0
+
+    success_event = resolve_cold_breath_recharge(encounter, "E1", roll_override=5)
+
+    assert success_event is not None
+    assert success_event.raw_rolls["rechargeRoll"] == 5
+    assert success_event.resolved_totals["rechargeSucceeded"] is True
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 1
+
+
+def test_adult_white_dragon_legendary_resistance_turns_failed_save_into_success() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+
+    event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E1",
+            ability="dex",
+            dc=20,
+            reason="test effect",
+            overrides=SavingThrowOverrides(save_rolls=[1]),
+        ),
+    )
+
+    assert event.resolved_totals["success"] is True
+    assert event.resolved_totals["legendaryResistanceApplied"] is True
+    assert event.resolved_totals["legendaryResistanceUsesRemaining"] == 2
+    assert encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 2
+    assert "E1 uses Legendary Resistance to succeed instead." in event.condition_deltas
+
+
+def test_adult_white_dragon_legendary_resistance_does_not_apply_without_uses() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    encounter.units["E1"].resource_pools["legendary_resistance_uses"] = 0
+
+    event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E1",
+            ability="dex",
+            dc=20,
+            reason="test effect",
+            overrides=SavingThrowOverrides(save_rolls=[1]),
+        ),
+    )
+
+    assert event.resolved_totals["success"] is False
+    assert "legendaryResistanceApplied" not in event.resolved_totals
+    assert encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 0
+
+
+def test_adult_white_dragon_legendary_resistance_does_not_spend_on_successful_save() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+
+    event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E1",
+            ability="con",
+            dc=12,
+            reason="test effect",
+            overrides=SavingThrowOverrides(save_rolls=[20]),
+        ),
+    )
+
+    assert event.resolved_totals["success"] is True
+    assert "legendaryResistanceApplied" not in event.resolved_totals
+    assert encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 3
+
+
+def test_adult_white_dragon_uses_current_position_cold_breath_when_it_can_hit_two_pcs() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F3"].position = GridPosition(x=12, y=7)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.pre_action_movement is None
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "cold_breath"
+
+
+def test_adult_white_dragon_first_turn_lands_then_uses_cold_breath_when_it_can_hit_two_pcs() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F3"].position = GridPosition(x=3, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+    encounter.units["F3"].max_hp = 50
+    encounter.units["F3"].current_hp = 50
+
+    decision, events = run_actor_turn(encounter, "E1")
+    move_events = [event for event in events if event.event_type == "move"]
+    attacks = enemy_attack_events(events)
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "landing"
+    assert decision.action["kind"] == "special_action"
+    assert decision.action["action_id"] == "cold_breath"
+    assert move_events[0].resolved_totals["movementMode"] == "landing"
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert encounter.units["E1"].resource_pools["cold_breath_available"] == 0
+    assert [event.damage_details.weapon_id for event in attacks] == ["cold_breath", "cold_breath"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1", "F3")
+
+
+def test_adult_white_dragon_first_turn_lands_then_uses_three_rend_attacks_when_breath_unavailable() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["cold_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=2, y=2)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    decision, events = run_actor_turn(encounter, "E1")
+    move_events = [event for event in events if event.event_type == "move"]
+    attacks = enemy_attack_events(events)
+
+    assert decision.pre_action_movement is not None
+    assert decision.pre_action_movement.mode == "landing"
+    assert move_events[0].resolved_totals["movementMode"] == "landing"
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend", "rend", "rend"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_adult_white_dragon_avoids_cold_breath_when_best_current_cone_includes_an_ally() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1", "F3")
+    encounter.units["E1"].resource_pools["opening_landing_uses"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["E2"].position = GridPosition(x=10, y=5)
+    encounter.units["F1"].position = GridPosition(x=11, y=5)
+    encounter.units["F3"].position = GridPosition(x=11, y=6)
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.action["kind"] != "special_action"
+
+
+def test_adult_white_dragon_pounce_triggers_after_pc_turn_and_spends_legendary_action_use() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=2, y=8)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    phase_events = [
+        event
+        for event in events
+        if event.event_type == "phase_change" and event.resolved_totals.get("legendaryAction") == "pounce"
+    ]
+    move_events = [event for event in events if event.event_type == "move"]
+    attacks = enemy_attack_events(events)
+
+    assert phase_events
+    assert phase_events[0].resolved_totals["legendaryActionUsesRemaining"] == 2
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert move_events
+    assert move_events[0].resolved_totals["movementMode"] == "move"
+    assert move_events[0].movement_details.distance <= 4
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend"]
+    assert_occupied_squares_are_valid(encounter, "E1", "F1")
+
+
+def test_adult_white_dragon_pounce_does_not_spend_when_no_rend_can_be_reached() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+
+    assert events == []
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+
+
+def test_adult_white_dragon_legendary_action_uses_reset_at_start_of_own_turn() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    encounter.units["E1"].resource_pools["legendary_action_uses"] = 0
+    encounter.units["E1"].resource_pools["freezing_burst_available"] = 0
+
+    reset_legendary_action_uses_at_turn_start(encounter, "E1")
+
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+    assert encounter.units["E1"].resource_pools["freezing_burst_available"] == 1
+
+
+def test_adult_white_dragon_freezing_burst_failed_save_deals_damage_and_sets_speed_zero() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+
+    events = resolve_legendary_freezing_burst(
+        encounter,
+        "E1",
+        {"center_x": 5, "center_y": 5, "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[3, 4]),
+    )
+    phase_events = [
+        event
+        for event in events
+        if event.event_type == "phase_change" and event.resolved_totals.get("legendaryAction") == "freezing_burst"
+    ]
+    attacks = enemy_attack_events(events)
+
+    assert phase_events
+    assert phase_events[0].resolved_totals["legendaryActionUsesRemaining"] == 2
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["freezing_burst_available"] == 0
+    assert attacks[0].damage_details.weapon_id == "freezing_burst"
+    assert attacks[0].resolved_totals["saveAbility"] == "con"
+    assert attacks[0].resolved_totals["saveDc"] == 14
+    assert attacks[0].resolved_totals["saveSucceeded"] is False
+    assert attacks[0].resolved_totals["speedZeroApplied"] is True
+    assert attacks[0].damage_details.total_damage == 7
+    assert attacks[0].damage_details.final_damage_to_hp == 7
+    assert "F1's Speed becomes 0 until the end of its next turn." in attacks[0].condition_deltas
+    assert encounter.units["F1"].effective_speed == 0
+    assert any(effect.kind == "speed_zero" and effect.source_id == "E1" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_white_dragon_freezing_burst_successful_save_deals_no_damage_or_speed_zero() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_legendary_freezing_burst(
+        encounter,
+        "E1",
+        {"center_x": 5, "center_y": 5, "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20], damage_rolls=[3, 4]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert attacks[0].resolved_totals["saveSucceeded"] is True
+    assert attacks[0].resolved_totals["speedZeroApplied"] is False
+    assert attacks[0].damage_details.total_damage == 0
+    assert attacks[0].damage_details.final_damage_to_hp == 0
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert encounter.units["F1"].effective_speed == encounter.units["F1"].speed
+    assert not any(effect.kind == "speed_zero" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_white_dragon_freezing_burst_respects_cold_immunity() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].damage_immunities = ("cold",)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_legendary_freezing_burst(
+        encounter,
+        "E1",
+        {"center_x": 5, "center_y": 5, "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[3, 4]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert attacks[0].damage_details.resisted_damage == 7
+    assert attacks[0].damage_details.final_damage_to_hp == 0
+    assert attacks[0].resolved_totals["speedZeroApplied"] is True
+
+
+def test_adult_white_dragon_freezing_burst_speed_zero_expires_at_target_turn_end() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+
+    resolve_legendary_freezing_burst(
+        encounter,
+        "E1",
+        {"center_x": 5, "center_y": 5, "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1], damage_rolls=[1, 1]),
+    )
+    assert encounter.units["F1"].effective_speed == 0
+
+    events = expire_turn_end_effects(encounter, "F1")
+
+    assert any(event.event_type == "phase_change" for event in events)
+    assert encounter.units["F1"].effective_speed == encounter.units["F1"].speed
+    assert not any(effect.kind == "speed_zero" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_white_dragon_freezing_burst_cannot_repeat_until_dragon_turn_start() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+
+    first_events = resolve_legendary_freezing_burst(
+        encounter,
+        "E1",
+        {"center_x": 5, "center_y": 5, "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20], damage_rolls=[1, 1]),
+    )
+    second_events = resolve_legendary_freezing_burst(
+        encounter,
+        "E1",
+        {"center_x": 5, "center_y": 5, "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20], damage_rolls=[1, 1]),
+    )
+
+    assert first_events
+    assert second_events == []
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["freezing_burst_available"] == 0
+
+    reset_legendary_action_uses_at_turn_start(encounter, "E1")
+
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+    assert encounter.units["E1"].resource_pools["freezing_burst_available"] == 1
+
+
+def test_adult_white_dragon_frightful_presence_failed_save_applies_frightened_and_concentration() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+
+    events = resolve_legendary_frightful_presence(
+        encounter,
+        "E1",
+        {"origin_x": 7, "origin_y": 5, "direction": "e", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1]),
+    )
+    phase_events = [
+        event
+        for event in events
+        if event.event_type == "phase_change" and event.resolved_totals.get("legendaryAction") == "frightful_presence"
+    ]
+    save_events = [event for event in events if event.event_type == "saving_throw"]
+
+    assert phase_events
+    assert phase_events[0].resolved_totals["legendaryActionUsesRemaining"] == 2
+    assert phase_events[0].resolved_totals["frightfulPresenceAvailable"] == 0
+    assert encounter.units["E1"].resource_pools["frightful_presence_available"] == 0
+    assert any(effect.kind == "concentration" and effect.spell_id == "fear" for effect in encounter.units["E1"].temporary_effects)
+    assert save_events[0].resolved_totals["frightenedApplied"] is True
+    assert any(effect.kind == "frightened_by" and effect.source_id == "E1" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_white_dragon_frightful_presence_success_or_immunity_does_not_apply_frightened() -> None:
+    success_encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(success_encounter, "E1", "F1")
+    success_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    success_encounter.units["F1"].position = GridPosition(x=12, y=5)
+
+    success_events = resolve_legendary_frightful_presence(
+        success_encounter,
+        "E1",
+        {"origin_x": 7, "origin_y": 5, "direction": "e", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20]),
+    )
+    success_saves = [event for event in success_events if event.event_type == "saving_throw"]
+
+    assert success_saves[0].resolved_totals["frightenedApplied"] is False
+    assert not any(effect.kind == "frightened_by" for effect in success_encounter.units["F1"].temporary_effects)
+
+    immune_encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(immune_encounter, "E1", "F1")
+    immune_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    immune_encounter.units["F1"].position = GridPosition(x=12, y=5)
+    immune_encounter.units["F1"].condition_immunities = ("frightened",)
+
+    immune_events = resolve_legendary_frightful_presence(
+        immune_encounter,
+        "E1",
+        {"origin_x": 7, "origin_y": 5, "direction": "e", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1]),
+    )
+    immune_phase_events = [
+        event for event in immune_events if event.resolved_totals.get("frightenedImmune") is True
+    ]
+
+    assert immune_phase_events
+    assert not any(effect.kind == "frightened_by" for effect in immune_encounter.units["F1"].temporary_effects)
+
+
+def test_frightened_attacker_has_disadvantage_against_fear_source() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+    encounter.units["F1"].temporary_effects.append(FrightenedEffect(kind="frightened_by", source_id="E1", save_dc=14))
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="greatsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18, 5], damage_rolls=[3, 4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["attackMode"] == "disadvantage"
+    assert "frightened" in attack_event.raw_rolls["disadvantageSources"]
+
+
+def test_frightened_creature_dashes_away_and_skips_normal_turn() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].temporary_effects.append(FrightenedEffect(kind="frightened_by", source_id="E1", save_dc=14))
+    starting_distance = get_min_chebyshev_distance_between_footprints(
+        encounter.units["F1"].position,
+        encounter.units["F1"].footprint,
+        encounter.units["E1"].position,
+        encounter.units["E1"].footprint,
+    )
+
+    events = resolve_frightened_forced_turn(encounter, "F1")
+    move_events = [event for event in events if event.event_type == "move"]
+    ending_distance = get_min_chebyshev_distance_between_footprints(
+        encounter.units["F1"].position,
+        encounter.units["F1"].footprint,
+        encounter.units["E1"].position,
+        encounter.units["E1"].footprint,
+    )
+
+    assert any(event.resolved_totals.get("forcedByCondition") == "frightened" for event in events)
+    assert move_events
+    assert move_events[0].resolved_totals["movementMode"] == "dash"
+    assert ending_distance > starting_distance
+    assert not enemy_attack_events(events)
+
+
+def test_frightened_end_turn_save_removes_effect_only_when_line_of_sight_is_broken() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+    encounter.units["F1"].position = GridPosition(x=4, y=5)
+    encounter.units["F1"].ability_mods.wis = 20
+    encounter.units["F1"].temporary_effects.append(FrightenedEffect(kind="frightened_by", source_id="E1", save_dc=14))
+
+    visible_events = resolve_frightened_end_of_turn_save(encounter, "F1")
+
+    assert visible_events == []
+    assert any(effect.kind == "frightened_by" for effect in encounter.units["F1"].temporary_effects)
+
+    encounter.terrain_features.append(
+        TerrainFeature(
+            feature_id="fear_los_blocker",
+            kind="rock",
+            position=GridPosition(x=6, y=5),
+            footprint=Footprint(width=1, height=1),
+        )
+    )
+
+    hidden_events = resolve_frightened_end_of_turn_save(encounter, "F1")
+
+    assert any(event.event_type == "saving_throw" for event in hidden_events)
+    assert not any(effect.kind == "frightened_by" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_dragon_fear_concentration_failure_removes_frightened_effects() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    resolve_legendary_frightful_presence(
+        encounter,
+        "E1",
+        {"origin_x": 7, "origin_y": 5, "direction": "e", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[1]),
+    )
+    assert any(effect.kind == "frightened_by" for effect in encounter.units["F1"].temporary_effects)
+
+    damage_result = apply_damage(
+        encounter,
+        "E1",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[1],
+    )
+
+    assert damage_result.concentration_ended is True
+    assert not any(effect.kind == "frightened_by" for effect in encounter.units["F1"].temporary_effects)
+
+
+def test_adult_white_dragon_frightful_presence_cannot_repeat_until_dragon_turn_start() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+
+    first_events = resolve_legendary_frightful_presence(
+        encounter,
+        "E1",
+        {"origin_x": 7, "origin_y": 5, "direction": "e", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20]),
+    )
+    second_events = resolve_legendary_frightful_presence(
+        encounter,
+        "E1",
+        {"origin_x": 7, "origin_y": 5, "direction": "e", "target_id": "F1"},
+        AttackRollOverrides(save_rolls=[20]),
+    )
+
+    assert first_events
+    assert second_events == []
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["frightful_presence_available"] == 0
+
+    reset_legendary_action_uses_at_turn_start(encounter, "E1")
+
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+    assert encounter.units["E1"].resource_pools["frightful_presence_available"] == 1
+
+
+def test_adult_white_dragon_prefers_freezing_burst_over_pounce_when_it_can_hit_two_pcs() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+    encounter.units["F1"].position = GridPosition(x=2, y=5)
+    encounter.units["F3"].position = GridPosition(x=2, y=6)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    phase_events = [
+        event
+        for event in events
+        if event.event_type == "phase_change" and event.resolved_totals.get("legendaryAction") == "freezing_burst"
+    ]
+    attacks = enemy_attack_events(events)
+
+    assert phase_events
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["freezing_burst_available"] == 0
+    assert {event.damage_details.weapon_id for event in attacks} == {"freezing_burst"}
+
+
+def test_adult_white_dragon_does_not_use_freezing_burst_if_best_sphere_includes_ally() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    encounter.units["E2"] = create_enemy("E2", "hobgoblin_warrior")
+    defeat_other_units(encounter, "E1", "E2", "F1", "F3")
+    encounter.units["E1"].position = GridPosition(x=13, y=13)
+    encounter.units["E2"].position = GridPosition(x=1, y=4)
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F3"].position = GridPosition(x=1, y=7)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+
+    assert events == []
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+    assert encounter.units["E1"].resource_pools["freezing_burst_available"] == 1
+
+
+def test_adult_white_dragon_uses_frightful_presence_after_freezing_burst_is_unavailable() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].resource_pools["freezing_burst_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F3"].position = GridPosition(x=12, y=7)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+
+    assert any(event.resolved_totals.get("legendaryAction") == "frightful_presence" for event in events)
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["frightful_presence_available"] == 0
+
+
+def test_adult_white_dragon_skips_frightful_presence_when_targets_are_ineligible() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].resource_pools["freezing_burst_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F3"].position = GridPosition(x=12, y=7)
+    encounter.units["F1"].temporary_effects.append(FrightenedEffect(kind="frightened_by", source_id="E1", save_dc=14))
+    encounter.units["F3"].condition_immunities = ("frightened",)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+
+    assert not any(event.resolved_totals.get("legendaryAction") == "frightful_presence" for event in events)
+
+
+def test_adult_white_dragon_falls_back_to_pounce_when_freezing_burst_is_locked_out() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["freezing_burst_available"] = 0
+    encounter.units["E1"].resource_pools["frightful_presence_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=2, y=8)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    attacks = enemy_attack_events(events)
+
+    assert any(event.resolved_totals.get("legendaryAction") == "pounce" for event in events)
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend"]
 
 
 def test_grick_tentacles_grapple_medium_targets_with_dc_12_but_not_large_targets() -> None:

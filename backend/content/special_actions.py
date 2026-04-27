@@ -31,6 +31,32 @@ class DragonBreathActionDefinition:
     recharge_threshold: int = 5
 
 
+@dataclass(frozen=True)
+class LegendarySphereActionDefinition:
+    action_id: str
+    display_name: str
+    resource_pool_id: str
+    save_ability: str
+    save_dc: int
+    range_squares: int
+    radius_squares: int
+    damage_die_count: int
+    damage_die_sides: int
+    damage_type: str
+    speed_zero_on_failed_save: bool = False
+
+
+@dataclass(frozen=True)
+class LegendaryConeFearActionDefinition:
+    action_id: str
+    display_name: str
+    resource_pool_id: str
+    save_ability: str
+    save_dc: int
+    range_squares: int
+    duration_rounds: int
+
+
 SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
     "swallow": SpecialActionDefinition(
         action_id="swallow",
@@ -46,6 +72,16 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
         action_id="fire_breath",
         display_name="Fire Breath",
         description="Exhale a fiery cone that forces Dexterity saves for half fire damage.",
+    ),
+    "freezing_burst": SpecialActionDefinition(
+        action_id="freezing_burst",
+        display_name="Freezing Burst",
+        description="A freezing sphere that can damage and halt creatures that fail Constitution saves.",
+    ),
+    "frightful_presence": SpecialActionDefinition(
+        action_id="frightful_presence",
+        display_name="Frightful Presence",
+        description="A terrifying presence that can frighten creatures in a cone.",
     ),
     "natures_wrath": SpecialActionDefinition(
         action_id="natures_wrath",
@@ -67,6 +103,17 @@ DRAGON_BREATH_ACTIONS: dict[str, DragonBreathActionDefinition] = {
         damage_die_sides=8,
         damage_type="cold",
     ),
+    "adult_white_cold_breath": DragonBreathActionDefinition(
+        action_id="cold_breath",
+        display_name="Cold Breath",
+        resource_pool_id="cold_breath_available",
+        save_ability="con",
+        save_dc=19,
+        range_squares=12,
+        damage_die_count=12,
+        damage_die_sides=8,
+        damage_type="cold",
+    ),
     "fire_breath": DragonBreathActionDefinition(
         action_id="fire_breath",
         display_name="Fire Breath",
@@ -77,6 +124,36 @@ DRAGON_BREATH_ACTIONS: dict[str, DragonBreathActionDefinition] = {
         damage_die_count=16,
         damage_die_sides=6,
         damage_type="fire",
+    ),
+}
+
+
+LEGENDARY_CONE_FEAR_ACTIONS: dict[str, LegendaryConeFearActionDefinition] = {
+    "frightful_presence": LegendaryConeFearActionDefinition(
+        action_id="frightful_presence",
+        display_name="Frightful Presence",
+        resource_pool_id="frightful_presence_available",
+        save_ability="wis",
+        save_dc=14,
+        range_squares=6,
+        duration_rounds=10,
+    ),
+}
+
+
+LEGENDARY_SPHERE_ACTIONS: dict[str, LegendarySphereActionDefinition] = {
+    "freezing_burst": LegendarySphereActionDefinition(
+        action_id="freezing_burst",
+        display_name="Freezing Burst",
+        resource_pool_id="freezing_burst_available",
+        save_ability="con",
+        save_dc=14,
+        range_squares=24,
+        radius_squares=6,
+        damage_die_count=2,
+        damage_die_sides=6,
+        damage_type="cold",
+        speed_zero_on_failed_save=True,
     ),
 }
 

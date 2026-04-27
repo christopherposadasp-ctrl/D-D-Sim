@@ -94,7 +94,9 @@ from backend.engine.rules.spatial import (
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
     get_unit_footprint,
+    has_line_of_sight_between_units,
     is_active_grapple,
+    chebyshev_distance,
 )
 from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 from backend.engine.utils.rng import roll_die
@@ -293,6 +295,31 @@ def get_active_heroism_effect(state: EncounterState, unit: UnitState) -> Heroism
     return None
 
 
+def unit_is_frightened_by_source(state: EncounterState, unit: UnitState, source_id: str) -> bool:
+    source = state.units.get(source_id)
+    return bool(
+        source
+        and source.current_hp > 0
+        and not source.conditions.dead
+        and any(effect.kind == "frightened_by" and effect.source_id == source_id for effect in unit.temporary_effects)
+        and has_line_of_sight_between_units(state, unit.id, source_id)
+    )
+
+
+def unit_is_frightened_immune(state: EncounterState, unit: UnitState) -> bool:
+    return "frightened" in unit.condition_immunities or get_active_heroism_effect(state, unit) is not None
+
+
+def clear_frightened_effects(unit: UnitState, source_id: str | None = None) -> int:
+    original_count = len(unit.temporary_effects)
+    unit.temporary_effects = [
+        effect
+        for effect in unit.temporary_effects
+        if not (effect.kind == "frightened_by" and (source_id is None or effect.source_id == source_id))
+    ]
+    return original_count - len(unit.temporary_effects)
+
+
 def unit_is_halted(unit: UnitState) -> bool:
     return any(effect.kind == "halted" for effect in unit.temporary_effects)
 
@@ -366,6 +393,7 @@ def end_concentration(state: EncounterState, caster_id: str, *, reason: str | No
     removed_blessed_targets: list[str] = []
     removed_shield_of_faith_targets: list[str] = []
     removed_heroism_targets: list[str] = []
+    removed_frightened_targets: list[str] = []
     divine_favor_removed = False
     if "bless" in spell_ids:
         for unit in state.units.values():
@@ -397,6 +425,11 @@ def end_concentration(state: EncounterState, caster_id: str, *, reason: str | No
             ]
             if len(unit.temporary_effects) != original_count:
                 removed_heroism_targets.append(unit.id)
+    if "fear" in spell_ids:
+        for unit in state.units.values():
+            removed_count = clear_frightened_effects(unit, caster_id)
+            if removed_count:
+                removed_frightened_targets.append(unit.id)
     if "divine_favor" in spell_ids:
         original_count = len(caster.temporary_effects)
         caster.temporary_effects = [
@@ -416,6 +449,8 @@ def end_concentration(state: EncounterState, caster_id: str, *, reason: str | No
         )
     if removed_heroism_targets:
         summary = f"{summary} Heroism ends on {', '.join(sorted(removed_heroism_targets, key=unit_sort_key))}."
+    if removed_frightened_targets:
+        summary = f"{summary} Fear ends on {', '.join(sorted(removed_frightened_targets, key=unit_sort_key))}."
     if divine_favor_removed:
         summary = f"{summary} Divine Favor ends on {caster_id}."
     return [summary]
@@ -858,6 +893,10 @@ def recalculate_effective_speed_for_unit(unit: UnitState) -> None:
         unit.effective_speed = 0
         return
 
+    if any(effect.kind == "speed_zero" for effect in unit.temporary_effects):
+        unit.effective_speed = 0
+        return
+
     if any(effect.kind == "restrained_by" for effect in unit.temporary_effects):
         unit.effective_speed = 0
         return
@@ -994,6 +1033,16 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
     bless_bonus, bless_rolls, bless_source_id = roll_bless_bonus(state, actor)
     total = selected_roll + modifier + bless_bonus
     success = total >= args.dc
+    legendary_resistance_applied = False
+    if not success:
+        try:
+            has_legendary_resistance = unit_has_trait(actor, "legendary_resistance")
+        except ValueError:
+            has_legendary_resistance = False
+        if has_legendary_resistance and actor.resource_pools.get("legendary_resistance_uses", 0) > 0:
+            actor.resource_pools["legendary_resistance_uses"] -= 1
+            legendary_resistance_applied = True
+            success = True
     raw_rolls = {
         "savingThrowRolls": save_rolls,
         "advantageSources": advantage_sources,
@@ -1013,6 +1062,11 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
     if bless_bonus:
         resolved_totals["blessBonus"] = bless_bonus
         resolved_totals["blessSourceId"] = bless_source_id
+    condition_deltas = []
+    if legendary_resistance_applied:
+        resolved_totals["legendaryResistanceApplied"] = True
+        resolved_totals["legendaryResistanceUsesRemaining"] = actor.resource_pools.get("legendary_resistance_uses", 0)
+        condition_deltas.append(f"{args.actor_id} uses Legendary Resistance to succeed instead.")
 
     return CombatEvent(
         **event_base(state, args.actor_id),
@@ -1022,10 +1076,11 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
         resolved_totals=resolved_totals,
         movement_details=None,
         damage_details=None,
-        condition_deltas=[],
+        condition_deltas=condition_deltas,
         text_summary=(
             f"{args.actor_id} makes a {args.ability.upper()} save for {args.reason}: "
-            f"{'success' if success else 'failure'} with {total} against DC {args.dc}."
+            f"{'success' if success else 'failure'} with {total} against DC {args.dc}"
+            f"{' using Legendary Resistance' if legendary_resistance_applied else ''}."
         ),
     )
 
@@ -2521,6 +2576,15 @@ class ConeBreathTargeting:
     direction: str
 
 
+@dataclass(frozen=True)
+class SphereTargeting:
+    primary_target_id: str
+    target_ids: tuple[str, ...]
+    enemy_target_ids: tuple[str, ...]
+    ally_target_ids: tuple[str, ...]
+    center: GridPosition
+
+
 def get_self_origin_cone_endpoint_deltas(range_squares: int, direction: str) -> tuple[tuple[int, int], ...]:
     half_width = max(1, range_squares // 2)
     endpoints_by_direction = {
@@ -2679,6 +2743,101 @@ def choose_cold_breath_targeting(
     )
 
 
+def build_sphere_targeting(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    center: GridPosition,
+    radius_squares: int,
+    range_squares: int,
+    required_primary_target_id: str | None = None,
+) -> SphereTargeting | None:
+    actor = state.units[actor_id]
+    if not actor.position:
+        return None
+    if not (1 <= center.x <= GRID_SIZE and 1 <= center.y <= GRID_SIZE):
+        return None
+
+    actor_origins = get_occupied_squares_for_position(actor.position, get_unit_footprint(actor))
+    if all(chebyshev_distance(origin, center) > range_squares for origin in actor_origins):
+        return None
+
+    live_units = [
+        unit
+        for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id))
+        if unit.position and not unit.conditions.dead
+    ]
+    hit_units = [
+        unit
+        for unit in live_units
+        if any(
+            chebyshev_distance(center, occupied_square) <= radius_squares
+            for occupied_square in get_occupied_squares_for_position(unit.position, get_unit_footprint(unit))
+        )
+    ]
+    if required_primary_target_id and all(unit.id != required_primary_target_id for unit in hit_units):
+        return None
+
+    enemy_target_ids = tuple(unit.id for unit in hit_units if unit.faction != actor.faction)
+    if not enemy_target_ids:
+        return None
+    ally_target_ids = tuple(unit.id for unit in hit_units if unit.faction == actor.faction)
+    primary_target_id = required_primary_target_id or sorted(enemy_target_ids, key=unit_sort_key)[0]
+    return SphereTargeting(
+        primary_target_id=primary_target_id,
+        target_ids=tuple(unit.id for unit in hit_units),
+        enemy_target_ids=enemy_target_ids,
+        ally_target_ids=ally_target_ids,
+        center=center,
+    )
+
+
+def choose_sphere_targeting(
+    state: EncounterState,
+    actor_id: str,
+    *,
+    required_primary_target_id: str | None = None,
+    minimum_enemy_targets: int = 1,
+    allow_allies: bool = True,
+    radius_squares: int,
+    range_squares: int,
+) -> SphereTargeting | None:
+    viable: list[SphereTargeting] = []
+    for x in range(1, GRID_SIZE + 1):
+        for y in range(1, GRID_SIZE + 1):
+            targeting = build_sphere_targeting(
+                state,
+                actor_id,
+                center=GridPosition(x=x, y=y),
+                radius_squares=radius_squares,
+                range_squares=range_squares,
+                required_primary_target_id=required_primary_target_id,
+            )
+            if not targeting:
+                continue
+            if len(targeting.enemy_target_ids) < minimum_enemy_targets:
+                continue
+            if not allow_allies and targeting.ally_target_ids:
+                continue
+            viable.append(targeting)
+
+    if not viable:
+        return None
+
+    return sorted(
+        viable,
+        key=lambda targeting: (
+            -len(targeting.enemy_target_ids),
+            len(targeting.ally_target_ids),
+            sum(state.units[target_id].current_hp for target_id in targeting.enemy_target_ids),
+            targeting.primary_target_id,
+            targeting.center.x,
+            targeting.center.y,
+            targeting.target_ids,
+        ),
+    )[0]
+
+
 def choose_burning_hands_targeting(
     state: EncounterState,
     actor_id: str,
@@ -2822,6 +2981,9 @@ def get_attack_mode(
 
     if any(effect.kind in {"restrained_by", "blinded_by"} for effect in attacker.temporary_effects):
         disadvantage_sources.append("impaired_attacker")
+
+    if unit_is_frightened_by_source(state, attacker, target_id):
+        disadvantage_sources.append("frightened")
 
     if unit_is_poisoned(attacker):
         disadvantage_sources.append("poisoned")

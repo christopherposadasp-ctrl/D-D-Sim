@@ -16,6 +16,7 @@ from backend.content.enemies import (
     unit_has_creature_tag,
     unit_is_undead,
 )
+from backend.content.special_actions import DRAGON_BREATH_ACTIONS, LEGENDARY_CONE_FEAR_ACTIONS, LEGENDARY_SPHERE_ACTIONS
 from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
 
@@ -83,6 +84,8 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     assert tuple(definition.trait_ids) == expectation.trait_ids
     assert tuple(definition.role_tags) == expectation.role_tags
     assert tuple(definition.special_action_ids) == expectation.special_action_ids
+    assert tuple(definition.dragon_breath_profile_ids.items()) == expectation.dragon_breath_profile_ids
+    assert tuple(definition.legendary_action_ids) == expectation.legendary_action_ids
     assert tuple(definition.damage_resistances) == expectation.damage_resistances
     assert tuple(definition.damage_immunities) == expectation.damage_immunities
     assert tuple(definition.damage_vulnerabilities) == expectation.damage_vulnerabilities
@@ -205,9 +208,53 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     if "ice_walk" in expectation.special_mechanics:
         assert "ice_walk" in definition.trait_ids
 
+    if "legendary_resistance" in expectation.special_mechanics:
+        assert "legendary_resistance" in definition.trait_ids
+        assert runtime_unit.resource_pools.get("legendary_resistance_uses") == 3
+
+    if "pounce" in expectation.special_mechanics:
+        assert "pounce" in definition.legendary_action_ids
+        assert runtime_unit.resource_pools.get("legendary_action_uses") == 3
+
+    if "freezing_burst" in expectation.special_mechanics:
+        burst = LEGENDARY_SPHERE_ACTIONS["freezing_burst"]
+        assert "freezing_burst" in definition.legendary_action_ids
+        assert runtime_unit.resource_pools.get("freezing_burst_available") == 1
+        assert burst.resource_pool_id == "freezing_burst_available"
+        assert burst.save_ability == "con"
+        assert burst.save_dc == 14
+        assert burst.range_squares == 24
+        assert burst.radius_squares == 6
+        assert burst.damage_die_count == 2
+        assert burst.damage_die_sides == 6
+        assert burst.damage_type == "cold"
+
+    if "frightful_presence" in expectation.special_mechanics:
+        fear = LEGENDARY_CONE_FEAR_ACTIONS["frightful_presence"]
+        assert "frightful_presence" in definition.legendary_action_ids
+        assert runtime_unit.resource_pools.get("frightful_presence_available") == 1
+        assert fear.resource_pool_id == "frightful_presence_available"
+        assert fear.save_ability == "wis"
+        assert fear.save_dc == 14
+        assert fear.range_squares == 6
+        assert fear.duration_rounds == 10
+        assert burst.speed_zero_on_failed_save is True
+
     if "cold_breath" in expectation.special_mechanics:
         assert "cold_breath" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("cold_breath_available") == 1
+
+    if "adult_cold_breath" in expectation.special_mechanics:
+        breath = DRAGON_BREATH_ACTIONS["adult_white_cold_breath"]
+        assert breath.action_id == "cold_breath"
+        assert breath.resource_pool_id == "cold_breath_available"
+        assert breath.save_ability == "con"
+        assert breath.save_dc == 19
+        assert breath.range_squares == 12
+        assert breath.damage_die_count == 12
+        assert breath.damage_die_sides == 8
+        assert breath.damage_type == "cold"
+        assert breath.recharge_threshold == 5
 
     if "fire_breath" in expectation.special_mechanics:
         assert "fire_breath" in definition.special_action_ids
@@ -279,7 +326,7 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         ]
 
 
-@pytest.mark.parametrize("creature_name", ("Young White Dragon", "Young Red Dragon"))
+@pytest.mark.parametrize("creature_name", ("Young White Dragon", "Young Red Dragon", "Adult White Dragon"))
 def test_completed_dragon_workbook_rows_are_marked_modeled(creature_name: str) -> None:
     workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
     sheet = workbook.active

@@ -963,6 +963,33 @@ def has_terrain_half_cover_against_observer(
     return any(get_terrain_feature_at(state, square, index) for square in traversed)
 
 
+def has_line_of_sight_between_units(
+    state: EncounterState,
+    observer_id: str,
+    target_id: str,
+    observer_position: GridPosition | None = None,
+    target_position: GridPosition | None = None,
+    position_index: PositionIndex | None = None,
+) -> bool:
+    observer = state.units.get(observer_id)
+    target = state.units.get(target_id)
+    if not observer or not target:
+        return False
+    resolved_observer_position = observer_position or observer.position
+    resolved_target_position = target_position or target.position
+    if not resolved_observer_position or not resolved_target_position:
+        return False
+
+    index = position_index or build_position_index(state)
+    traversed = get_attack_line_traversed_squares(
+        resolved_observer_position,
+        get_unit_footprint(observer),
+        resolved_target_position,
+        get_unit_footprint(target),
+    )
+    return not any(get_terrain_feature_at(state, square, index) for square in traversed)
+
+
 def get_conscious_enemy_observers_for_hide(
     state: EncounterState,
     unit_id: str,
