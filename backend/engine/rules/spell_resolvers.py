@@ -729,8 +729,17 @@ def resolve_multi_target_save_spell(
             return [build_spell_skip_event(state, attacker_id, spell_id, "is not in range.")]
         attack_contexts[target_id] = attack_context
 
-    if spell.max_targets > 1 and not targets_are_within_spell_cluster(state, resolved_target_ids, 5):
-        return [build_spell_skip_event(state, attacker_id, spell_id, "targets are not within 5 feet of each other.")]
+    if spell.max_targets > 1 and not targets_are_within_spell_cluster(
+        state, resolved_target_ids, spell.target_cluster_feet
+    ):
+        return [
+            build_spell_skip_event(
+                state,
+                attacker_id,
+                spell_id,
+                f"targets are not within {spell.target_cluster_feet} feet of each other.",
+            )
+        ]
 
     if spell.level > 0 and not spend_spell_slot(attacker, spell.level):
         return [build_spell_skip_event(state, attacker_id, spell_id, f"No level {spell.level} spell slots remain.")]
@@ -759,6 +768,7 @@ def resolve_multi_target_save_spell(
                     "spellLevel": spell.level,
                     "targetCount": len(resolved_target_ids),
                     "maxTargets": spell.max_targets,
+                    "targetClusterFeet": spell.target_cluster_feet,
                 },
                 movement_details=None,
                 damage_details=None,
@@ -811,6 +821,7 @@ def resolve_multi_target_save_spell(
             "halfOnSuccess": spell.half_on_success,
             "damageApplied": applied_damage,
             "targetCount": len(resolved_target_ids),
+            "targetClusterFeet": spell.target_cluster_feet,
             "distanceSquares": attack_context.distance_squares,
             "distanceFeet": attack_context.distance_feet,
         }

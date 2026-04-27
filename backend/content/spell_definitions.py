@@ -48,6 +48,7 @@ class SpellDefinition:
     concentration: bool = False
     duration_rounds: int = 0
     max_targets: int = 1
+    target_cluster_feet: int = 5
     healing_dice: tuple[DiceSpec, ...] = ()
     healing_modifier_ability: str | None = None
     temporary_hit_point_dice: tuple[DiceSpec, ...] = ()
@@ -367,6 +368,24 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         damage_type="radiant",
         concentration=True,
         duration_rounds=10,
+    ),
+    "shatter": SpellDefinition(
+        spell_id="shatter",
+        display_name="Shatter",
+        level=2,
+        school="evocation",
+        description="Area thunder burst forcing Constitution saves for half damage.",
+        timing="action",
+        targeting_mode="multi_target_save",
+        range_feet=60,
+        damage_dice=(DiceSpec(count=3, sides=8),),
+        damage_modifier=0,
+        damage_type="thunder",
+        attack_ability="int",
+        save_ability="con",
+        half_on_success=True,
+        max_targets=8,
+        target_cluster_feet=10,
     ),
     "divine_smite": SpellDefinition(
         spell_id="divine_smite",

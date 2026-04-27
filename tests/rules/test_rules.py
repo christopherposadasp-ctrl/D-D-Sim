@@ -1559,6 +1559,12 @@ def prepare_ray_of_sickness_test_wizard(encounter) -> None:
         encounter.units["F1"].prepared_combat_spell_ids.append("ray_of_sickness")
 
 
+def prepare_shatter_test_wizard(encounter) -> None:
+    if "shatter" not in encounter.units["F1"].prepared_combat_spell_ids:
+        encounter.units["F1"].prepared_combat_spell_ids.append("shatter")
+    encounter.units["F1"].resources.spell_slots_level_2 = 1
+
+
 def test_false_life_grants_temporary_hp_spends_slot_and_logs_event() -> None:
     spell = get_spell_definition("false_life")
     encounter = create_encounter(build_wizard_config("wizard-false-life"))
@@ -2305,6 +2311,139 @@ def test_acid_splash_out_of_range_does_not_roll_or_spend_slot() -> None:
     assert spell_events[0].event_type == "skip"
     assert "Acid Splash: is not in range" in spell_events[0].text_summary
     assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+
+
+def test_shatter_deals_thunder_damage_on_con_saves_spends_level2_slot_and_logs_events() -> None:
+    spell = get_spell_definition("shatter")
+    encounter = create_encounter(build_wizard_config("wizard-shatter"))
+    prepare_shatter_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=12, y=5)
+    encounter.units["E1"].max_hp = 30
+    encounter.units["E1"].current_hp = 30
+    encounter.units["E2"].max_hp = 30
+    encounter.units["E2"].current_hp = 30
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "shatter",
+            "target_id": "E1",
+            "target_ids": ["E1", "E2"],
+        },
+        overrides=AttackRollOverrides(save_rolls=[1, 20], damage_rolls=[3, 4, 5]),
+    )
+
+    assert spell.level == 2
+    assert spell.school == "evocation"
+    assert spell.save_ability == "con"
+    assert spell.damage_type == "thunder"
+    assert spell.range_feet == 60
+    assert spell.half_on_success is True
+    assert spell.target_cluster_feet == 10
+    assert [event.event_type for event in spell_events] == [
+        "phase_change",
+        "saving_throw",
+        "attack",
+        "saving_throw",
+        "attack",
+    ]
+    phase_event = spell_events[0]
+    first_save = spell_events[1]
+    first_attack = spell_events[2]
+    second_save = spell_events[3]
+    second_attack = spell_events[4]
+    assert phase_event.resolved_totals["spellId"] == "shatter"
+    assert phase_event.resolved_totals["targetCount"] == 2
+    assert phase_event.resolved_totals["targetClusterFeet"] == 10
+    assert first_save.resolved_totals["ability"] == "con"
+    assert first_save.resolved_totals["success"] is False
+    assert first_attack.resolved_totals["spellId"] == "shatter"
+    assert first_attack.resolved_totals["spellLevel"] == 2
+    assert first_attack.resolved_totals["saveSucceeded"] is False
+    assert first_attack.resolved_totals["fullDamage"] == 12
+    assert first_attack.resolved_totals["damageApplied"] == 12
+    assert first_attack.resolved_totals["spellSlotsLevel2Remaining"] == 0
+    assert first_attack.raw_rolls["damageRolls"] == [3, 4, 5]
+    assert first_attack.damage_details.damage_components[0].damage_type == "thunder"
+    assert first_attack.damage_details.total_damage == 12
+    assert second_save.resolved_totals["success"] is True
+    assert second_attack.resolved_totals["saveSucceeded"] is True
+    assert second_attack.resolved_totals["damageApplied"] == 6
+    assert second_attack.damage_details.total_damage == 6
+    assert "Shatter" in first_attack.text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 0
+
+
+def test_shatter_requires_prepared_spell_and_does_not_spend_level2_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shatter-unprepared"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].resources.spell_slots_level_2 = 1
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shatter", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[3, 4, 5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Shatter: is not prepared" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 1
+
+
+def test_shatter_rejects_targets_outside_burst_cluster_without_spending_slot() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shatter-spread-targets"))
+    prepare_shatter_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=13, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "shatter",
+            "target_id": "E1",
+            "target_ids": ["E1", "E2"],
+        },
+        overrides=AttackRollOverrides(save_rolls=[1, 1], damage_rolls=[3, 4, 5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "Shatter: targets are not within 10 feet of each other" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 1
+
+
+def test_shatter_fails_cleanly_when_no_level2_slots_remain() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shatter-no-slot"))
+    prepare_shatter_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].resources.spell_slots_level_2 = 0
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shatter", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[3, 4, 5]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 2 spell slots remain" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 0
 
 
 def test_shocking_grasp_prevents_opportunity_attacks_until_target_turn_start() -> None:
