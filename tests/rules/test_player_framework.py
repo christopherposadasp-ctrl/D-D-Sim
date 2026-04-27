@@ -267,6 +267,36 @@ def test_wizard_sample_build_uses_spellcasting_registry_metadata() -> None:
     assert wizard.resource_pools == {"spell_slots_level_1": 2}
 
 
+def test_wizard_level2_sample_build_uses_expanded_spellcasting_metadata() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level2-registry-metadata",
+            placements=build_trio_placements(),
+            player_preset_id="wizard_level2_sample_trio",
+        )
+    )
+    wizard = encounter.units["F1"]
+
+    assert wizard.class_id == "wizard"
+    assert wizard.level == 2
+    assert wizard.loadout_id == "wizard_level2_sample_build"
+    assert wizard.behavior_profile == "arcane_artillery"
+    assert wizard.ac == 12
+    assert wizard.max_hp == 14
+    assert wizard.role_tags == ["caster"]
+    assert wizard.resources.spell_slots_level_1 == 3
+    assert wizard.combat_cantrip_ids == ["fire_bolt", "shocking_grasp"]
+    assert wizard.prepared_combat_spell_ids == ["magic_missile", "shield", "burning_hands", "mage_armor"]
+    assert wizard.cantrips_known == 3
+    assert wizard.spellbook_spells == 8
+    assert wizard.prepared_spells == 5
+    assert "spellcasting" in wizard.feature_ids
+    assert "ritual_adept" in wizard.feature_ids
+    assert "arcane_recovery" in wizard.feature_ids
+    assert "scholar" in wizard.feature_ids
+    assert wizard.resource_pools == {"spell_slots_level_1": 3}
+
+
 def test_paladin_sample_build_uses_support_tank_registry_metadata() -> None:
     encounter = create_encounter(
         EncounterConfig(
@@ -603,6 +633,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "rogue_ranged_level4_assassin_sample_build",
         "rogue_ranged_level5_assassin_sample_build",
         "wizard_sample_build",
+        "wizard_level2_sample_build",
     ]
     assert [entry.id for entry in catalog.player_presets] == [
         "fighter_sample_trio",
@@ -627,6 +658,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "paladin_level4_sample_trio",
         "paladin_level5_sample_trio",
         "wizard_sample_trio",
+        "wizard_level2_sample_trio",
         "martial_mixed_party",
     ]
     assert {entry.id: entry.max_supported_level for entry in catalog.classes} == {
@@ -635,7 +667,7 @@ def test_player_catalog_reports_current_supported_sample_party() -> None:
         "monk": 2,
         "paladin": 5,
         "rogue": 5,
-        "wizard": 1,
+        "wizard": 2,
     }
 
 
@@ -653,11 +685,12 @@ def test_default_player_preset_loads_fighter_paladin_rogue_and_wizard() -> None:
     assert encounter.units["F2"].resources.channel_divinity_uses == 2
     assert encounter.units["F3"].loadout_id == "rogue_ranged_level5_assassin_sample_build"
     assert encounter.units["F3"].level == 5
-    assert encounter.units["F4"].loadout_id == "wizard_sample_build"
-    assert encounter.units["F4"].level == 1
+    assert encounter.units["F4"].loadout_id == "wizard_level2_sample_build"
+    assert encounter.units["F4"].level == 2
     assert encounter.units["F4"].class_id == "wizard"
+    assert encounter.units["F4"].resources.spell_slots_level_1 == 3
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 144
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 150
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:

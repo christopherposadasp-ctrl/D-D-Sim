@@ -296,6 +296,12 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Wizard short-rest slot recovery tracked as metadata; live encounter actions do not use it yet.",
     ),
+    "scholar": FeatureDefinition(
+        feature_id="scholar",
+        display_name="Scholar",
+        kind="class_feature",
+        description="Wizard level 2 academic expertise tracked as metadata for future non-combat checks.",
+    ),
     "ki": FeatureDefinition(
         feature_id="ki",
         display_name="Ki",

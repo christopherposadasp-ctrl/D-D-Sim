@@ -1354,7 +1354,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "id": "wizard",
       "displayName": "Wizard",
       "category": "spellcaster",
-      "maxSupportedLevel": 1
+      "maxSupportedLevel": 2
     }
   ],
   "loadouts": [
@@ -1824,6 +1824,22 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       "weaponIds": [
         "dagger"
       ]
+    },
+    {
+      "id": "wizard_level2_sample_build",
+      "displayName": "Level 2 Wizard Sample Build",
+      "classId": "wizard",
+      "level": 2,
+      "maxHp": 14,
+      "featureIds": [
+        "spellcasting",
+        "ritual_adept",
+        "arcane_recovery",
+        "scholar"
+      ],
+      "weaponIds": [
+        "dagger"
+      ]
     }
   ],
   "playerPresets": [
@@ -2246,9 +2262,28 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
       ]
     },
     {
+      "id": "wizard_level2_sample_trio",
+      "displayName": "Level 2 Wizard Trio",
+      "description": "Three level 2 wizards with extra durability, a third level 1 slot, and Mage Armor metadata.",
+      "units": [
+        {
+          "unitId": "F1",
+          "loadoutId": "wizard_level2_sample_build"
+        },
+        {
+          "unitId": "F2",
+          "loadoutId": "wizard_level2_sample_build"
+        },
+        {
+          "unitId": "F3",
+          "loadoutId": "wizard_level2_sample_build"
+        }
+      ]
+    },
+    {
       "id": "martial_mixed_party",
       "displayName": "Mixed Martial Party",
-      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 1 wizard.",
+      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 wizard.",
       "units": [
         {
           "unitId": "F1",
@@ -2264,7 +2299,7 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
         },
         {
           "unitId": "F4",
-          "loadoutId": "wizard_sample_build"
+          "loadoutId": "wizard_level2_sample_build"
         }
       ]
     }
@@ -2308,6 +2343,7 @@ const ACTIVE_PLAYER_PRESET_IDS = [
   'paladin_level4_sample_trio',
   'paladin_level5_sample_trio',
   'wizard_sample_trio',
+  'wizard_level2_sample_trio',
   'martial_mixed_party',
 ];
 
@@ -2856,7 +2892,7 @@ describe('App', () => {
       { unitId: 'F1', loadoutId: 'fighter_level5_sample_build' },
       { unitId: 'F2', loadoutId: 'paladin_level5_sample_build' },
       { unitId: 'F3', loadoutId: 'rogue_ranged_level5_assassin_sample_build' },
-      { unitId: 'F4', loadoutId: 'wizard_sample_build' },
+      { unitId: 'F4', loadoutId: 'wizard_level2_sample_build' },
     ]);
   });
 

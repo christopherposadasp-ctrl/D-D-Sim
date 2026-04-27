@@ -873,6 +873,28 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         combat_cantrip_ids=("fire_bolt", "shocking_grasp"),
         prepared_combat_spell_ids=("magic_missile", "shield", "burning_hands", "mage_armor"),
     ),
+    "wizard_level2_sample_build": PlayerLoadoutDefinition(
+        loadout_id="wizard_level2_sample_build",
+        display_name="Level 2 Wizard Sample Build",
+        class_id="wizard",
+        level=2,
+        template_name="Level 2 Wizard Sample Build",
+        behavior_profile="arcane_artillery",
+        max_hp=14,
+        ac=12,
+        speed=30,
+        initiative_mod=2,
+        passive_perception=11,
+        ability_mods=wizard_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={"dagger": player_weapons["dagger"]},
+        role_tags=("caster",),
+        medicine_modifier=1,
+        default_melee_weapon_id="dagger",
+        combat_cantrip_ids=("fire_bolt", "shocking_grasp"),
+        prepared_combat_spell_ids=("magic_missile", "shield", "burning_hands", "mage_armor"),
+    ),
 }
 
 PLAYER_LOADOUTS.update(
@@ -1115,15 +1137,24 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
         description="Three level 1 wizards with direct damage, melee escape, Shield, and Burning Hands pressure.",
         units=tuple(PlayerPresetUnit(unit_id=fighter_id, loadout_id="wizard_sample_build") for fighter_id in TRIO_PLAYER_IDS),
     ),
+    "wizard_level2_sample_trio": PlayerPresetDefinition(
+        preset_id="wizard_level2_sample_trio",
+        display_name="Level 2 Wizard Trio",
+        description="Three level 2 wizards with extra durability, a third level 1 slot, and Mage Armor metadata.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="wizard_level2_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 1 wizard.",
+        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 wizard.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
             PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level5_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
-            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_sample_build"),
+            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_level2_sample_build"),
         ),
     ),
 }
@@ -1166,6 +1197,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "paladin_level4_sample_trio",
     "paladin_level5_sample_trio",
     "wizard_sample_trio",
+    "wizard_level2_sample_trio",
     "martial_mixed_party",
 )
 

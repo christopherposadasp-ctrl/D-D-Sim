@@ -311,6 +311,21 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
             "prepared_spells": 4,
         },
     ),
+    (
+        "wizard",
+        2,
+    ): ClassProgressionDefinition(
+        class_id="wizard",
+        level=2,
+        feature_ids=("spellcasting", "ritual_adept", "arcane_recovery", "scholar"),
+        resource_pools={"spell_slots_level_1": 3},
+        attack_count=1,
+        feature_scalars={
+            "cantrips_known": 3,
+            "spellbook_spells": 8,
+            "prepared_spells": 5,
+        },
+    ),
 }
 
 

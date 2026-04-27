@@ -563,6 +563,22 @@ def test_smart_wizard_uses_fire_bolt_as_the_default_ranged_action() -> None:
     assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
 
 
+def test_level2_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level2-no-mage-armor-ai",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+
+
 def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_by_one_enemy() -> None:
     encounter = create_encounter(
         EncounterConfig(

@@ -1127,6 +1127,33 @@ def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert "No level 1 spell slots remain" in spell_events[0].text_summary
 
 
+def test_level2_wizard_has_third_level1_slot_for_leveled_spells() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level2-third-slot",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="wizard_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].max_hp = 50
+    encounter.units["E1"].current_hp = 50
+
+    for _ in range(3):
+        spell_events = resolve_cast_spell_action(
+            encounter,
+            "F1",
+            {"kind": "cast_spell", "spell_id": "magic_missile", "target_id": "E1"},
+            overrides=AttackRollOverrides(damage_rolls=[1, 1, 1]),
+        )
+        assert any(event.event_type == "attack" for event in spell_events)
+
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 0
+
+
 def test_chromatic_orb_hits_with_selected_damage_type_and_spends_slot() -> None:
     spell = get_spell_definition("chromatic_orb")
     encounter = create_encounter(build_wizard_config("wizard-chromatic-orb"))
