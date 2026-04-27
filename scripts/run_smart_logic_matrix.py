@@ -28,7 +28,7 @@ DEFAULT_SCENARIO_IDS = (
     "hobgoblin_command_screen",
     "berserker_overrun",
 )
-DEFAULT_BATCH_SIZE = 1000
+DEFAULT_BATCH_SIZE = 900
 DEFAULT_PLAYER_BEHAVIOR: PlayerBehavior = "balanced"
 DEFAULT_MONSTER_BEHAVIOR: MonsterBehaviorSelection = "combined"
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "smart_logic_matrix"
