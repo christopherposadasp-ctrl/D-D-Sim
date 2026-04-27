@@ -202,6 +202,8 @@ def reset_legendary_action_uses_at_turn_start(state: EncounterState, actor_id: s
         fear_action = LEGENDARY_CONE_FEAR_ACTIONS.get(action_id)
         if fear_action and fear_action.resource_pool_id in actor.resource_pools:
             actor.resource_pools[fear_action.resource_pool_id] = 1
+        if action_id == "fiery_rays" and "fiery_rays_available" in actor.resource_pools:
+            actor.resource_pools["fiery_rays_available"] = 1
 
 
 def choose_legendary_pounce_option(state: EncounterState, actor: UnitState):
@@ -724,6 +726,200 @@ def resolve_legendary_frightful_presence(
     return events
 
 
+SCORCHING_RAY_RAY_COUNT = 3
+
+
+def choose_scorching_ray_target_id(
+    state: EncounterState,
+    actor_id: str,
+    preferred_target_id: str | None = None,
+) -> str | None:
+    actor = state.units[actor_id]
+    weapon = actor.attacks.get("scorching_ray")
+    if not weapon:
+        return None
+
+    if preferred_target_id:
+        preferred_target = state.units.get(preferred_target_id)
+        if (
+            preferred_target
+            and is_unit_conscious(preferred_target)
+            and get_attack_context(state, actor_id, preferred_target_id, weapon).legal
+        ):
+            return preferred_target_id
+
+    for target in get_ranked_attack_targets(state, actor, preferred_weapon_id="scorching_ray"):
+        if target.current_hp <= 0 or target.conditions.dead or target.conditions.unconscious:
+            continue
+        if get_attack_context(state, actor_id, target.id, weapon).legal:
+            return target.id
+
+    return None
+
+
+def build_scorching_ray_attack_overrides(
+    state: EncounterState,
+    actor_id: str,
+    target_id: str,
+    attack_rolls: list[int],
+    damage_rolls: list[int],
+) -> AttackRollOverrides:
+    actor = state.units[actor_id]
+    target = state.units[target_id]
+    weapon = actor.attacks["scorching_ray"]
+    attack_mode, _, _ = get_attack_mode(state, actor, actor_id, target, target_id, weapon)
+    attack_roll_count = 1 if attack_mode == "normal" else 2
+    ray_damage_die_count = sum(spec.count for spec in weapon.damage_dice)
+    return AttackRollOverrides(
+        attack_rolls=[attack_rolls.pop(0) for _ in range(min(attack_roll_count, len(attack_rolls)))],
+        damage_rolls=[damage_rolls.pop(0) for _ in range(min(ray_damage_die_count, len(damage_rolls)))],
+    )
+
+
+def resolve_scorching_ray_attacks(
+    state: EncounterState,
+    actor_id: str,
+    preferred_target_ids: list[str] | None = None,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if "scorching_ray" not in actor.attacks:
+        return [create_skip_event(state, actor_id, "Scorching Ray is unavailable.")]
+
+    attack_rolls = list(overrides.attack_rolls if overrides else [])
+    damage_rolls = list(overrides.damage_rolls if overrides else [])
+    preferred_target_ids = preferred_target_ids or []
+    events: list[CombatEvent] = []
+
+    for ray_index in range(SCORCHING_RAY_RAY_COUNT):
+        if actor.conditions.dead or actor.current_hp <= 0:
+            break
+        preferred_target_id = (
+            preferred_target_ids[ray_index]
+            if ray_index < len(preferred_target_ids)
+            else (preferred_target_ids[-1] if preferred_target_ids else None)
+        )
+        target_id = choose_scorching_ray_target_id(state, actor_id, preferred_target_id)
+        if not target_id:
+            if not events:
+                return [create_skip_event(state, actor_id, "Scorching Ray has no legal target.")]
+            break
+
+        ray_overrides = build_scorching_ray_attack_overrides(state, actor_id, target_id, attack_rolls, damage_rolls)
+        attack_event, _ = resolve_attack(
+            state,
+            ResolveAttackArgs(
+                attacker_id=actor_id,
+                target_id=target_id,
+                weapon_id="scorching_ray",
+                savage_attacker_available=False,
+                overrides=ray_overrides,
+            ),
+        )
+        attack_event.resolved_totals["specialAction"] = "scorching_ray"
+        attack_event.resolved_totals["scorchingRayIndex"] = ray_index + 1
+        events.extend(build_attack_reaction_pre_events(state, attack_event))
+        events.extend(build_attack_reaction_phase_events(state, attack_event))
+        events.append(attack_event)
+        events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
+        events.extend(maybe_resolve_sentinel_guardian_follow_up(state, attack_event))
+        for resolved_target_id in attack_event.target_ids:
+            if state.units[resolved_target_id].conditions.dead:
+                events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+                events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+
+    return events
+
+
+def resolve_scorching_ray(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    overrides: AttackRollOverrides | None = None,
+    *,
+    include_phase: bool = True,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    try:
+        definition = get_monster_definition_for_unit(actor)
+    except ValueError:
+        return [create_skip_event(state, actor_id, "Scorching Ray is not configured.")]
+    if "scorching_ray" not in definition.special_action_ids:
+        return [create_skip_event(state, actor_id, "Scorching Ray is not available to this creature.")]
+
+    raw_target_ids = action.get("target_ids")
+    preferred_target_ids: list[str] = []
+    if isinstance(raw_target_ids, list):
+        preferred_target_ids = [str(target_id) for target_id in raw_target_ids]
+    elif isinstance(action.get("target_id"), str):
+        preferred_target_ids = [str(action["target_id"])]
+
+    primary_target_id = choose_scorching_ray_target_id(
+        state,
+        actor_id,
+        preferred_target_ids[0] if preferred_target_ids else None,
+    )
+    if not primary_target_id:
+        return [create_skip_event(state, actor_id, "Scorching Ray has no legal target.")]
+    if not preferred_target_ids:
+        preferred_target_ids = [primary_target_id]
+
+    events: list[CombatEvent] = []
+    if include_phase:
+        events.append(
+            add_unit_phase_event(
+                state,
+                actor_id,
+                primary_target_id,
+                f"{actor_id} casts Scorching Ray.",
+                condition_deltas=[f"{actor_id} makes three ranged spell attacks."],
+                resolved_totals={"specialAction": "scorching_ray", "rayCount": SCORCHING_RAY_RAY_COUNT},
+            )
+        )
+    events.extend(resolve_scorching_ray_attacks(state, actor_id, preferred_target_ids, overrides))
+    return events
+
+
+def resolve_legendary_fiery_rays(
+    state: EncounterState,
+    actor_id: str,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    if "fiery_rays" not in get_legendary_action_ids_for_unit(actor):
+        return []
+    if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+        return []
+    if actor.resource_pools.get("fiery_rays_available", 0) <= 0:
+        return []
+
+    target_id = choose_scorching_ray_target_id(state, actor_id)
+    if not target_id:
+        return []
+
+    actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    actor.resource_pools["fiery_rays_available"] = 0
+    events = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            target_id,
+            f"{actor_id} uses Legendary Action: Fiery Rays.",
+            condition_deltas=[
+                f"{actor_id} spends 1 legendary action use on Fiery Rays.",
+                f"{actor_id} cannot use Fiery Rays again until the start of its next turn.",
+            ],
+            resolved_totals={
+                "legendaryAction": "fiery_rays",
+                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+                "fieryRaysAvailable": actor.resource_pools.get("fiery_rays_available", 0),
+            },
+        )
+    ]
+    events.extend(resolve_scorching_ray_attacks(state, actor_id, [target_id], overrides))
+    return events
+
+
 def resolve_legendary_actions_after_turn(state: EncounterState, triggering_actor_id: str) -> list[CombatEvent]:
     triggering_actor = state.units[triggering_actor_id]
     if "dragon" in triggering_actor.creature_tags:
@@ -751,6 +947,13 @@ def resolve_legendary_actions_after_turn(state: EncounterState, triggering_actor
             frightful_events = resolve_legendary_frightful_presence(state, actor.id)
             if frightful_events:
                 events.extend(frightful_events)
+                if fighters_defeated(state) or goblins_defeated(state):
+                    break
+                continue
+        if "fiery_rays" in legendary_action_ids:
+            fiery_events = resolve_legendary_fiery_rays(state, actor.id)
+            if fiery_events:
+                events.extend(fiery_events)
                 if fighters_defeated(state) or goblins_defeated(state):
                     break
                 continue
@@ -2214,6 +2417,8 @@ def resolve_special_action_events(
 ) -> list[CombatEvent]:
     if action.get("action_id") in DRAGON_BREATH_ACTIONS:
         return resolve_dragon_cone_breath(state, actor_id, action, overrides)
+    if action.get("action_id") == "scorching_ray":
+        return resolve_scorching_ray(state, actor_id, action, overrides)
     return [resolve_special_action(state, actor_id, action)]
 
 
@@ -2724,6 +2929,17 @@ def resolve_attack_action(
             break
 
         target_id, weapon_id = selected_target_and_weapon
+        if weapon_id == "scorching_ray":
+            attack_events.extend(
+                resolve_scorching_ray_attacks(
+                    state,
+                    actor_id,
+                    [target_id],
+                    step_overrides[step_index] if step_overrides and step_index < len(step_overrides) else None,
+                )
+            )
+            continue
+
         if step_index == 0:
             reckless_event = maybe_commit_reckless_attack(state, actor_id, target_id, weapon_id)
             if reckless_event:

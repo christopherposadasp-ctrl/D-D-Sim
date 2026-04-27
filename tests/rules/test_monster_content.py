@@ -275,6 +275,19 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert "fire_breath" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("fire_breath_available") == 1
 
+    if "scorching_ray" in expectation.special_mechanics:
+        assert "scorching_ray" in definition.special_action_ids
+        scorching_ray = definition.attacks["scorching_ray"]
+        assert scorching_ray.attack_bonus == 12
+        assert tuple((die.count, die.sides) for die in scorching_ray.damage_dice) == ((2, 6),)
+        assert scorching_ray.damage_type == "fire"
+        assert scorching_ray.range is not None
+        assert (scorching_ray.range.normal, scorching_ray.range.long) == (120, 120)
+
+    if "fiery_rays" in expectation.special_mechanics:
+        assert "fiery_rays" in definition.legendary_action_ids
+        assert runtime_unit.resource_pools.get("fiery_rays_available") == 1
+
     if "no_legendary_actions" in expectation.special_mechanics:
         legendary_fields = (
             definition.action_ids,

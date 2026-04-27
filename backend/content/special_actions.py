@@ -73,6 +73,11 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
         display_name="Fire Breath",
         description="Exhale a fiery cone that forces Dexterity saves for half fire damage.",
     ),
+    "scorching_ray": SpecialActionDefinition(
+        action_id="scorching_ray",
+        display_name="Scorching Ray",
+        description="Cast three ranged fire rays as a monster spell-like action.",
+    ),
     "freezing_burst": SpecialActionDefinition(
         action_id="freezing_burst",
         display_name="Freezing Burst",

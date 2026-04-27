@@ -20,6 +20,7 @@ from backend.engine.combat.engine import (
     resolve_legendary_actions_after_turn,
     resolve_legendary_freezing_burst,
     resolve_legendary_frightful_presence,
+    resolve_scorching_ray,
 )
 from backend.engine.models.state import (
     DamageComponentResult,
@@ -2304,6 +2305,51 @@ def test_adult_red_dragon_fire_breath_respects_fire_immunity() -> None:
     assert attacks[0].damage_details.final_damage_to_hp == 0
 
 
+def test_adult_red_dragon_scorching_ray_resolves_three_fixed_fire_rays() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+
+    events = resolve_scorching_ray(
+        encounter,
+        "E1",
+        {"action_id": "scorching_ray", "target_id": "F1"},
+        AttackRollOverrides(attack_rolls=[10, 10, 10], damage_rolls=[3, 4, 2, 5, 6, 1]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert [event.damage_details.weapon_id for event in attacks] == [
+        "scorching_ray",
+        "scorching_ray",
+        "scorching_ray",
+    ]
+    assert [event.resolved_totals["scorchingRayIndex"] for event in attacks] == [1, 2, 3]
+    assert [event.damage_details.total_damage for event in attacks] == [7, 7, 7]
+    assert all(event.resolved_totals["hit"] is True for event in attacks)
+
+
+def test_adult_red_dragon_scorching_ray_respects_fire_immunity() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=12, y=5)
+    encounter.units["F1"].damage_immunities = ("fire",)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_scorching_ray(
+        encounter,
+        "E1",
+        {"action_id": "scorching_ray", "target_id": "F1"},
+        AttackRollOverrides(attack_rolls=[10, 10, 10], damage_rolls=[3, 4, 2, 5, 6, 1]),
+    )
+    attacks = enemy_attack_events(events)
+
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert [event.damage_details.final_damage_to_hp for event in attacks] == [0, 0, 0]
+    assert [event.damage_details.resisted_damage for event in attacks] == [7, 7, 7]
+
+
 def test_adult_red_dragon_fire_breath_recharge_rolls_restore_only_on_five_or_higher() -> None:
     encounter = build_monster_benchmark_encounter("adult_red_dragon")
     encounter.units["E1"].resource_pools["fire_breath_available"] = 0
@@ -2390,7 +2436,33 @@ def test_adult_red_dragon_first_turn_lands_then_uses_three_rend_attacks_when_bre
     assert_occupied_squares_are_valid(encounter, "E1", "F1")
 
 
-def test_adult_red_dragon_uses_pounce_as_only_phase_one_legendary_action() -> None:
+def test_adult_red_dragon_uses_scorching_ray_multiattack_against_fire_vulnerable_target() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["fire_breath_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=8, y=5)
+    encounter.units["F1"].damage_vulnerabilities = ("fire",)
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {
+        "kind": "attack",
+        "target_id": "F1",
+        "weapon_id": "scorching_ray",
+        "attack_action_id": "scorching_ray_multiattack",
+    }
+    assert [event.damage_details.weapon_id for event in attacks] == [
+        "rend",
+        "scorching_ray",
+        "scorching_ray",
+        "scorching_ray",
+        "rend",
+    ]
+
+
+def test_adult_red_dragon_uses_fiery_rays_legendary_action_before_pounce() -> None:
     encounter = build_monster_benchmark_encounter("adult_red_dragon")
     defeat_other_units(encounter, "E1", "F1")
     encounter.units["E1"].position = GridPosition(x=8, y=8)
@@ -2400,11 +2472,44 @@ def test_adult_red_dragon_uses_pounce_as_only_phase_one_legendary_action() -> No
     attacks = enemy_attack_events(events)
     legendary_actions = [event.resolved_totals.get("legendaryAction") for event in events]
 
-    assert "pounce" in legendary_actions
+    assert "fiery_rays" in legendary_actions
+    assert "pounce" not in legendary_actions
     assert "freezing_burst" not in legendary_actions
     assert "frightful_presence" not in legendary_actions
     assert "commanding_presence" not in legendary_actions
+    assert [event.damage_details.weapon_id for event in attacks] == [
+        "scorching_ray",
+        "scorching_ray",
+        "scorching_ray",
+    ]
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["fiery_rays_available"] == 0
+
+
+def test_adult_red_dragon_fiery_rays_resets_on_dragon_turn_start() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    encounter.units["E1"].resource_pools["legendary_action_uses"] = 1
+    encounter.units["E1"].resource_pools["fiery_rays_available"] = 0
+
+    reset_legendary_action_uses_at_turn_start(encounter, "E1")
+
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+    assert encounter.units["E1"].resource_pools["fiery_rays_available"] == 1
+
+
+def test_adult_red_dragon_falls_back_to_pounce_when_fiery_rays_is_locked_out() -> None:
+    encounter = build_monster_benchmark_encounter("adult_red_dragon")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["fiery_rays_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=2, y=8)
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    attacks = enemy_attack_events(events)
+    legendary_actions = [event.resolved_totals.get("legendaryAction") for event in events]
+
     assert "fiery_rays" not in legendary_actions
+    assert "pounce" in legendary_actions
     assert [event.damage_details.weapon_id for event in attacks] == ["rend"]
 
 

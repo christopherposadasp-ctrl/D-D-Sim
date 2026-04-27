@@ -4981,6 +4981,35 @@ def build_dragon_breath_action(breath: DragonBreathActionDefinition, targeting) 
     }
 
 
+def choose_adult_red_scorching_ray_multiattack_action(state: EncounterState, actor: UnitState) -> dict[str, str] | None:
+    if actor.combat_role != "adult_red_dragon":
+        return None
+    if "scorching_ray" not in actor.attacks or "rend" not in actor.attacks:
+        return None
+
+    rend = actor.attacks["rend"]
+    scorching_ray = actor.attacks["scorching_ray"]
+    for target in get_ranked_attack_targets(state, actor, preferred_weapon_id="rend"):
+        if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+            continue
+        if "fire" not in target.damage_vulnerabilities:
+            continue
+        if "fire" in target.damage_immunities or "fire" in target.damage_resistances:
+            continue
+        if not get_attack_context(state, actor.id, target.id, rend).legal:
+            continue
+        if not get_attack_context(state, actor.id, target.id, scorching_ray).legal:
+            continue
+        return {
+            "kind": "attack",
+            "target_id": target.id,
+            "weapon_id": "scorching_ray",
+            "attack_action_id": "scorching_ray_multiattack",
+        }
+
+    return None
+
+
 def choose_dragon_landing_breath_option(
     state: EncounterState,
     actor: UnitState,
@@ -5048,6 +5077,10 @@ def get_dragon_decision(state: EncounterState, actor: UnitState) -> TurnDecision
                 ),
                 action=build_dragon_breath_action(breath, targeting),
             )
+
+    scorching_ray_multiattack = choose_adult_red_scorching_ray_multiattack_action(state, actor)
+    if scorching_ray_multiattack:
+        return TurnDecision(action=scorching_ray_multiattack)
 
     if can_use_opening_flight_landing(actor):
         return get_opening_flight_landing_decision(state, actor)
