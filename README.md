@@ -79,6 +79,48 @@ The working roadmap and design decisions are tracked in:
 
 For new class work, start with [docs/PLAYER_CLASS_IMPLEMENTATION.md](docs/PLAYER_CLASS_IMPLEMENTATION.md).
 
+## Quick Start
+
+Use PowerShell from the folder where you want the project:
+
+```powershell
+git clone https://github.com/christopherposadasp-ctrl/D-D-Sim.git
+Set-Location '.\D-D-Sim'
+```
+
+Install the Python and frontend dependencies:
+
+```powershell
+py -3.13 -m pip install -e .[dev]
+npm install
+```
+
+Start the Python backend in one PowerShell window:
+
+```powershell
+py -3.13 -m uvicorn backend.api.app:app --reload
+```
+
+Start the React frontend in a second PowerShell window:
+
+```powershell
+npm run dev
+```
+
+Open the Vite URL shown in the frontend terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+The backend API docs are available while the backend is running:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Use Python `3.12+`; this project is normally run with Python `3.13`. Run tests and scripts from the repo root, not from your user folder, or pytest will scan unrelated files.
+
 ## Frontend Commands
 
 ```powershell
