@@ -1,0 +1,221 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+from scripts import run_audit_validation as audit_validation
+
+
+def test_extracts_dev_tasks_and_runbook_direct_equivalents() -> None:
+    dev_text = '[ValidateSet("check-fast", "audit-validation")] [string]$Task'
+    runbook_text = "\n- `check-fast`: `py -3.13 -m pytest`\n- `audit-validation`: `py -3.13 .\\scripts\\run_audit_validation.py`\n"
+
+    assert audit_validation.extract_dev_tasks(dev_text) == ["check-fast", "audit-validation"]
+    assert audit_validation.extract_runbook_direct_equivalents(runbook_text) == {
+        "check-fast": "py -3.13 -m pytest",
+        "audit-validation": "py -3.13 .\\scripts\\run_audit_validation.py",
+    }
+
+
+def test_command_coverage_detects_doc_mismatch() -> None:
+    coverage = audit_validation.build_command_coverage(
+        wrapper_tasks=["check-fast", "audit-validation"],
+        runbook_mappings={"check-fast": "py -3.13 -m pytest"},
+    )
+
+    assert "audit-validation" in coverage["missingRunbookDirectEquivalent"]
+    assert "audit-validation" in coverage["undocumentedWrapperTasks"]
+
+
+def test_summarize_json_report_extracts_status_runtime_and_coverage(tmp_path: Path) -> None:
+    report_path = tmp_path / "report.json"
+    payload = {
+        "overallStatus": "warn",
+        "elapsedSeconds": 12.5,
+        "scenarioIds": ["goblin_screen"],
+        "playerPresetIds": ["martial_mixed_party"],
+        "warnings": ["sample warning"],
+        "rows": [{"status": "pass"}, {"status": "warn"}],
+    }
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = audit_validation.summarize_json_report(
+        report_path,
+        now=datetime.now(tz=UTC),
+        stale_days=14,
+    )
+
+    assert summary["status"] == "warn"
+    assert summary["elapsedSeconds"] == 12.5
+    assert summary["rowCount"] == 2
+    assert summary["warningCount"] == 2
+    assert summary["scenarioIds"] == ["goblin_screen"]
+    assert summary["playerPresetIds"] == ["martial_mixed_party"]
+
+
+def test_missing_report_lowers_confidence_without_failing_row() -> None:
+    mechanism = audit_validation.AuditMechanism(
+        task="example-audit",
+        purpose="example",
+        recommended_gate_level="checkpoint",
+        report_paths=("reports/does_not_exist/audit.json",),
+        overlap_candidates=(),
+    )
+
+    row = audit_validation.build_mechanism_row(
+        mechanism=mechanism,
+        wrapper_tasks=["example-audit"],
+        runbook_mappings={"example-audit": "py example.py"},
+        now=datetime.now(tz=UTC),
+        stale_days=14,
+    )
+
+    assert row["status"] == "warn"
+    assert row["validationConfidence"] == "low"
+    assert "json_report_missing" in row["confidenceReasons"]
+
+
+def test_segmented_class_summary_satisfies_class_evidence(tmp_path: Path) -> None:
+    summary_path = tmp_path / "fighter_barbarian_quick_latest.json"
+    summary_path.write_text(
+        json.dumps({"overallStatus": "warn", "results": [{"status": "pass"}, {"status": "warn"}]}),
+        encoding="utf-8",
+    )
+    mechanism = audit_validation.AuditMechanism(
+        task="class-audit-slices",
+        purpose="canonical class evidence",
+        recommended_gate_level="checkpoint",
+        report_paths=(str(summary_path),),
+        overlap_candidates=(),
+    )
+
+    row = audit_validation.build_mechanism_row(
+        mechanism=mechanism,
+        wrapper_tasks=["class-audit-slices"],
+        runbook_mappings={"class-audit-slices": "py -3.13 .\\scripts\\run_class_audit_slices.py"},
+        now=datetime.now(tz=UTC),
+        stale_days=14,
+    )
+
+    assert row["validationConfidence"] == "high"
+    assert row["status"] == "pass"
+    assert row["latestStatus"] == "warn"
+
+
+def test_failed_segmented_class_summary_needs_refresh(tmp_path: Path) -> None:
+    summary_path = tmp_path / "fighter_barbarian_quick_latest.json"
+    summary_path.write_text(json.dumps({"overallStatus": "fail", "results": [{"status": "timeout"}]}), encoding="utf-8")
+    mechanism = audit_validation.AuditMechanism(
+        task="class-audit-slices",
+        purpose="canonical class evidence",
+        recommended_gate_level="checkpoint",
+        report_paths=(str(summary_path),),
+        overlap_candidates=(),
+    )
+
+    row = audit_validation.build_mechanism_row(
+        mechanism=mechanism,
+        wrapper_tasks=["class-audit-slices"],
+        runbook_mappings={"class-audit-slices": "py -3.13 .\\scripts\\run_class_audit_slices.py"},
+        now=datetime.now(tz=UTC),
+        stale_days=14,
+    )
+    recommendations = audit_validation.build_recommendations([row])
+
+    assert row["validationConfidence"] == "low"
+    assert "canonical_class_evidence_failed" in row["confidenceReasons"]
+    assert recommendations["needsLaterValidation"] == ["class-audit-slices"]
+    assert recommendations["needsEvidenceRefresh"] == ["class-audit-slices"]
+
+
+def test_legacy_fighter_report_is_not_required_for_confidence() -> None:
+    mechanism = next(item for item in audit_validation.MECHANISMS if item.task == "fighter-audit-quick")
+
+    row = audit_validation.build_mechanism_row(
+        mechanism=mechanism,
+        wrapper_tasks=["fighter-audit-quick"],
+        runbook_mappings={"fighter-audit-quick": "py -3.13 .\\scripts\\run_fighter_audit.py"},
+        now=datetime.now(tz=UTC),
+        stale_days=14,
+    )
+
+    assert row["recommendedGateLevel"] == "forensic"
+    assert row["validationConfidence"] == "high"
+    assert row["reportArtifacts"] == []
+
+
+def test_heavy_smoke_measurement_is_skipped_without_include_heavy() -> None:
+    rows = [
+        {
+            "task": "pass2-stability",
+            "status": "pass",
+            "validationConfidence": "high",
+            "confidenceReasons": [],
+            "reportArtifacts": [],
+        }
+    ]
+
+    audit_validation.maybe_measure_rows(
+        rows=rows,
+        mechanisms=audit_validation.MECHANISMS,
+        measure_smoke=True,
+        include_heavy=False,
+        timeout_seconds=300,
+    )
+
+    assert rows[0]["smokeMeasurement"]["status"] == "skipped"
+    assert "Heavy command skipped" in rows[0]["smokeMeasurement"]["reason"]
+
+
+def test_report_payload_and_markdown_include_recommendations(tmp_path: Path) -> None:
+    rows = [
+        {
+            "task": "check-fast",
+            "status": "pass",
+            "recommendedGateLevel": "inner_loop",
+            "validationConfidence": "high",
+            "latestStatus": "unreported",
+            "inferredRuntimeClass": "unmeasured",
+            "reportArtifacts": [],
+        },
+        {
+            "task": "missing-audit",
+            "status": "warn",
+            "recommendedGateLevel": "checkpoint",
+            "validationConfidence": "low",
+            "latestStatus": "missing",
+            "inferredRuntimeClass": "unknown",
+            "reportArtifacts": [],
+        },
+    ]
+    coverage = {
+        "wrapperTasks": ["check-fast", "missing-audit"],
+        "runbookDirectEquivalentTasks": ["check-fast", "missing-audit"],
+        "missingFromWrapper": [],
+        "missingRunbookDirectEquivalent": [],
+        "undocumentedWrapperTasks": [],
+        "unknownWrapperTasks": [],
+    }
+
+    payload = audit_validation.build_report_payload(
+        context={"generatedAt": "2026-04-28T00:00:00+00:00", "branch": "integration", "commit": "abc123", "gitStatusShort": []},
+        rows=rows,
+        command_coverage=coverage,
+        measure_smoke=False,
+        include_heavy=False,
+        timeout_seconds=300,
+        stale_days=14,
+        json_path=tmp_path / "audit_validation.json",
+        markdown_path=tmp_path / "audit_validation.md",
+    )
+    markdown = audit_validation.format_report_markdown(payload)
+
+    assert payload["overallStatus"] == "warn"
+    assert payload["recommendations"]["keepInDefaultGate"] == ["check-fast"]
+    assert payload["recommendations"]["needsLaterValidation"] == ["missing-audit"]
+    assert payload["legacyClassAuditCommands"] == list(audit_validation.LEGACY_CLASS_AUDIT_COMMANDS)
+    assert payload["canonicalClassEvidence"]["task"] == "class-audit-slices"
+    assert "Audit Validation Report" in markdown
+    assert "Needs later validation" in markdown
+    assert "Canonical Class Evidence" in markdown

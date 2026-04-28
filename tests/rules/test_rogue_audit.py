@@ -76,6 +76,10 @@ def test_review_signature_probes_passes_quick_probe_set() -> None:
     hide_probe = next(probe for probe in probes if probe.probe_id == "hide_before_attack")
     assert hide_probe.hide_attempted is True
     assert hide_probe.hide_succeeded is True
+    after_hide_probe = next(probe for probe in probes if probe.probe_id == "hide_after_attack")
+    assert after_hide_probe.bonus_action == {"kind": "hide", "timing": "after_movement"}
+    assert after_hide_probe.hide_attempted is True
+    assert after_hide_probe.hide_succeeded is True
 
 
 def test_build_preset_aggregates_flags_smart_underperforming_dumb() -> None:

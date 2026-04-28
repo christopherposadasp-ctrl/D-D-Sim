@@ -115,6 +115,7 @@ Use the PowerShell task runner for the standard checks:
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
+.\scripts\dev.ps1 audit-validation
 .\scripts\dev.ps1 fighter-audit-quick
 .\scripts\dev.ps1 fighter-audit-full
 .\scripts\dev.ps1 barbarian-audit-quick
@@ -137,13 +138,14 @@ These map to:
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile
 - `audit-health`: the code-health and benchmark audit
-- `fighter-audit-quick`: the dedicated Fighter audit quick profile
-- `fighter-audit-full`: the dedicated Fighter audit full profile
-- `barbarian-audit-quick`: the dedicated Barbarian audit quick profile
-- `barbarian-audit-full`: the dedicated Barbarian audit full profile
+- `audit-validation`: measure-first report on audit command coverage, report freshness, runtime evidence, and overlap candidates
+- `fighter-audit-quick`: legacy targeted Fighter audit; use segmented slices for full Fighter matrix evidence
+- `fighter-audit-full`: legacy targeted Fighter full audit
+- `barbarian-audit-quick`: legacy targeted Barbarian audit; use segmented slices for full Barbarian matrix evidence
+- `barbarian-audit-full`: legacy targeted Barbarian full audit
 - `rogue-audit-quick`: the dedicated level 2 ranged Rogue audit
 - `rogue-audit-full`: the dedicated Rogue audit full profile
-- `class-audit-slices`: timeout-safe segmented Fighter/Barbarian audit slices
+- `class-audit-slices`: canonical timeout-safe segmented Fighter/Barbarian checkpoint evidence
 - `behavior-diagnostics`: smart-vs-dumb behavior investigation helper
 - `nightly-audit`: the nightly layered audit protocol
 - `pass2-stability`: the deterministic replay/batch and async stability gate
@@ -159,6 +161,7 @@ The task runner passes through extra arguments to the underlying script. Example
 .\scripts\dev.ps1 pc-tuning-sample --profile wizard --runs-per-scenario 20
 .\scripts\dev.ps1 audit-quick --scenario goblin_screen
 .\scripts\dev.ps1 audit-full --json
+.\scripts\dev.ps1 class-audit-slices --class both --profile quick --timeout-seconds 300 --summary-json-path .\reports\class_audit\fighter_barbarian_quick_latest.json --summary-markdown-path .\reports\class_audit\fighter_barbarian_quick_latest.md
 ```
 
 Routine development should usually run:
@@ -168,7 +171,9 @@ Routine development should usually run:
 .\scripts\dev.ps1 party-validation
 ```
 
-Use the broader audit commands before major merges, broad rules changes, or release checkpoints.
+Use the broader audit commands before major merges, broad rules changes, or release checkpoints. Fighter/Barbarian
+checkpoint evidence should use `class-audit-slices`; the monolithic Fighter/Barbarian commands are targeted legacy tools,
+not the recommended full-matrix route.
 
 ## Direct Python Commands
 

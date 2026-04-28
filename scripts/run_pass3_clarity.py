@@ -118,6 +118,7 @@ DOC_REQUIREMENTS = {
         "nightly-audit",
         "pass2-stability",
         "pass3-clarity",
+        "audit-validation",
     ),
     "docs/MASTER_NOTES.md": (
         "Pass 1 closed",
@@ -135,6 +136,7 @@ DOC_REQUIREMENTS = {
         "Pass 3",
         "nightly-audit",
         "pass3-clarity",
+        "audit-validation",
     ),
 }
 
@@ -143,6 +145,7 @@ COMMAND_REQUIREMENTS = (
     CommandDocRequirement("audit-quick", ("scripts\\run_scenario_audit.py", "scripts/run_scenario_audit.py")),
     CommandDocRequirement("audit-full", ("run_scenario_audit.py", "--full")),
     CommandDocRequirement("audit-health", ("scripts\\run_code_health_audit.py", "scripts/run_code_health_audit.py")),
+    CommandDocRequirement("audit-validation", ("scripts\\run_audit_validation.py", "scripts/run_audit_validation.py")),
     CommandDocRequirement("fighter-audit-quick", ("scripts\\run_fighter_audit.py", "scripts/run_fighter_audit.py")),
     CommandDocRequirement("fighter-audit-full", ("run_fighter_audit.py", "--full")),
     CommandDocRequirement("barbarian-audit-quick", ("scripts\\run_barbarian_audit.py", "scripts/run_barbarian_audit.py")),

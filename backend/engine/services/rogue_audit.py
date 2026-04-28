@@ -594,9 +594,11 @@ def run_hide_after_attack_probe(seed: str) -> RogueSignatureProbeResult:
             player_behavior="smart",
         )
     )
-    encounter.units["F1"].position = GridPosition(x=3, y=8)
+    encounter.units["F1"].position = GridPosition(x=5, y=8)
     encounter.units["F1"].combat_skill_modifiers["stealth"] = 30
     encounter.units["E4"].position = GridPosition(x=8, y=8)
+    encounter.units["E4"].max_hp = 100
+    encounter.units["E4"].current_hp = 100
     defeat_other_enemies(encounter, "E4")
     set_active_actor(encounter)
 
@@ -613,18 +615,22 @@ def run_hide_after_attack_probe(seed: str) -> RogueSignatureProbeResult:
     hide_succeeded = bool(hide_event and hide_event.resolved_totals.get("success"))
 
     failures: list[str] = []
-    if decision.pre_action_movement is None:
-        failures.append("Ranged Rogue did not reposition into a hide-ready square before attacking.")
-    elif not can_attempt_hide_from_position(encounter, "F1", decision.pre_action_movement.path[-1]):
-        failures.append("Ranged Rogue did not choose a legal hide-ready square before attacking.")
-    if decision.bonus_action != {"kind": "hide", "timing": "after_action"}:
-        failures.append("Ranged Rogue did not spend Cunning Action Hide after attacking from the hide-ready square.")
+    if can_attempt_hide_from_position(encounter, "F1", encounter.units["F1"].position):
+        failures.append("The after-attack hide probe started the Rogue in an already hide-ready square.")
+    if decision.pre_action_movement is not None:
+        failures.append("Ranged Rogue moved before attacking instead of preserving the attack-then-hide line.")
+    if decision.post_action_movement is None:
+        failures.append("Ranged Rogue did not reposition into a hide-ready square after attacking.")
+    elif not can_attempt_hide_from_position(encounter, "F1", decision.post_action_movement.path[-1]):
+        failures.append("Ranged Rogue did not choose a legal post-attack hide-ready square.")
+    if decision.bonus_action != {"kind": "hide", "timing": "after_movement"}:
+        failures.append("Ranged Rogue did not spend Cunning Action Hide after post-attack movement.")
     if hide_event is None or not hide_succeeded:
         failures.append("The after-attack hide probe did not produce a successful hide event.")
 
     return RogueSignatureProbeResult(
         probe_id="hide_after_attack",
-        display_name="Move to hide-ready square and hide after attack",
+        display_name="Attack, move to hide-ready square, then hide",
         status=probe_result_status(failures),
         action=decision.action,
         bonus_action=decision.bonus_action,
@@ -815,6 +821,9 @@ def run_health_pass(
                 monster_behavior,
                 scenario_id,
                 player_preset_id,
+                base_config.smart_targeting_policy,
+                base_config.enable_end_turn_flanking,
+                base_config.enable_frontline_body_blocking,
                 run_index,
             )
             result = run_encounter(encounter_config)

@@ -21,6 +21,7 @@ Run these from the repo root through the PowerShell wrapper:
 .\scripts\dev.ps1 audit-quick
 .\scripts\dev.ps1 audit-full
 .\scripts\dev.ps1 audit-health
+.\scripts\dev.ps1 audit-validation
 .\scripts\dev.ps1 fighter-audit-quick
 .\scripts\dev.ps1 fighter-audit-full
 .\scripts\dev.ps1 barbarian-audit-quick
@@ -43,6 +44,7 @@ Direct equivalents:
 - `audit-quick`: `py -3.13 .\scripts\run_scenario_audit.py`
 - `audit-full`: `py -3.13 .\scripts\run_scenario_audit.py --full`
 - `audit-health`: `py -3.13 .\scripts\run_code_health_audit.py --write-report`
+- `audit-validation`: `py -3.13 .\scripts\run_audit_validation.py`
 - `fighter-audit-quick`: `py -3.13 .\scripts\run_fighter_audit.py`
 - `fighter-audit-full`: `py -3.13 .\scripts\run_fighter_audit.py --full`
 - `barbarian-audit-quick`: `py -3.13 .\scripts\run_barbarian_audit.py`
@@ -58,7 +60,9 @@ Direct equivalents:
 ## Canonical Reports
 
 - Daily housekeeping: `reports/housekeeping/daily_housekeeping_latest.json` and `reports/housekeeping/daily_housekeeping_latest.md`
+- Audit validation: `reports/audit_validation/audit_validation_latest.json` and `reports/audit_validation/audit_validation_latest.md`
 - Focused party validation: `reports/party_validation/party_validation_latest.json` and `reports/party_validation/party_validation_latest.md`
+- Canonical Fighter/Barbarian class evidence: `reports/class_audit/fighter_barbarian_quick_latest.json` and `reports/class_audit/fighter_barbarian_quick_latest.md`
 - Pass 1 readiness: `reports/pass1/pass1_readiness_2026-04-23.md`
 - Scenario audit: `reports/scenario_audit_latest.json`
 - Rogue audit: `reports/rogue_audit/rogue_audit_latest.json`
@@ -94,6 +98,13 @@ For daily admin review, run:
 This is report-only. It checks worktree state and doc drift, then recommends exact files and a commit message only when the changes are docs/admin/test-only and safe to propose.
 
 Run the broader audit commands when changing shared combat mechanics, expanding the scenario roster, or preparing a major checkpoint.
+For Fighter/Barbarian checkpoint evidence, use the segmented route instead of monolithic class audits:
+
+```powershell
+.\scripts\dev.ps1 class-audit-slices --class both --profile quick --timeout-seconds 300 --summary-json-path .\reports\class_audit\fighter_barbarian_quick_latest.json --summary-markdown-path .\reports\class_audit\fighter_barbarian_quick_latest.md
+```
+
+The monolithic `fighter-audit-*` and `barbarian-audit-*` commands remain available for targeted manual checks, but they are not the recommended full-matrix evidence route.
 
 ## Active Waivers
 
