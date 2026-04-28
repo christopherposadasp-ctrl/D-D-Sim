@@ -25,6 +25,7 @@ from backend.engine.combat.engine import (
     resolve_bonus_action_events,
     resolve_bonus_attack_action,
     resolve_cast_spell_action,
+    resolve_hasted_action_events,
     run_batch_parallel,
     run_batch_serial,
     run_encounter_summary_fast,
@@ -42,6 +43,8 @@ from backend.engine.models.state import (
     FrightenedEffect,
     GrappledEffect,
     GridPosition,
+    HasteEffect,
+    HasteLethargyEffect,
     HeroismEffect,
     HiddenEffect,
     NoReactionsEffect,
@@ -2994,7 +2997,7 @@ def test_level5_evoker_metadata_level3_spells_fail_cleanly_without_spending_slot
     encounter.units["F1"].position = GridPosition(x=5, y=5)
     encounter.units["E1"].position = GridPosition(x=10, y=5)
 
-    for spell_id, target_id in (("fireball", "E1"), ("counterspell", "E1"), ("haste", "F1")):
+    for spell_id, target_id in (("fireball", "E1"), ("counterspell", "E1")):
         spell_events = resolve_cast_spell_action(
             encounter,
             "F1",
@@ -3005,6 +3008,248 @@ def test_level5_evoker_metadata_level3_spells_fail_cleanly_without_spending_slot
         assert spell_events[0].event_type == "skip"
         assert "cannot be resolved by the live simulator" in spell_events[0].text_summary
         assert encounter.units["F1"].resources.spell_slots_level_3 == 2
+
+
+def test_haste_applies_buffs_spends_level3_slot_and_logs_event() -> None:
+    spell = get_spell_definition("haste")
+    encounter = create_encounter(build_level5_wizard_config("wizard-haste-cast"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=6, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F2"},
+    )
+    haste_event = spell_events[0]
+
+    assert spell.level == 3
+    assert spell.school == "transmutation"
+    assert spell.targeting_mode == "ranged_ally_haste_buff"
+    assert spell.range_feet == 30
+    assert spell.ac_bonus == 2
+    assert spell.speed_multiplier == 2
+    assert spell.concentration is True
+    assert spell.duration_rounds == 10
+    assert haste_event.event_type == "phase_change"
+    assert haste_event.resolved_totals["spellId"] == "haste"
+    assert haste_event.resolved_totals["spellLevel"] == 3
+    assert haste_event.resolved_totals["targetId"] == "F2"
+    assert haste_event.resolved_totals["acBonus"] == 2
+    assert haste_event.resolved_totals["previousEffectiveAc"] == 12
+    assert haste_event.resolved_totals["newEffectiveAc"] == 14
+    assert haste_event.resolved_totals["previousEffectiveSpeed"] == 30
+    assert haste_event.resolved_totals["newEffectiveSpeed"] == 60
+    assert haste_event.resolved_totals["dexSaveAdvantage"] is True
+    assert haste_event.resolved_totals["hastedActionOptions"] == ["attack", "dash", "disengage", "hide", "use_object"]
+    assert haste_event.resolved_totals["spellSlotsLevel3Remaining"] == 1
+    assert "Haste" in haste_event.text_summary
+    assert any(effect.kind == "concentration" and effect.spell_id == "haste" for effect in encounter.units["F1"].temporary_effects)
+    assert any(isinstance(effect, HasteEffect) for effect in encounter.units["F2"].temporary_effects)
+    assert encounter.units["F1"].resources.spell_slots_level_3 == 1
+
+
+def test_haste_bonus_affects_attack_target_ac() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-haste-ac"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    defeat_other_enemies(encounter, "E1")
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F1"},
+    )
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[9], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["targetAc"] == 14
+    assert attack_event.resolved_totals["hit"] is False
+    assert encounter.units["F1"].current_hp == encounter.units["F1"].max_hp
+
+
+def test_haste_doubles_speed_dash_budget_and_grants_dex_save_advantage() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-haste-speed-save"))
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F1"},
+    )
+
+    assert encounter.units["F1"].effective_speed == 60
+    assert get_total_movement_budget(
+        encounter.units["F1"],
+        {"kind": "skip", "reason": "Probe Haste movement."},
+        hasted_action={"kind": "dash"},
+        state=encounter,
+    ) == 24
+
+    save_event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="F1",
+            ability="dex",
+            dc=99,
+            reason="Haste Dexterity save probe",
+            overrides=SavingThrowOverrides(save_rolls=[3, 17]),
+        ),
+    )
+
+    assert save_event.resolved_totals["saveMode"] == "advantage"
+    assert save_event.raw_rolls["advantageSources"] == ["haste"]
+    assert save_event.raw_rolls["savingThrowRolls"] == [3, 17]
+    assert save_event.resolved_totals["selectedRoll"] == 17
+
+
+def test_haste_hasted_actions_attack_dash_disengage_hide_and_use_object() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="haste-actions", enemy_preset_id="goblin_screen", player_preset_id="martial_mixed_party")
+    )
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F4"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].position = GridPosition(x=7, y=5)
+    encounter.units["E1"].current_hp = 100
+    resolve_cast_spell_action(
+        encounter,
+        "F4",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F1"},
+    )
+
+    attack_events: list = []
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "skip", "reason": "Probe Haste attack."},
+            hasted_action={"kind": "attack", "target_id": "E1", "weapon_id": "greatsword"},
+        ),
+        attack_events,
+        rescue_mode=False,
+    )
+    hasted_attacks = [event for event in attack_events if event.event_type == "attack" and event.resolved_totals.get("hastedAction")]
+    assert len(hasted_attacks) == 1
+    assert hasted_attacks[0].damage_details.weapon_id == "greatsword"
+
+    dash_events = resolve_hasted_action_events(encounter, "F1", {"kind": "dash"})
+    assert dash_events[0].resolved_totals["hastedActionKind"] == "dash"
+
+    disengage_events: list = []
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["E1"].position = GridPosition(x=7, y=5)
+    encounter.units["E1"].reaction_available = True
+    execute_decision(
+        encounter,
+        "F1",
+        TurnDecision(
+            action={"kind": "skip", "reason": "Probe Haste Disengage."},
+            hasted_action={"kind": "disengage"},
+            post_action_movement=MovementPlan(
+                path=[GridPosition(x=6, y=5), GridPosition(x=5, y=5), GridPosition(x=4, y=5)],
+                mode="move",
+            ),
+        ),
+        disengage_events,
+        rescue_mode=False,
+    )
+    assert any(event.resolved_totals.get("hastedActionKind") == "disengage" for event in disengage_events)
+    assert all(not (event.actor_id == "E1" and event.event_type == "attack") for event in disengage_events)
+
+    hide_events = resolve_hasted_action_events(encounter, "F1", {"kind": "hide"})
+    assert hide_events[0].resolved_totals["hastedActionKind"] == "hide"
+
+    use_object_events = resolve_hasted_action_events(encounter, "F1", {"kind": "use_object"})
+    assert use_object_events[0].event_type == "skip"
+    assert "Use Object is unsupported" in use_object_events[0].text_summary
+
+
+def test_haste_invalid_casts_skip_without_spending_level3_slot() -> None:
+    cases = [
+        ("unprepared", lambda state: state.units["F1"].prepared_combat_spell_ids.remove("haste"), "F1"),
+        ("no-slot", lambda state: setattr(state.units["F1"].resources, "spell_slots_level_3", 0), "F1"),
+        ("enemy", lambda state: None, "E1"),
+        ("dead-target", lambda state: setattr(state.units["F2"].conditions, "dead", True), "F2"),
+        ("out-of-range", lambda state: setattr(state.units["F2"], "position", GridPosition(x=20, y=20)), "F2"),
+    ]
+
+    for label, arrange, target_id in cases:
+        encounter = create_encounter(build_level5_wizard_config(f"wizard-haste-invalid-{label}"))
+        encounter.units["F1"].position = GridPosition(x=5, y=5)
+        encounter.units["F2"].position = GridPosition(x=6, y=5)
+        encounter.units["E1"].position = GridPosition(x=7, y=5)
+        arrange(encounter)
+        slots_before = encounter.units["F1"].resources.spell_slots_level_3
+
+        spell_events = resolve_cast_spell_action(
+            encounter,
+            "F1",
+            {"kind": "cast_spell", "spell_id": "haste", "target_id": target_id},
+        )
+
+        assert spell_events[0].event_type == "skip"
+        assert encounter.units["F1"].resources.spell_slots_level_3 == slots_before
+
+    already_hasted = create_encounter(build_level5_wizard_config("wizard-haste-invalid-already"))
+    already_hasted.units["F1"].position = GridPosition(x=5, y=5)
+    resolve_cast_spell_action(
+        already_hasted,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F1"},
+    )
+    slots_after_first_cast = already_hasted.units["F1"].resources.spell_slots_level_3
+
+    second_cast = resolve_cast_spell_action(
+        already_hasted,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F1"},
+    )
+
+    assert second_cast[0].event_type == "skip"
+    assert "already hasted" in second_cast[0].text_summary
+    assert already_hasted.units["F1"].resources.spell_slots_level_3 == slots_after_first_cast
+
+
+def test_haste_concentration_failure_applies_lethargy_skips_next_turn_and_expires() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="haste-lethargy", enemy_preset_id="goblin_screen", player_preset_id="martial_mixed_party")
+    )
+    encounter.units["F4"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    resolve_cast_spell_action(
+        encounter,
+        "F4",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F1"},
+    )
+
+    damage_result = apply_damage(
+        encounter,
+        "F4",
+        [DamageComponentResult(damage_type="slashing", raw_rolls=[], adjusted_rolls=[], subtotal=0, flat_modifier=2, total_damage=2)],
+        False,
+        concentration_save_rolls=[1],
+    )
+
+    assert damage_result.concentration_save_success is False
+    assert damage_result.concentration_ended is True
+    assert all(effect.kind != "haste" for effect in encounter.units["F1"].temporary_effects)
+    assert any(isinstance(effect, HasteLethargyEffect) for effect in encounter.units["F1"].temporary_effects)
+    assert encounter.units["F1"].effective_speed == 0
+
+    encounter.active_combatant_index = encounter.initiative_order.index("F1")
+    result = step_encounter(encounter)
+
+    assert any(event.event_type == "skip" and "Haste lethargy" in event.text_summary for event in result.events)
+    assert all(effect.kind != "haste_lethargy" for effect in result.state.units["F1"].temporary_effects)
+    assert result.state.units["F1"].effective_speed == result.state.units["F1"].speed
 
 
 def test_scorching_ray_stops_remaining_rays_after_target_drops() -> None:

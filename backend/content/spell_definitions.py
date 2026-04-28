@@ -35,6 +35,7 @@ class SpellDefinition:
         "multi_target_save",
         "self_weapon_damage_buff",
         "touch_heroism_buff",
+        "ranged_ally_haste_buff",
         "point_sphere_save",
         "multi_target_command",
         "metadata_only",
@@ -59,7 +60,9 @@ class SpellDefinition:
     temporary_hit_point_modifier: int = 0
     hp_bonus: int = 0
     speed_bonus: int = 0
+    speed_multiplier: int = 1
     speed_penalty: int = 0
+    save_advantage_abilities: tuple[str, ...] = ()
     selectable_damage_types: tuple[str, ...] = ()
     radius_feet: int = 0
     ray_count: int = 1
@@ -444,13 +447,16 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         display_name="Haste",
         level=3,
         school="transmutation",
-        description="Concentration buff recorded as Wizard level 5 metadata only in combat.",
+        description="Concentration transmutation granting +2 AC, doubled speed, Dexterity save advantage, and one restricted extra action.",
         timing="action",
-        targeting_mode="metadata_only",
+        targeting_mode="ranged_ally_haste_buff",
         range_feet=30,
         damage_dice=(),
         damage_modifier=0,
-        damage_type="",
+        damage_type="none",
+        ac_bonus=2,
+        speed_multiplier=2,
+        save_advantage_abilities=("dex",),
         concentration=True,
         duration_rounds=10,
     ),

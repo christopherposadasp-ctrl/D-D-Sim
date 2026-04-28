@@ -91,6 +91,7 @@ from backend.engine.rules.combat_rules import (
     event_base,
     expire_turn_effects,
     format_effect_kinds,
+    get_active_haste_effect,
     get_active_rage_effect,
     get_attack_mode,
     get_saving_throw_mode,
@@ -112,6 +113,7 @@ from backend.engine.rules.combat_rules import (
     resolve_single_target_save_spell,
     unit_is_frightened_by_source,
     unit_is_frightened_immune,
+    unit_is_haste_lethargic,
 )
 from backend.engine.rules.spatial import (
     build_position_index,
@@ -2088,11 +2090,16 @@ def get_total_movement_budget(
     action: dict[str, str],
     bonus_action: dict[str, str] | None = None,
     surged_action: dict[str, str] | None = None,
+    hasted_action: dict[str, str] | None = None,
     *,
     state: EncounterState | None = None,
 ) -> int:
     move_squares = get_move_squares(state, actor)
-    action_multiplier = int(action["kind"] == "dash") + int(bool(surged_action and surged_action["kind"] == "dash"))
+    action_multiplier = (
+        int(action["kind"] == "dash")
+        + int(bool(surged_action and surged_action["kind"] == "dash"))
+        + int(bool(hasted_action and hasted_action["kind"] == "dash"))
+    )
     bonus_multiplier = get_extra_movement_multiplier(bonus_action["kind"] if bonus_action else None)
     total_budget = move_squares * (1 + action_multiplier + bonus_multiplier)
     return max(0, total_budget - get_stand_up_cost_squares(actor))
@@ -2191,6 +2198,23 @@ def bonus_action_applies_disengage_for_phase(bonus_action: dict[str, str] | None
     if timing == "after_action":
         return phase == "after_action"
     return False
+
+
+def hasted_action_applies_disengage_for_phase(hasted_action: dict[str, str] | None, phase: str) -> bool:
+    if not hasted_action or hasted_action.get("kind") != "disengage":
+        return False
+    return phase in {"after_action", "after_movement"}
+
+
+def disengage_applies_for_phase(
+    bonus_action: dict[str, str] | None,
+    hasted_action: dict[str, str] | None,
+    phase: str,
+) -> bool:
+    return bonus_action_applies_disengage_for_phase(bonus_action, phase) or hasted_action_applies_disengage_for_phase(
+        hasted_action,
+        phase,
+    )
 
 
 def resolve_turn_start_posture(state: EncounterState, actor_id: str) -> list[CombatEvent]:
@@ -4304,7 +4328,104 @@ def execute_movement(
 
 
 def can_act_after_movement(actor: UnitState) -> bool:
-    return not actor.conditions.dead and actor.current_hp > 0
+    return not actor.conditions.dead and actor.current_hp > 0 and not unit_is_haste_lethargic(actor)
+
+
+def build_hasted_action_skip_event(state: EncounterState, actor_id: str, reason: str) -> CombatEvent:
+    event = create_skip_event(state, actor_id, reason)
+    event.resolved_totals["hastedAction"] = True
+    return event
+
+
+def resolve_hasted_attack_action(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, str],
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    target_id = action.get("target_id")
+    weapon_id = action.get("weapon_id")
+    if not target_id or target_id not in state.units:
+        return [build_hasted_action_skip_event(state, actor_id, "Haste attack requires a valid target.")]
+    if not weapon_id or weapon_id not in actor.attacks:
+        return [build_hasted_action_skip_event(state, actor_id, "Haste attack requires an available weapon.")]
+
+    attack_event, savage_consumed = resolve_attack(
+        state,
+        ResolveAttackArgs(
+            attacker_id=actor_id,
+            target_id=target_id,
+            weapon_id=weapon_id,
+            savage_attacker_available=unit_has_feature(actor, "savage_attacker") and not actor._savage_attacker_used_this_turn,
+        ),
+    )
+    attack_event.resolved_totals["hastedAction"] = True
+    attack_event.resolved_totals["hastedActionKind"] = "attack"
+    if savage_consumed:
+        actor._savage_attacker_used_this_turn = True
+
+    events: list[CombatEvent] = []
+    if attack_event.event_type == "attack":
+        events.extend(build_attack_reaction_pre_events(state, attack_event))
+        events.extend(build_attack_reaction_phase_events(state, attack_event))
+    events.append(attack_event)
+    if attack_event.event_type == "attack":
+        events.extend(maybe_resolve_riposte_follow_up(state, attack_event))
+        events.extend(maybe_resolve_sentinel_guardian_follow_up(state, attack_event))
+        resolved_target_id = attack_event.target_ids[0] if attack_event.target_ids else target_id
+        if resolved_target_id in state.units and state.units[resolved_target_id].conditions.dead:
+            events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+            events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+    return events
+
+
+def resolve_hasted_action_events(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, str],
+) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    effect = get_active_haste_effect(state, actor)
+    if not effect:
+        return [build_hasted_action_skip_event(state, actor_id, "Haste action requires an active Haste effect.")]
+
+    action_kind = action.get("kind")
+    if action_kind not in effect.allowed_action_kinds:
+        return [build_hasted_action_skip_event(state, actor_id, f"Haste cannot be used for {action_kind}.")]
+
+    if action_kind == "attack":
+        return resolve_hasted_attack_action(state, actor_id, action)
+    if action_kind == "dash":
+        return [
+            add_unit_phase_event(
+                state,
+                actor_id,
+                actor_id,
+                f"{actor_id} uses Haste to Dash.",
+                condition_deltas=[f"{actor_id} gains an additional movement budget from Haste."],
+                resolved_totals={"hastedAction": True, "hastedActionKind": "dash"},
+            )
+        ]
+    if action_kind == "disengage":
+        return [
+            add_unit_phase_event(
+                state,
+                actor_id,
+                actor_id,
+                f"{actor_id} uses Haste to Disengage.",
+                condition_deltas=[f"{actor_id}'s remaining movement does not provoke opportunity attacks from Haste Disengage."],
+                resolved_totals={"hastedAction": True, "hastedActionKind": "disengage"},
+            )
+        ]
+    if action_kind == "hide":
+        hide_event = attempt_hide(state, actor_id)
+        hide_event.resolved_totals["hastedAction"] = True
+        hide_event.resolved_totals["hastedActionKind"] = "hide"
+        return [hide_event]
+    if action_kind == "use_object":
+        return [build_hasted_action_skip_event(state, actor_id, "Haste Use Object is unsupported by the simulator.")]
+
+    return [build_hasted_action_skip_event(state, actor_id, "Unsupported Haste action.")]
 
 
 def resolve_bonus_action(
@@ -4598,6 +4719,7 @@ def exceeds_movement_budget(state: EncounterState, actor: UnitState, decision: T
         decision.action,
         decision.bonus_action,
         decision.surged_action,
+        decision.hasted_action,
         state=state,
     )
 
@@ -4702,6 +4824,8 @@ def step_encounter_internal(
             events.append(create_skip_event(next_state, actor_id, "Stable fighters do not act while unconscious."))
         else:
             events.append(resolve_death_save(next_state, actor_id))
+    elif unit_is_haste_lethargic(actor):
+        events.append(create_skip_event(next_state, actor_id, "Haste lethargy prevents movement and actions."))
     else:
         commanded_events = resolve_commanded_forced_turn(next_state, actor_id)
         if commanded_events:
@@ -4772,7 +4896,7 @@ def execute_decision(
         state,
         actor_id,
         decision.pre_action_movement,
-        bonus_action_applies_disengage_for_phase(decision.bonus_action, "before_action"),
+        disengage_applies_for_phase(decision.bonus_action, decision.hasted_action, "before_action"),
         "before_action",
     )
     events.extend(pre_events)
@@ -4808,7 +4932,7 @@ def execute_decision(
                 state,
                 actor_id,
                 decision.between_action_movement,
-                bonus_action_applies_disengage_for_phase(decision.bonus_action, "between_actions"),
+                disengage_applies_for_phase(decision.bonus_action, decision.hasted_action, "between_actions"),
                 "between_actions",
             )
             events.extend(between_events)
@@ -4826,6 +4950,9 @@ def execute_decision(
                 rescue_mode=rescue_mode,
                 turn_normal_movement_budget=turn_normal_movement_budget,
             )
+
+    if can_act_after_movement(state.units[actor_id]) and decision.hasted_action:
+        events.extend(resolve_hasted_action_events(state, actor_id, decision.hasted_action))
 
     fallback_second_wind_moved = False
     if can_act_after_movement(state.units[actor_id]):
@@ -4872,7 +4999,7 @@ def execute_decision(
             state,
             actor_id,
             post_action_movement,
-            bonus_action_applies_disengage_for_phase(decision.bonus_action, "after_action"),
+            disengage_applies_for_phase(decision.bonus_action, decision.hasted_action, "after_action"),
             "after_action",
         )
         events.extend(post_events)

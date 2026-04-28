@@ -41,6 +41,7 @@ from backend.engine.rules.combat_rules import (
     choose_cone_breath_targeting,
     choose_selectable_damage_type,
     choose_sphere_targeting,
+    get_active_haste_effect,
     get_active_bless_effect,
     get_damage_defense_flags,
     get_rage_damage_bonus,
@@ -112,6 +113,7 @@ class TurnDecision:
     between_action_movement: MovementPlan | None = None
     surged_action: dict[str, str] | None = None
     post_action_movement: MovementPlan | None = None
+    hasted_action: dict[str, str] | None = None
 
 
 @dataclass
@@ -957,6 +959,23 @@ def attack_action_uses_melee_weapon(actor: UnitState, action: dict[str, str] | N
     return bool(weapon and weapon.kind == "melee")
 
 
+def apply_haste_extra_attack(state: EncounterState, actor: UnitState, decision: TurnDecision) -> TurnDecision:
+    if decision.hasted_action or not get_active_haste_effect(state, actor):
+        return decision
+    if decision.action.get("kind") != "attack":
+        return decision
+    target_id = decision.action.get("target_id")
+    weapon_id = decision.action.get("weapon_id")
+    if not target_id or not weapon_id:
+        return decision
+    target = state.units.get(target_id)
+    weapon = actor.attacks.get(weapon_id)
+    if not target or target.conditions.dead or target.current_hp <= 0 or not weapon:
+        return decision
+    decision.hasted_action = {"kind": "attack", "target_id": target_id, "weapon_id": weapon_id}
+    return decision
+
+
 def estimate_average_weapon_damage(weapon: WeaponProfile) -> float:
     if weapon.damage_components:
         dice_average = sum(spec.count * (spec.sides + 1) / 2 for component in weapon.damage_components for spec in component.damage_dice)
@@ -1122,6 +1141,7 @@ def finalize_player_turn_decision(
 ) -> TurnDecision:
     decision = apply_fighter_action_surge(state, actor, decision, melee_weapon_id, position_index)
     decision = apply_fighter_maneuver_intents(state, actor, decision)
+    decision = apply_haste_extra_attack(state, actor, decision)
     decision = finalize_player_bonus_action_decision(state, actor, decision, position_index)
     return apply_end_turn_flanking_support_movement(state, actor, decision, position_index)
 

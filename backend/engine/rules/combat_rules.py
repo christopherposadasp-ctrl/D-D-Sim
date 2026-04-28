@@ -40,6 +40,8 @@ from backend.engine.models.state import (
     GridPosition,
     HaltedEffect,
     HarriedEffect,
+    HasteEffect,
+    HasteLethargyEffect,
     HeroismEffect,
     HiddenEffect,
     MasteryType,
@@ -250,7 +252,7 @@ def get_shield_ac_bonus(unit: UnitState) -> int:
     return sum(
         effect.ac_bonus
         for effect in unit.temporary_effects
-        if effect.kind in {"shield", "shield_of_faith"}
+        if effect.kind in {"shield", "shield_of_faith", "haste"}
     )
 
 
@@ -293,6 +295,28 @@ def get_active_heroism_effect(state: EncounterState, unit: UnitState) -> Heroism
         if caster and unit_is_concentrating_on(caster, "heroism"):
             return effect
     return None
+
+
+def get_active_haste_effect(state: EncounterState, unit: UnitState) -> HasteEffect | None:
+    for effect in unit.temporary_effects:
+        if effect.kind != "haste":
+            continue
+        caster = state.units.get(effect.source_id)
+        if caster and unit_is_concentrating_on(caster, "haste"):
+            return effect
+    return None
+
+
+def get_haste_ac_bonus(unit: UnitState, source_id: str | None = None) -> int:
+    return sum(
+        effect.ac_bonus
+        for effect in unit.temporary_effects
+        if effect.kind == "haste" and (source_id is None or effect.source_id == source_id)
+    )
+
+
+def unit_is_haste_lethargic(unit: UnitState) -> bool:
+    return any(effect.kind == "haste_lethargy" for effect in unit.temporary_effects)
 
 
 def unit_is_frightened_by_source(state: EncounterState, unit: UnitState, source_id: str) -> bool:
@@ -420,6 +444,7 @@ def end_concentration(state: EncounterState, caster_id: str, *, reason: str | No
     removed_blessed_targets: list[str] = []
     removed_shield_of_faith_targets: list[str] = []
     removed_heroism_targets: list[str] = []
+    removed_haste_targets: list[str] = []
     removed_frightened_targets: list[str] = []
     divine_favor_removed = False
     if "bless" in spell_ids:
@@ -452,6 +477,26 @@ def end_concentration(state: EncounterState, caster_id: str, *, reason: str | No
             ]
             if len(unit.temporary_effects) != original_count:
                 removed_heroism_targets.append(unit.id)
+    if "haste" in spell_ids:
+        for unit in state.units.values():
+            original_count = len(unit.temporary_effects)
+            unit.temporary_effects = [
+                effect
+                for effect in unit.temporary_effects
+                if not (effect.kind == "haste" and effect.source_id == caster_id)
+            ]
+            if len(unit.temporary_effects) != original_count:
+                removed_haste_targets.append(unit.id)
+                recalculate_effective_speed_for_unit(unit)
+                if unit.current_hp > 0 and not unit.conditions.dead:
+                    unit.temporary_effects.append(
+                        HasteLethargyEffect(
+                            kind="haste_lethargy",
+                            source_id=caster_id,
+                            expires_at_turn_end_of=unit.id,
+                        )
+                    )
+                    recalculate_effective_speed_for_unit(unit)
     if "fear" in spell_ids:
         for unit in state.units.values():
             removed_count = clear_frightened_effects(unit, caster_id)
@@ -476,6 +521,8 @@ def end_concentration(state: EncounterState, caster_id: str, *, reason: str | No
         )
     if removed_heroism_targets:
         summary = f"{summary} Heroism ends on {', '.join(sorted(removed_heroism_targets, key=unit_sort_key))}."
+    if removed_haste_targets:
+        summary = f"{summary} Haste ends on {', '.join(sorted(removed_haste_targets, key=unit_sort_key))}; lethargy begins."
     if removed_frightened_targets:
         summary = f"{summary} Fear ends on {', '.join(sorted(removed_frightened_targets, key=unit_sort_key))}."
     if divine_favor_removed:
@@ -920,6 +967,10 @@ def recalculate_effective_speed_for_unit(unit: UnitState) -> None:
         unit.effective_speed = 0
         return
 
+    if unit_is_haste_lethargic(unit):
+        unit.effective_speed = 0
+        return
+
     if any(effect.kind == "speed_zero" for effect in unit.temporary_effects):
         unit.effective_speed = 0
         return
@@ -930,7 +981,11 @@ def recalculate_effective_speed_for_unit(unit: UnitState) -> None:
 
     slow_penalty = sum(effect.penalty for effect in unit.temporary_effects if effect.kind == "slow")
     speed_bonus = max(0, unit.longstrider_speed_bonus)
-    unit.effective_speed = max(0, unit.speed + speed_bonus - min(10, slow_penalty))
+    haste_multiplier = max(
+        (effect.speed_multiplier for effect in unit.temporary_effects if effect.kind == "haste"),
+        default=1,
+    )
+    unit.effective_speed = max(0, ((unit.speed + speed_bonus) * haste_multiplier) - min(10, slow_penalty))
 
 
 def recalculate_effective_speed(unit: UnitState) -> UnitState:
@@ -1020,6 +1075,9 @@ def get_saving_throw_mode(
 
     if ability == "dex" and has_danger_sense(actor):
         advantage_sources.append("danger_sense")
+
+    if ability == "dex" and state and get_active_haste_effect(state, actor):
+        advantage_sources.append("haste")
 
     if actor.faction == "goblins" and unit_has_trait(actor, "bloodied_frenzy") and unit_is_bloodied(actor):
         advantage_sources.append("bloodied_frenzy")
@@ -3892,6 +3950,7 @@ _SPELL_RESOLVER_EXPORTS = {
     "resolve_divine_favor",
     "resolve_false_life",
     "resolve_heroism",
+    "resolve_haste",
     "resolve_longstrider",
     "resolve_mage_armor",
     "resolve_magic_missile",

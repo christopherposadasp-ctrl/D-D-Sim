@@ -278,6 +278,21 @@ class HeroismEffect(CamelModel):
     frightened_immunity_modeled: bool = False
 
 
+class HasteEffect(CamelModel):
+    kind: Literal["haste"]
+    source_id: str
+    ac_bonus: int
+    speed_multiplier: int
+    dex_save_advantage: bool = True
+    allowed_action_kinds: tuple[str, ...] = ("attack", "dash", "disengage", "hide", "use_object")
+
+
+class HasteLethargyEffect(CamelModel):
+    kind: Literal["haste_lethargy"]
+    source_id: str
+    expires_at_turn_end_of: str
+
+
 class DivineFavorEffect(CamelModel):
     kind: Literal["divine_favor"]
     source_id: str
@@ -385,6 +400,8 @@ TemporaryEffect: TypeAlias = (
     | ShieldEffect
     | ShieldOfFaithEffect
     | HeroismEffect
+    | HasteEffect
+    | HasteLethargyEffect
     | DivineFavorEffect
     | InvisibleEffect
     | GrappledEffect

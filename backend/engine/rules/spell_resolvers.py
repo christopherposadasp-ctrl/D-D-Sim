@@ -14,6 +14,7 @@ from backend.engine.models.state import (
     DivineFavorEffect,
     EncounterState,
     HealingBlockedEffect,
+    HasteEffect,
     HeroismEffect,
     NoReactionsEffect,
     PoisonedEffect,
@@ -35,9 +36,11 @@ from backend.engine.rules.combat_rules import (
     end_concentration,
     end_hidden,
     get_active_divine_favor_effect,
+    get_active_haste_effect,
     get_active_heroism_effect,
     get_attack_mode,
     get_saving_throw_mode,
+    get_haste_ac_bonus,
     get_shield_ac_bonus,
     get_shield_of_faith_ac_bonus,
     has_harried_effect,
@@ -1952,6 +1955,95 @@ def resolve_shield_of_faith(state: EncounterState, actor_id: str, target_id: str
     )
 
 
+def resolve_haste(state: EncounterState, actor_id: str, target_id: str) -> CombatEvent:
+    actor = state.units[actor_id]
+    target = state.units.get(target_id)
+    spell = get_spell_definition("haste")
+
+    if not unit_has_combat_spell(actor, "haste"):
+        return build_spell_skip_event(state, actor_id, "haste", "is not prepared.")
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return build_spell_skip_event(state, actor_id, "haste", "cannot be cast while down.")
+    if not target:
+        return build_spell_skip_event(state, actor_id, "haste", "target is unavailable.")
+    if target.faction != actor.faction or target.conditions.dead or target.current_hp <= 0:
+        return build_spell_skip_event(state, actor_id, "haste", "target is not a living ally.")
+    if not units_are_within_spell_range(state, actor_id, target_id, spell.range_feet):
+        return build_spell_skip_event(state, actor_id, "haste", "target is not within 30 feet.")
+    if get_active_haste_effect(state, target) is not None:
+        return build_spell_skip_event(state, actor_id, "haste", "target is already hasted.")
+    if not spend_spell_slot(actor, spell.level):
+        return build_spell_skip_event(state, actor_id, "haste", f"No level {spell.level} spell slots remain.")
+
+    previous_haste_ac_bonus = get_haste_ac_bonus(target)
+    previous_effective_ac = target.ac + get_shield_ac_bonus(target)
+    previous_effective_speed = target.effective_speed
+    condition_deltas = end_concentration(
+        state,
+        actor_id,
+        reason=f"{actor_id}'s prior concentration ends before casting {spell.display_name}.",
+    )
+
+    actor.temporary_effects.append(
+        ConcentrationEffect(
+            kind="concentration",
+            source_id=actor_id,
+            spell_id="haste",
+            remaining_rounds=spell.duration_rounds,
+        )
+    )
+    target.temporary_effects = [
+        effect for effect in target.temporary_effects if not (effect.kind == "haste" and effect.source_id == actor_id)
+    ]
+    target.temporary_effects.append(
+        HasteEffect(
+            kind="haste",
+            source_id=actor_id,
+            ac_bonus=spell.ac_bonus,
+            speed_multiplier=spell.speed_multiplier,
+            dex_save_advantage="dex" in spell.save_advantage_abilities,
+        )
+    )
+    recalculate_effective_speed_for_unit(target)
+
+    new_haste_ac_bonus = get_haste_ac_bonus(target)
+    new_effective_ac = target.ac + get_shield_ac_bonus(target)
+    condition_deltas.append(
+        f"{target_id} gains +{spell.ac_bonus} AC, doubled speed, Dexterity save advantage, and one restricted hasted action."
+    )
+
+    haste_effect = get_active_haste_effect(state, target)
+    action_options = list(haste_effect.allowed_action_kinds) if haste_effect else []
+    return CombatEvent(
+        **event_base(state, actor_id),
+        target_ids=[target_id],
+        event_type="phase_change",
+        raw_rolls={},
+        resolved_totals={
+            "spellId": "haste",
+            "spellLevel": spell.level,
+            "concentration": True,
+            "targetId": target_id,
+            "acBonus": spell.ac_bonus,
+            "previousHasteAcBonus": previous_haste_ac_bonus,
+            "newHasteAcBonus": new_haste_ac_bonus,
+            "previousEffectiveAc": previous_effective_ac,
+            "newEffectiveAc": new_effective_ac,
+            "previousEffectiveSpeed": previous_effective_speed,
+            "newEffectiveSpeed": target.effective_speed,
+            "speedMultiplier": spell.speed_multiplier,
+            "dexSaveAdvantage": "dex" in spell.save_advantage_abilities,
+            "hastedActionOptions": action_options,
+            "durationRounds": spell.duration_rounds,
+            "spellSlotsLevel3Remaining": get_remaining_spell_slots(actor, spell.level),
+        },
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=condition_deltas,
+        text_summary=f"{actor_id} casts {spell.display_name} on {target_id}.",
+    )
+
+
 def apply_heroism_start_of_turn(state: EncounterState, actor_id: str) -> CombatEvent | None:
     actor = state.units[actor_id]
     effect = get_active_heroism_effect(state, actor)
@@ -2176,6 +2268,8 @@ def resolve_cast_spell(
         return resolve_longstrider(state, actor_id, target_id)
     if spell.targeting_mode == "ranged_ally_ac_buff":
         return resolve_shield_of_faith(state, actor_id, target_id)
+    if spell.targeting_mode == "ranged_ally_haste_buff":
+        return resolve_haste(state, actor_id, target_id)
     if spell.targeting_mode == "touch_heroism_buff":
         return resolve_heroism(state, actor_id, target_id)
     if spell.targeting_mode == "self_weapon_damage_buff":
