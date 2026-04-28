@@ -459,6 +459,38 @@ def make_skipped_step(spec: CommandSpec, reason: str) -> StepResult:
     )
 
 
+def build_backend_gate_commands(backend_gate_timeout: int) -> list[CommandSpec]:
+    return [
+        CommandSpec(
+            step_id="check_fast_ruff",
+            label="Backend lint",
+            argv=(sys.executable, "-m", "ruff", "check", "backend", "tests", "scripts"),
+            display_command=f"{Path(sys.executable).name} -m ruff check backend tests scripts",
+            timeout_seconds=10 * 60,
+        ),
+        CommandSpec(
+            step_id="check_fast_pytest",
+            label="Backend tests",
+            argv=(
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-m",
+                "not slow",
+                "tests\\golden",
+                "tests\\rules",
+                "tests\\integration",
+            ),
+            display_command=(
+                f"{Path(sys.executable).name} -m pytest -q -m \"not slow\" "
+                "tests\\golden tests\\rules tests\\integration"
+            ),
+            timeout_seconds=backend_gate_timeout,
+        ),
+    ]
+
+
 def run_command(spec: CommandSpec) -> StepResult:
     report_paths = make_report_paths(spec.report_paths)
     try:
@@ -634,22 +666,7 @@ def main() -> None:
         branch_gate.detail = f"Expected branch `{args.integration_branch}` but found `{context['branch']}`."
 
     backend_gate_timeout = 45 * 60
-    backend_gate_commands = [
-        CommandSpec(
-            step_id="check_fast_ruff",
-            label="Backend lint",
-            argv=(sys.executable, "-m", "ruff", "check", "backend", "tests", "scripts"),
-            display_command=f"{Path(sys.executable).name} -m ruff check backend tests scripts",
-            timeout_seconds=10 * 60,
-        ),
-        CommandSpec(
-            step_id="check_fast_pytest",
-            label="Backend tests",
-            argv=(sys.executable, "-m", "pytest", "-q", "tests\\golden", "tests\\rules", "tests\\integration"),
-            display_command=f"{Path(sys.executable).name} -m pytest -q tests\\golden tests\\rules tests\\integration",
-            timeout_seconds=backend_gate_timeout,
-        ),
-    ]
+    backend_gate_commands = build_backend_gate_commands(backend_gate_timeout)
     node_executable = resolve_node_executable()
     npm_test_spec = CommandSpec(
         step_id="npm_test",

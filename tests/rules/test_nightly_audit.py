@@ -115,6 +115,14 @@ def test_rotation_state_defaults_and_advances(tmp_path: Path) -> None:
     assert nightly_audit.load_rotation_index(state_path, 4) == 3
 
 
+def test_backend_gate_uses_fast_non_slow_pytest_filter() -> None:
+    commands = nightly_audit.build_backend_gate_commands(2700)
+    pytest_command = next(command for command in commands if command.step_id == "check_fast_pytest")
+
+    assert pytest_command.argv[1:6] == ("-m", "pytest", "-q", "-m", "not slow")
+    assert 'pytest -q -m "not slow" tests\\golden tests\\rules tests\\integration' in pytest_command.display_command
+
+
 def test_markdown_report_includes_blocker_and_reports() -> None:
     context = {
         "generatedAt": "2026-04-21T23:30:00",
