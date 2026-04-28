@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from backend.content.enemies import unit_has_trait
@@ -18,6 +19,10 @@ from backend.engine.utils.helpers import is_unit_conscious, unit_can_take_reacti
 
 GRID_SIZE = 15
 SINGLE_SQUARE_FOOTPRINT = Footprint(width=1, height=1)
+BLOCKING_TERRAIN_KINDS = frozenset({"rock", "boulder"})
+HALF_COVER_TERRAIN_KINDS = frozenset({"rock", "boulder", "low_wall"})
+LINE_OF_SIGHT_BLOCKING_TERRAIN_KINDS = frozenset({"rock", "boulder"})
+HIDE_SUPPORTING_TERRAIN_KINDS = frozenset({"rock", "boulder"})
 
 
 class ReachableSquare:
@@ -167,6 +172,22 @@ def get_terrain_occupied_squares(feature: TerrainFeature) -> list[GridPosition]:
     return get_occupied_squares_for_position(feature.position, feature.footprint)
 
 
+def terrain_blocks_movement(feature: TerrainFeature) -> bool:
+    return feature.kind in BLOCKING_TERRAIN_KINDS
+
+
+def terrain_grants_half_cover(feature: TerrainFeature) -> bool:
+    return feature.kind in HALF_COVER_TERRAIN_KINDS
+
+
+def terrain_blocks_line_of_sight(feature: TerrainFeature) -> bool:
+    return feature.kind in LINE_OF_SIGHT_BLOCKING_TERRAIN_KINDS
+
+
+def terrain_supports_hide(feature: TerrainFeature) -> bool:
+    return feature.kind in HIDE_SUPPORTING_TERRAIN_KINDS
+
+
 def is_unit_swallowed(unit: UnitState) -> bool:
     return any(effect.kind == "swallowed_by" for effect in unit.temporary_effects)
 
@@ -282,6 +303,8 @@ def inspect_placements_for_unit_ids(
     blocked_square_groups_by_key: dict[str, dict[str, object]] = {}
 
     for feature in terrain_features or ():
+        if not terrain_blocks_movement(feature):
+            continue
         for occupied_square in get_terrain_occupied_squares(feature):
             terrain_occupied_squares.setdefault(position_key(occupied_square), []).append(feature.feature_id)
 
@@ -531,6 +554,15 @@ def get_terrain_feature_at(
     return terrain_features[0] if terrain_features else None
 
 
+def get_terrain_features_at(
+    state: EncounterState,
+    position: GridPosition,
+    position_index: PositionIndex | None = None,
+) -> list[TerrainFeature]:
+    index = position_index or build_position_index(state)
+    return list(index.terrain_occupancy.get(position_key(position), []))
+
+
 def get_terrain_features_for_position(
     state: EncounterState,
     position: GridPosition,
@@ -545,6 +577,19 @@ def get_terrain_features_for_position(
             terrain_features_by_id[feature.feature_id] = feature
 
     return sorted(terrain_features_by_id.values(), key=lambda feature: feature.feature_id)
+
+
+def get_blocking_terrain_features_for_position(
+    state: EncounterState,
+    position: GridPosition,
+    footprint: Footprint,
+    position_index: PositionIndex | None = None,
+) -> list[TerrainFeature]:
+    return [
+        feature
+        for feature in get_terrain_features_for_position(state, position, footprint, position_index)
+        if terrain_blocks_movement(feature)
+    ]
 
 
 def can_move_through(mover: UnitState, occupant: UnitState) -> bool:
@@ -757,7 +802,7 @@ def build_reachable_square_map(
                 continue
             if not is_within_bounds(neighbor, mover_footprint):
                 continue
-            if get_terrain_features_for_position(state, neighbor, mover_footprint, index):
+            if get_blocking_terrain_features_for_position(state, neighbor, mover_footprint, index):
                 continue
 
             destination_occupants = get_occupants_for_position(state, neighbor, mover_footprint, [mover_id], index)
@@ -937,6 +982,31 @@ def get_attack_line_traversed_squares(
     return get_line_squares(line_start, line_end)[1:-1]
 
 
+def _has_matching_terrain_cover_against_observer(
+    state: EncounterState,
+    unit_id: str,
+    observer_id: str,
+    unit_position: GridPosition,
+    observer_position: GridPosition,
+    terrain_predicate: Callable[[TerrainFeature], bool],
+    position_index: PositionIndex | None = None,
+) -> bool:
+    index = position_index or build_position_index(state)
+    unit = state.units[unit_id]
+    observer = state.units[observer_id]
+    traversed = get_attack_line_traversed_squares(
+        observer_position,
+        get_unit_footprint(observer),
+        unit_position,
+        get_unit_footprint(unit),
+    )
+    return any(
+        terrain_predicate(feature)
+        for square in traversed
+        for feature in get_terrain_features_at(state, square, index)
+    )
+
+
 def has_terrain_half_cover_against_observer(
     state: EncounterState,
     unit_id: str,
@@ -951,16 +1021,34 @@ def has_terrain_half_cover_against_observer(
     concealment geometry without inheriting unit-based cover shortcuts.
     """
 
-    index = position_index or build_position_index(state)
-    unit = state.units[unit_id]
-    observer = state.units[observer_id]
-    traversed = get_attack_line_traversed_squares(
-        observer_position,
-        get_unit_footprint(observer),
+    return _has_matching_terrain_cover_against_observer(
+        state,
+        unit_id,
+        observer_id,
         unit_position,
-        get_unit_footprint(unit),
+        observer_position,
+        terrain_grants_half_cover,
+        position_index,
     )
-    return any(get_terrain_feature_at(state, square, index) for square in traversed)
+
+
+def has_hide_supporting_terrain_against_observer(
+    state: EncounterState,
+    unit_id: str,
+    observer_id: str,
+    unit_position: GridPosition,
+    observer_position: GridPosition,
+    position_index: PositionIndex | None = None,
+) -> bool:
+    return _has_matching_terrain_cover_against_observer(
+        state,
+        unit_id,
+        observer_id,
+        unit_position,
+        observer_position,
+        terrain_supports_hide,
+        position_index,
+    )
 
 
 def has_line_of_sight_between_units(
@@ -987,7 +1075,11 @@ def has_line_of_sight_between_units(
         resolved_target_position,
         get_unit_footprint(target),
     )
-    return not any(get_terrain_feature_at(state, square, index) for square in traversed)
+    return not any(
+        terrain_blocks_line_of_sight(feature)
+        for square in traversed
+        for feature in get_terrain_features_at(state, square, index)
+    )
 
 
 def get_conscious_enemy_observers_for_hide(
@@ -1061,7 +1153,7 @@ def has_terrain_cover_from_all_observers_for_hide(
         return False
 
     return all(
-        has_terrain_half_cover_against_observer(
+        has_hide_supporting_terrain_against_observer(
             state,
             unit_id,
             observer.id,

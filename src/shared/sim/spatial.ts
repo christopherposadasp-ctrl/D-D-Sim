@@ -51,6 +51,10 @@ export function isWithinBounds(position: GridPosition, footprint: Footprint = SI
   );
 }
 
+export function terrainBlocksPlacement(feature: TerrainFeature): boolean {
+  return feature.kind === 'rock' || feature.kind === 'boulder';
+}
+
 export function inspectPlacementsForUnitIds(
   placements: Record<string, GridPosition> | undefined,
   expectedUnitIds: readonly string[],
@@ -75,6 +79,9 @@ export function inspectPlacementsForUnitIds(
   >();
 
   for (const feature of terrainFeatures) {
+    if (!terrainBlocksPlacement(feature)) {
+      continue;
+    }
     for (const occupiedSquare of getOccupiedSquaresForPosition(feature.position, feature.footprint)) {
       const key = positionKey(occupiedSquare);
       const featureIds = terrainOccupiedSquares.get(key) ?? [];

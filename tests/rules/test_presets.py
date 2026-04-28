@@ -167,6 +167,32 @@ def test_hobgoblin_command_screen_builds_layered_leader_shell() -> None:
     assert encounter.units["E7"].combat_role == "hobgoblin_melee"
     assert encounter.units["E11"].combat_role == "hobgoblin_captain"
     assert encounter.units["E12"].combat_role == "hobgoblin_archer"
+    assert [feature.model_dump() for feature in encounter.terrain_features] == [
+        {
+            "feature_id": "rock_1",
+            "kind": "rock",
+            "position": {"x": 5, "y": 8},
+            "footprint": {"width": 1, "height": 1},
+        },
+        {
+            "feature_id": "command_low_wall_1",
+            "kind": "low_wall",
+            "position": {"x": 7, "y": 6},
+            "footprint": {"width": 2, "height": 1},
+        },
+        {
+            "feature_id": "command_low_wall_2",
+            "kind": "low_wall",
+            "position": {"x": 7, "y": 10},
+            "footprint": {"width": 2, "height": 1},
+        },
+        {
+            "feature_id": "command_boulder_1",
+            "kind": "boulder",
+            "position": {"x": 6, "y": 4},
+            "footprint": {"width": 1, "height": 1},
+        },
+    ]
 
 
 def test_berserker_overrun_builds_staggered_mob_and_hammers() -> None:

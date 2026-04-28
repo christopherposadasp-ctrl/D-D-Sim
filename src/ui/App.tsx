@@ -1,6 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useReducer, useState } from 'react';
 
-import { getOccupiedSquaresForPosition, inspectPlacementsForUnitIds } from '../shared/sim/spatial';
+import { getOccupiedSquaresForPosition, inspectPlacementsForUnitIds, terrainBlocksPlacement } from '../shared/sim/spatial';
 import type {
   BatchJobStatus,
   EnemyCatalogResponse,
@@ -280,13 +280,14 @@ export function App(props: AppProps = {}) {
   }
 
   function handlePlacementCellClick(position: GridPosition, occupantId: string | null): void {
-    const terrainOccupiesSquare = terrainFeatures.some((feature) =>
-      getOccupiedSquaresForPosition(feature.position, feature.footprint).some(
-        (occupiedSquare) => occupiedSquare.x === position.x && occupiedSquare.y === position.y
-      )
+    const blockingTerrainOccupiesSquare = terrainFeatures.some((feature) =>
+      terrainBlocksPlacement(feature)
+        && getOccupiedSquaresForPosition(feature.position, feature.footprint).some(
+          (occupiedSquare) => occupiedSquare.x === position.x && occupiedSquare.y === position.y
+        )
     );
 
-    if (terrainOccupiesSquare) {
+    if (blockingTerrainOccupiesSquare) {
       return;
     }
 

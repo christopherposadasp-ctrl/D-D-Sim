@@ -101,4 +101,20 @@ describe('shared spatial helpers', () => {
       }
     ]);
   });
+
+  it('allows placements onto passable low wall terrain', () => {
+    const validation = inspectPlacementsForUnitIds(
+      {
+        F1: { x: 5, y: 8 }
+      },
+      ['F1'],
+      {
+        F1: SINGLE_SQUARE_FOOTPRINT
+      },
+      [{ featureId: 'low_wall_1', kind: 'low_wall', position: { x: 5, y: 8 }, footprint: SINGLE_SQUARE_FOOTPRINT }]
+    );
+
+    expect(validation.isValid).toBe(true);
+    expect(validation.blockedSquareGroups).toEqual([]);
+  });
 });

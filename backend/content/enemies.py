@@ -224,6 +224,34 @@ def build_rock_terrain_feature() -> TerrainFeature:
         footprint=Footprint(width=1, height=1),
     )
 
+
+def build_boulder_terrain_feature(feature_id: str, x: int, y: int) -> TerrainFeature:
+    return TerrainFeature(
+        feature_id=feature_id,
+        kind="boulder",
+        position=GridPosition(x=x, y=y),
+        footprint=Footprint(width=1, height=1),
+    )
+
+
+def build_low_wall_terrain_feature(feature_id: str, x: int, y: int, width: int = 2) -> TerrainFeature:
+    return TerrainFeature(
+        feature_id=feature_id,
+        kind="low_wall",
+        position=GridPosition(x=x, y=y),
+        footprint=Footprint(width=width, height=1),
+    )
+
+
+def build_hobgoblin_command_screen_terrain_features() -> tuple[TerrainFeature, ...]:
+    return (
+        build_rock_terrain_feature(),
+        build_low_wall_terrain_feature("command_low_wall_1", 7, 6),
+        build_low_wall_terrain_feature("command_low_wall_2", 7, 10),
+        build_boulder_terrain_feature("command_boulder_1", 6, 4),
+    )
+
+
 enemy_weapons: dict[str, WeaponProfile] = {
     "scimitar": WeaponProfile(
         id="scimitar",
@@ -3628,7 +3656,7 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E14", "hobgoblin_archer", GridPosition(x=12, y=10)),
             EnemyPresetUnit("E15", "hobgoblin_archer", GridPosition(x=12, y=13)),
         ),
-        terrain_features=(build_rock_terrain_feature(),),
+        terrain_features=build_hobgoblin_command_screen_terrain_features(),
     ),
     "berserker_overrun": EnemyPresetDefinition(
         preset_id="berserker_overrun",

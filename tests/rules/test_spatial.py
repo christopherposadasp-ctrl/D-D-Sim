@@ -8,10 +8,21 @@ from backend.engine.rules.spatial import (
     find_path_to_adjacent_square,
     get_attack_context,
     get_hide_passive_perception_dc,
+    get_reachable_squares,
+    has_line_of_sight_between_units,
     has_terrain_half_cover_against_observer,
     inspect_placements_for_unit_ids,
     path_provokes_opportunity_attack,
 )
+
+
+def build_low_wall(feature_id: str = "low_wall_1", x: int = 5, y: int = 8) -> TerrainFeature:
+    return TerrainFeature(
+        feature_id=feature_id,
+        kind="low_wall",
+        position=GridPosition(x=x, y=y),
+        footprint=Footprint(width=1, height=1),
+    )
 
 
 def test_flanking_requires_support_angle_greater_than_ninety_degrees() -> None:
@@ -156,6 +167,29 @@ def test_rock_grants_ranged_cover_bonus() -> None:
     assert context.cover_ac_bonus == 2
 
 
+def test_low_wall_grants_cover_without_blocking_placement_path_or_line_of_sight() -> None:
+    low_wall = build_low_wall()
+    validation = inspect_placements_for_unit_ids(
+        {"F1": GridPosition(x=5, y=8)},
+        ["F1"],
+        {"F1": Footprint(width=1, height=1)},
+        [low_wall],
+    )
+    encounter = create_encounter(EncounterConfig(seed="low-wall-cover", enemy_preset_id="goblin_screen"))
+    encounter.terrain_features = [low_wall]
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+    encounter.units["E1"].position = GridPosition(x=6, y=8)
+
+    reachable_positions = [square.position.model_dump() for square in get_reachable_squares(encounter, "F1", 1)]
+    context = get_attack_context(encounter, "F1", "E1", encounter.units["F1"].attacks["javelin"])
+
+    assert validation.is_valid is True
+    assert {"x": 5, "y": 8} in reachable_positions
+    assert has_line_of_sight_between_units(encounter, "F1", "E1") is True
+    assert context.legal is True
+    assert context.cover_ac_bonus == 2
+
+
 def test_terrain_cover_does_not_stack_with_unit_cover() -> None:
     encounter = create_encounter(EncounterConfig(seed="rock-and-unit-cover", enemy_preset_id="goblin_screen"))
     encounter.units["F1"].position = GridPosition(x=4, y=8)
@@ -195,6 +229,28 @@ def test_rock_cover_allows_hide_attempt_and_sets_minimum_dc_fifteen() -> None:
 
     assert can_attempt_hide_from_position(encounter, "F3", encounter.units["F3"].position) is True
     assert get_hide_passive_perception_dc(encounter, "F3", encounter.units["F3"].position) == 15
+
+
+def test_low_wall_cover_does_not_allow_hide_attempt() -> None:
+    encounter = create_encounter(EncounterConfig(seed="low-wall-hide-denied", enemy_preset_id="goblin_screen"))
+    encounter.terrain_features = [build_low_wall()]
+    encounter.units["F3"].position = GridPosition(x=4, y=8)
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+
+    for enemy_id, enemy in encounter.units.items():
+        if not enemy_id.startswith("E") or enemy_id == "E1":
+            continue
+        enemy.current_hp = 0
+        enemy.conditions.dead = True
+
+    assert has_terrain_half_cover_against_observer(
+        encounter,
+        "F3",
+        "E1",
+        encounter.units["F3"].position,
+        encounter.units["E1"].position,
+    ) is True
+    assert can_attempt_hide_from_position(encounter, "F3", encounter.units["F3"].position) is False
 
 
 def test_unit_cover_alone_does_not_allow_hide_attempt() -> None:

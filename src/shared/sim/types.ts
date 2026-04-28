@@ -34,7 +34,7 @@ export interface Footprint {
   height: number;
 }
 
-export type TerrainFeatureKind = 'rock';
+export type TerrainFeatureKind = 'rock' | 'boulder' | 'low_wall';
 
 export interface TerrainFeature {
   featureId: string;

@@ -1,4 +1,9 @@
-import { getOccupiedSquaresForPosition, GRID_SIZE, SINGLE_SQUARE_FOOTPRINT } from '../shared/sim/spatial';
+import {
+  getOccupiedSquaresForPosition,
+  GRID_SIZE,
+  SINGLE_SQUARE_FOOTPRINT,
+  terrainBlocksPlacement
+} from '../shared/sim/spatial';
 import type { PlacementValidationResult } from '../shared/sim/spatial';
 import type {
   BatchJobStatus,
@@ -46,6 +51,26 @@ function formatElapsedTime(value: number): string {
   }
 
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getTerrainToken(feature: TerrainFeature): string {
+  if (feature.kind === 'low_wall') {
+    return 'W';
+  }
+  if (feature.kind === 'boulder') {
+    return 'B';
+  }
+  return 'R';
+}
+
+function getTerrainLabel(feature: TerrainFeature): string {
+  if (feature.kind === 'low_wall') {
+    return 'low wall';
+  }
+  if (feature.kind === 'boulder') {
+    return 'boulder';
+  }
+  return 'rock';
 }
 
 function formatFieldValue(value: CombatEvent['rawRolls'][string]): string {
@@ -258,7 +283,7 @@ function GridBoard(props: {
       <div className="board-legend">
         <span className="legend-chip fighters">Fighter</span>
         <span className="legend-chip goblins">Enemy</span>
-        <span className="legend-chip terrain">Rock / Half Cover</span>
+        <span className="legend-chip terrain">Terrain / Cover</span>
         {placementMode ? (
           <span className="legend-chip selected">Selected Unit</span>
         ) : (
@@ -283,6 +308,7 @@ function GridBoard(props: {
             const terrainSquare = terrainSquares.get(key);
             const terrainFeature = terrainSquare?.feature ?? null;
             const isTerrainAnchor = terrainSquare?.isAnchor ?? false;
+            const isBlockingTerrain = terrainFeature ? terrainBlocksPlacement(terrainFeature) : false;
             const pathStep = pathIndex.get(key);
             const isActiveUnit = occupant?.id === props.activeUnitId;
             const isSelectedPlacementUnit = occupant?.id === props.selectedPlacementUnitId;
@@ -293,7 +319,7 @@ function GridBoard(props: {
             const cellClasses = `board-cell ${placementMode ? 'interactive' : ''} ${
               occupant ? occupant.faction : ''
             } ${terrainFeature ? `terrain ${terrainFeature.kind}` : ''} ${
-              placementMode && terrainFeature ? 'blocked-terrain' : ''
+              placementMode && isBlockingTerrain ? 'blocked-terrain' : ''
             } ${pathStep !== undefined ? 'path' : ''} ${isActiveUnit ? 'active-unit' : ''} ${
               isAttackOrigin ? 'attack-origin' : ''
             } ${isAttackTarget ? 'attack-target' : ''} ${isSelectedPlacementUnit ? 'selected-placement-unit' : ''}`;
@@ -303,7 +329,9 @@ function GridBoard(props: {
                   {cell.x},{cell.y}
                 </span>
                 {pathStep !== undefined ? <span className="path-step">{pathStep + 1}</span> : null}
-                {terrainFeature && isTerrainAnchor ? <span className="terrain-token">R</span> : null}
+                {terrainFeature && isTerrainAnchor ? (
+                  <span className="terrain-token">{getTerrainToken(terrainFeature)}</span>
+                ) : null}
                 {occupant && isAnchorSquare ? <span className="board-token">{occupant.id}</span> : null}
               </>
             );
@@ -319,11 +347,11 @@ function GridBoard(props: {
                     occupant
                       ? ` occupied by ${occupant.id}`
                       : terrainFeature
-                        ? ' contains rock terrain'
+                        ? ` contains ${getTerrainLabel(terrainFeature)} terrain`
                         : ' empty'
                   }`}
                   aria-pressed={isSelectedPlacementUnit}
-                  disabled={Boolean(terrainFeature)}
+                  disabled={isBlockingTerrain}
                 >
                   {cellContents}
                 </button>

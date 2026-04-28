@@ -65,12 +65,12 @@ from backend.engine.rules.spatial import (
     get_active_grappled_target_ids,
     get_active_grappler_ids,
     get_attack_context,
+    get_blocking_terrain_features_for_position,
     get_min_chebyshev_distance_between_footprints,
     get_min_distance_to_faction,
     get_occupants_for_position,
     get_reachable_squares,
     get_swallow_source_id,
-    get_terrain_features_for_position,
     get_unit_footprint,
     get_units_with_positions,
     is_within_bounds,
@@ -5443,7 +5443,7 @@ def get_legal_landing_positions(
                 continue
             if get_occupants_for_position(state, position, footprint, [actor.id], position_index):
                 continue
-            if get_terrain_features_for_position(state, position, footprint, position_index):
+            if get_blocking_terrain_features_for_position(state, position, footprint, position_index):
                 continue
             positions.append(position)
 
