@@ -22,9 +22,10 @@ def test_pc_tuning_sample_defaults_to_paladin_standard_battery() -> None:
     assert run_pc_tuning_sample.FIGHTER_DEFAULT_PLAYER_BEHAVIOR == "both"
     assert run_pc_tuning_sample.DEFAULT_MONSTER_BEHAVIOR == "balanced"
     assert run_pc_tuning_sample.DEFAULT_SCENARIO_IDS == (
-        "hobgoblin_kill_box",
-        "bugbear_dragnet",
-        "deadwatch_phalanx",
+        "reaction_bastion",
+        "skyhunter_pincer",
+        "hobgoblin_command_screen",
+        "berserker_overrun",
     )
 
 
@@ -227,6 +228,7 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     assert summary["wizardHitRate"] == 60.0
     assert summary["averageWizardDamagePerRun"] == 21
     assert summary["wizardSpellCasts"]["fire_bolt"] == 2
+    assert summary["wizardSpellCasts"]["magic_missile"] == 1
     assert summary["wizardSpellDamage"]["burning_hands"] == 16
     assert summary["wizardSpellSlotsSpentPerRun"] == 1.5
     assert summary["wizardDamagePerSlotSpent"] == 8.33

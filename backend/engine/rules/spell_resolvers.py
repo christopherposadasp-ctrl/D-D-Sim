@@ -263,6 +263,7 @@ def resolve_ranged_spell_attack(
         reaction_actor_id = target.id
         attack_reaction = "parry"
 
+    target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
     selected_damage_type: str | None = None
     if spell.selectable_damage_types:
         weapon = resolve_selectable_damage_weapon(weapon, target)
@@ -468,6 +469,7 @@ def resolve_ranged_spell_attack(
         resolved_totals["potentCantripApplied"] = True
         resolved_totals["potentCantripDamage"] = potent_cantrip_damage
         resolved_totals["potentCantripNoRider"] = True
+    attach_spell_target_outcome_fields(state, resolved_totals, resolved_target_id, target_was_alive_before_hit)
     raw_rolls = {
         "attackRolls": attack_rolls,
         "advantageSources": advantage_sources,
@@ -600,6 +602,7 @@ def resolve_magic_missile(
         return build_spell_skip_event(state, attacker_id, "magic_missile", "No level 1 spell slots remain.")
 
     target = state.units[target_id]
+    target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
     defense_reaction_data = (
         maybe_apply_shield_reaction(state, attacker_id=attacker_id, target_id=target_id, trigger="magic_missile")
         if not unit_has_shield_effect(target)
@@ -651,6 +654,7 @@ def resolve_magic_missile(
         "blockedByShield": blocked_by_shield,
         **(defense_reaction_data or {}),
     }
+    attach_spell_target_outcome_fields(state, resolved_totals, target_id, target_was_alive_before_hit)
     attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
 
     return CombatEvent(
@@ -738,6 +742,26 @@ def build_no_damage_result() -> DamageApplicationResult:
         final_damage_to_hp=0,
         final_total_damage=0,
     )
+
+
+def spell_target_was_alive_before_damage(target: UnitState) -> bool:
+    return target.current_hp > 0 and not target.conditions.dead
+
+
+def attach_spell_target_outcome_fields(
+    state: EncounterState,
+    resolved_totals: dict[str, object],
+    target_id: str,
+    target_was_alive_before_damage: bool,
+) -> None:
+    target = state.units.get(target_id)
+    target_dropped_to_zero = bool(
+        target_was_alive_before_damage
+        and target is not None
+        and (target.conditions.dead or target.current_hp <= 0)
+    )
+    resolved_totals["targetWasAliveBeforeHit"] = target_was_alive_before_damage
+    resolved_totals["targetDroppedToZero"] = target_dropped_to_zero
 
 
 def resolve_spell_attack_roll_count(
@@ -995,6 +1019,7 @@ def resolve_multi_target_save_spell(
 
     for resolved_target_id in resolved_target_ids:
         target = state.units[resolved_target_id]
+        target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
         save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "con", state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [
@@ -1051,6 +1076,7 @@ def resolve_multi_target_save_spell(
             resolved_totals["potentCantripNoRider"] = True
         if spell.level > 0:
             resolved_totals[f"spellSlotsLevel{spell.level}Remaining"] = get_remaining_spell_slots(attacker, spell.level)
+        attach_spell_target_outcome_fields(state, resolved_totals, resolved_target_id, target_was_alive_before_hit)
         attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
 
         events.append(save_event)
@@ -1148,6 +1174,7 @@ def resolve_burning_hands(
 
     for resolved_target_id in targeting.target_ids:
         target = state.units[resolved_target_id]
+        target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
         save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "dex", state=state)
         save_roll_count = 1 if save_mode == "normal" else 2
         save_rolls = [
@@ -1184,6 +1211,7 @@ def resolve_burning_hands(
             "fullDamage": full_damage,
             "halfOnSuccess": spell.half_on_success,
         }
+        attach_spell_target_outcome_fields(state, resolved_totals, resolved_target_id, target_was_alive_before_hit)
         attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
         events.append(
             CombatEvent(

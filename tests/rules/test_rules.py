@@ -1547,6 +1547,8 @@ def test_magic_missile_auto_hits_and_spends_a_level1_slot() -> None:
     defeat_other_enemies(encounter, "E1")
     encounter.units["F1"].position = GridPosition(x=5, y=5)
     encounter.units["E1"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].max_hp = 9
+    encounter.units["E1"].current_hp = 9
 
     spell_events = resolve_cast_spell_action(
         encounter,
@@ -1558,6 +1560,8 @@ def test_magic_missile_auto_hits_and_spends_a_level1_slot() -> None:
 
     assert attack_event.resolved_totals["spellId"] == "magic_missile"
     assert attack_event.resolved_totals["hit"] is True
+    assert attack_event.resolved_totals["targetWasAliveBeforeHit"] is True
+    assert attack_event.resolved_totals["targetDroppedToZero"] is True
     assert attack_event.raw_rolls["damageRolls"] == [1, 2, 3]
     assert attack_event.damage_details.total_damage == 9
     assert encounter.units["F1"].resources.spell_slots_level_1 == 1
@@ -1578,6 +1582,27 @@ def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert len(spell_events) == 1
     assert spell_events[0].event_type == "skip"
     assert "No level 1 spell slots remain" in spell_events[0].text_summary
+
+
+def test_fire_bolt_spell_damage_reports_target_drops_to_zero() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-fire-bolt-drop-metadata"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+    encounter.units["E1"].max_hp = 4
+    encounter.units["E1"].current_hp = 4
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[4]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "fire_bolt"
+    assert attack_event.resolved_totals["targetWasAliveBeforeHit"] is True
+    assert attack_event.resolved_totals["targetDroppedToZero"] is True
 
 
 def test_level2_wizard_has_third_level1_slot_for_leveled_spells() -> None:
@@ -2774,8 +2799,8 @@ def test_shatter_deals_thunder_damage_on_con_saves_spends_level2_slot_and_logs_e
     encounter.units["F1"].position = GridPosition(x=5, y=5)
     encounter.units["E1"].position = GridPosition(x=10, y=5)
     encounter.units["E2"].position = GridPosition(x=12, y=5)
-    encounter.units["E1"].max_hp = 30
-    encounter.units["E1"].current_hp = 30
+    encounter.units["E1"].max_hp = 12
+    encounter.units["E1"].current_hp = 12
     encounter.units["E2"].max_hp = 30
     encounter.units["E2"].current_hp = 30
 
@@ -2820,6 +2845,8 @@ def test_shatter_deals_thunder_damage_on_con_saves_spends_level2_slot_and_logs_e
     assert first_attack.resolved_totals["saveSucceeded"] is False
     assert first_attack.resolved_totals["fullDamage"] == 12
     assert first_attack.resolved_totals["damageApplied"] == 12
+    assert first_attack.resolved_totals["targetWasAliveBeforeHit"] is True
+    assert first_attack.resolved_totals["targetDroppedToZero"] is True
     assert first_attack.resolved_totals["spellSlotsLevel2Remaining"] == 0
     assert first_attack.raw_rolls["damageRolls"] == [3, 4, 5]
     assert first_attack.damage_details.damage_components[0].damage_type == "thunder"
@@ -2827,6 +2854,7 @@ def test_shatter_deals_thunder_damage_on_con_saves_spends_level2_slot_and_logs_e
     assert second_save.resolved_totals["success"] is True
     assert second_attack.resolved_totals["saveSucceeded"] is True
     assert second_attack.resolved_totals["damageApplied"] == 6
+    assert second_attack.resolved_totals["targetDroppedToZero"] is False
     assert second_attack.damage_details.total_damage == 6
     assert "Shatter" in first_attack.text_summary
     assert encounter.units["F1"].resources.spell_slots_level_2 == 0
@@ -3169,6 +3197,8 @@ def test_burning_hands_rolls_saves_uses_one_damage_roll_and_can_hit_allies() -> 
     encounter.units["F2"].position = GridPosition(x=7, y=6)
     encounter.units["E1"].position = GridPosition(x=6, y=5)
     encounter.units["E2"].position = GridPosition(x=7, y=5)
+    encounter.units["E1"].max_hp = 6
+    encounter.units["E1"].current_hp = 6
 
     spell_events = resolve_cast_spell_action(
         encounter,
@@ -3189,6 +3219,7 @@ def test_burning_hands_rolls_saves_uses_one_damage_roll_and_can_hit_allies() -> 
     attack_events = [event for event in spell_events if event.event_type == "attack"]
     assert [event.target_ids[0] for event in attack_events] == ["F2", "E1", "E2"]
     assert [event.damage_details.total_damage for event in attack_events] == [6, 6, 3]
+    assert [event.resolved_totals["targetDroppedToZero"] for event in attack_events] == [False, True, False]
     assert all(event.raw_rolls["damageRolls"] == [3, 2, 1] for event in attack_events)
 
 
