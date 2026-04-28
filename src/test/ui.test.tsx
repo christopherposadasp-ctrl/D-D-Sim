@@ -2414,6 +2414,7 @@ function buildUnit(
       uncannyMetabolismUses: 0,
       spellSlotsLevel1: 0,
       spellSlotsLevel2: 0,
+      spellSlotsLevel3: 0,
       layOnHandsPoints: 0,
       channelDivinityUses: 0,
     },

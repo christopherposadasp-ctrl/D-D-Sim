@@ -326,6 +326,12 @@ FEATURE_DEFINITIONS: dict[str, FeatureDefinition] = {
         kind="class_feature",
         description="Damaging cantrips deal half rolled damage, minimum 1, on misses or successful saves.",
     ),
+    "memorize_spell": FeatureDefinition(
+        feature_id="memorize_spell",
+        display_name="Memorize Spell",
+        kind="class_feature",
+        description="Wizard spell-preparation flexibility tracked as level 5 metadata; live encounters do not use it yet.",
+    ),
     "ki": FeatureDefinition(
         feature_id="ki",
         display_name="Ki",

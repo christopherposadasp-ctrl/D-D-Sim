@@ -733,6 +733,24 @@ def test_level4_evoker_wizard_keeps_existing_spell_priority_and_ignores_mage_arm
     assert set(decision.action["target_ids"]) == {"G1", "G2"}
 
 
+def test_level5_evoker_wizard_does_not_select_metadata_only_level3_spells() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-level5-no-level3-ai",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["F1"].resources.spell_slots_level_2 = 0
+    encounter.units["G1"].current_hp = 20
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+
+
 def test_evoker_wizard_shatter_plans_only_mutually_legal_cluster_targets() -> None:
     for behavior in ("smart", "dumb"):
         encounter = create_encounter(

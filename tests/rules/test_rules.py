@@ -220,6 +220,15 @@ def build_level4_wizard_config(seed: str, *, player_behavior: str = "smart") -> 
     )
 
 
+def build_level5_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+    return EncounterConfig(
+        seed=seed,
+        enemy_preset_id="goblin_screen",
+        player_preset_id="wizard_level5_evoker_sample_trio",
+        player_behavior=player_behavior,
+    )
+
+
 def build_level3_fighter_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
@@ -2977,6 +2986,25 @@ def test_level4_evoker_scorching_ray_uses_int_asi_spell_attack_bonus_and_third_l
     assert [event.resolved_totals["attackTotal"] for event in attack_events] == [15, 15, 15]
     assert [event.resolved_totals["hit"] for event in attack_events] == [True, True, True]
     assert encounter.units["F1"].resources.spell_slots_level_2 == 2
+
+
+def test_level5_evoker_metadata_level3_spells_fail_cleanly_without_spending_slots() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-metadata-spells-skip"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+
+    for spell_id, target_id in (("fireball", "E1"), ("counterspell", "E1"), ("haste", "F1")):
+        spell_events = resolve_cast_spell_action(
+            encounter,
+            "F1",
+            {"kind": "cast_spell", "spell_id": spell_id, "target_id": target_id},
+        )
+
+        assert len(spell_events) == 1
+        assert spell_events[0].event_type == "skip"
+        assert "cannot be resolved by the live simulator" in spell_events[0].text_summary
+        assert encounter.units["F1"].resources.spell_slots_level_3 == 2
 
 
 def test_scorching_ray_stops_remaining_rays_after_target_drops() -> None:

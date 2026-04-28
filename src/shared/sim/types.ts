@@ -69,6 +69,7 @@ export interface ResourceState {
   uncannyMetabolismUses: number;
   spellSlotsLevel1: number;
   spellSlotsLevel2: number;
+  spellSlotsLevel3: number;
   layOnHandsPoints: number;
   channelDivinityUses: number;
 }

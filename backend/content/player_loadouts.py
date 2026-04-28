@@ -954,6 +954,38 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
             "shatter",
         ),
     ),
+    "wizard_level5_evoker_sample_build": PlayerLoadoutDefinition(
+        loadout_id="wizard_level5_evoker_sample_build",
+        display_name="Level 5 Evoker Wizard Sample Build",
+        class_id="wizard",
+        level=5,
+        template_name="Level 5 Evoker Wizard Sample Build",
+        behavior_profile="arcane_artillery",
+        max_hp=32,
+        ac=12,
+        speed=30,
+        initiative_mod=2,
+        passive_perception=11,
+        ability_mods=wizard_level4_ability_mods,
+        size_category="medium",
+        footprint=medium_footprint,
+        attacks={"dagger": player_weapons["dagger"]},
+        role_tags=("caster",),
+        medicine_modifier=1,
+        default_melee_weapon_id="dagger",
+        combat_cantrip_ids=("fire_bolt", "shocking_grasp"),
+        prepared_combat_spell_ids=(
+            "magic_missile",
+            "shield",
+            "burning_hands",
+            "mage_armor",
+            "scorching_ray",
+            "shatter",
+            "fireball",
+            "counterspell",
+            "haste",
+        ),
+    ),
 }
 
 PLAYER_LOADOUTS.update(
@@ -1223,15 +1255,24 @@ PLAYER_PRESET_DEFINITIONS: dict[str, PlayerPresetDefinition] = {
             for fighter_id in TRIO_PLAYER_IDS
         ),
     ),
+    "wizard_level5_evoker_sample_trio": PlayerPresetDefinition(
+        preset_id="wizard_level5_evoker_sample_trio",
+        display_name="Level 5 Evoker Wizard Trio",
+        description="Three level 5 Evoker wizards with level 3 slot and spell access metadata.",
+        units=tuple(
+            PlayerPresetUnit(unit_id=fighter_id, loadout_id="wizard_level5_evoker_sample_build")
+            for fighter_id in TRIO_PLAYER_IDS
+        ),
+    ),
     "martial_mixed_party": PlayerPresetDefinition(
         preset_id="martial_mixed_party",
         display_name="Mixed Martial Party",
-        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 4 Evoker wizard.",
+        description="One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 5 Evoker wizard.",
         units=(
             PlayerPresetUnit(unit_id="F1", loadout_id="fighter_level5_sample_build"),
             PlayerPresetUnit(unit_id="F2", loadout_id="paladin_level5_sample_build"),
             PlayerPresetUnit(unit_id="F3", loadout_id="rogue_ranged_level5_assassin_sample_build"),
-            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_level4_evoker_sample_build"),
+            PlayerPresetUnit(unit_id="F4", loadout_id="wizard_level5_evoker_sample_build"),
         ),
     ),
 }
@@ -1277,6 +1318,7 @@ ACTIVE_PLAYER_PRESET_IDS = (
     "wizard_level2_sample_trio",
     "wizard_level3_evoker_sample_trio",
     "wizard_level4_evoker_sample_trio",
+    "wizard_level5_evoker_sample_trio",
     "martial_mixed_party",
 )
 
@@ -1377,6 +1419,7 @@ def build_legacy_resource_state(resource_pools: dict[str, int]) -> ResourceState
         uncanny_metabolism_uses=resource_pools.get("uncanny_metabolism", 0),
         spell_slots_level_1=resource_pools.get("spell_slots_level_1", 0),
         spell_slots_level_2=resource_pools.get("spell_slots_level_2", 0),
+        spell_slots_level_3=resource_pools.get("spell_slots_level_3", 0),
         lay_on_hands_points=resource_pools.get("lay_on_hands", 0),
         channel_divinity_uses=resource_pools.get("channel_divinity", 0),
     )

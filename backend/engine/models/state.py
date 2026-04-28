@@ -98,6 +98,7 @@ RESOURCE_FIELD_BY_POOL = {
     "uncanny_metabolism": "uncanny_metabolism_uses",
     "spell_slots_level_1": "spell_slots_level_1",
     "spell_slots_level_2": "spell_slots_level_2",
+    "spell_slots_level_3": "spell_slots_level_3",
     "lay_on_hands": "lay_on_hands_points",
     "channel_divinity": "channel_divinity_uses",
 }
@@ -114,6 +115,7 @@ class ResourceState(CamelModel):
     uncanny_metabolism_uses: int
     spell_slots_level_1: int
     spell_slots_level_2: int
+    spell_slots_level_3: int
     lay_on_hands_points: int
     channel_divinity_uses: int
 

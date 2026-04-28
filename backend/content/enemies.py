@@ -4080,6 +4080,7 @@ def create_enemy(unit_id: str, variant_id: str) -> UnitState:
             uncanny_metabolism_uses=0,
             spell_slots_level_1=0,
             spell_slots_level_2=0,
+            spell_slots_level_3=0,
             lay_on_hands_points=0,
             channel_divinity_uses=0,
         ),

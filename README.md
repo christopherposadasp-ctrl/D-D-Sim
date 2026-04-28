@@ -27,7 +27,7 @@ Current live martial class support:
 - Barbarian supported to level 2
 - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk supported to level 2
-- Wizard supported to level 4 as an Evoker with an Intelligence ASI, Potent Cantrip, Scorching Ray, Shatter, and Mage Armor metadata/manual support
+- Wizard supported to level 5 as an Evoker with level 3 slot metadata, Memorize Spell metadata, Potent Cantrip, Scorching Ray, Shatter, and Mage Armor metadata/manual support
 - Paladin supported to level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
 
 Current default player preset:
@@ -36,7 +36,7 @@ Current default player preset:
 - level 5 Battle Master fighter
 - level 5 Oath of the Ancients paladin
 - level 5 ranged Assassin rogue
-- level 4 Evoker wizard
+- level 5 Evoker wizard
 
 Active enemy presets:
 

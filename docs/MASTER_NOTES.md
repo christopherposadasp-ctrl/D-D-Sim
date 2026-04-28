@@ -89,10 +89,11 @@ It should be updated whenever one of these changes:
   - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
   - Monk supported to level 2
   - Paladin supported to level 5 as an Oath of the Ancients plate-and-shield support tank
-- A narrow combat-only Wizard level 1 slice is also live with:
+  - Wizard supported to level 5 as an Evoker with level 3 slot metadata and Memorize Spell metadata
+- A narrow combat-only Wizard spell slice is also live with:
   - cantrips: `fire_bolt`, `shocking_grasp`
-  - prepared combat spells: `magic_missile`, `shield`, `burning_hands`
-  - level 1 prepared-spell and cantrip counts tracked as runtime metadata
+  - prepared combat spells: `magic_missile`, `shield`, `burning_hands`, `scorching_ray`, `shatter`
+  - level 3 spell access and prepared-spell counts tracked as runtime metadata
 - Rogue level 2 now includes combat-only Cunning Action support with:
   - bonus-action Dash
   - bonus-action Disengage
@@ -102,7 +103,7 @@ It should be updated whenever one of these changes:
   - one level 5 Battle Master fighter
   - one level 5 Oath of the Ancients paladin
   - one level 5 ranged Assassin rogue
-  - one level 1 wizard
+  - one level 5 Evoker wizard
 - These new player-build fields are intentionally kept out of the live run/batch API payload for now so the current UI contract remains stable during the framework transition
 - A backend-owned player catalog endpoint now exists at `GET /api/catalog/classes`
 - Scenario audit expectations now resolve through a scenario-definition registry instead of being fully hardcoded inside the audit service
@@ -188,8 +189,8 @@ It should be updated whenever one of these changes:
 
 ### Current Working Version
 
-- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Paladin is live to level 5 as an Oath of the Ancients support tank with Extra Attack, Sentinel, level 2 Bless, and Aid rules support; Barbarian, melee Rogue, and Monk remain live up to level 2
-- Wizard level 1 is live as a narrow combat-only spellcasting slice, not a full `V4.4` spell framework rollout
+- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Paladin is live to level 5 as an Oath of the Ancients support tank with Extra Attack, Sentinel, level 2 Bless, and Aid rules support; Wizard is live to level 5 as an Evoker metadata upgrade; Barbarian, melee Rogue, and Monk remain live up to level 2
+- Wizard level 5 is live as a narrow combat-only spellcasting slice plus level 3 metadata, not a full `V4.4` spell framework rollout
 - Immediate project path is now focused on one presentation-ready level 5 party rather than broad class coverage:
   - Fighter: Battle Master
   - ranged Rogue: Assassin
