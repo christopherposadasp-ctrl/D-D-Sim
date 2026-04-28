@@ -82,6 +82,31 @@ def test_class_audit_parser_uses_overall_status_and_row_messages(tmp_path: Path)
     assert warnings == ["martial_mixed_party / orc_push: Action Surge was skipped on an opening turn."]
 
 
+def test_class_slice_summary_parser_uses_segmented_results(tmp_path: Path) -> None:
+    report_path = tmp_path / "class_slice_summary.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "overallStatus": "warn",
+                "results": [
+                    {
+                        "class": "fighter",
+                        "playerPresetId": "martial_mixed_party",
+                        "scenarioId": "orc_push",
+                        "status": "warn",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status, warnings = nightly_audit.parse_class_slice_summary_report(report_path)
+
+    assert status == "warn"
+    assert warnings == ["fighter / martial_mixed_party / orc_push: status=warn"]
+
+
 def test_code_health_parser_warns_on_legacy_imports_and_root_artifacts(tmp_path: Path) -> None:
     report_path = tmp_path / "health.json"
     report_path.write_text(
@@ -121,6 +146,18 @@ def test_backend_gate_uses_fast_non_slow_pytest_filter() -> None:
 
     assert pytest_command.argv[1:6] == ("-m", "pytest", "-q", "-m", "not slow")
     assert 'pytest -q -m "not slow" tests\\golden tests\\rules tests\\integration' in pytest_command.display_command
+
+
+def test_rotating_class_slices_use_segmented_runner_instead_of_legacy_quick() -> None:
+    rotating_slices = nightly_audit.build_rotating_slices(Path("reports/nightly"))
+    class_slices = [entry for entry in rotating_slices if "segmented" in entry.label]
+
+    assert class_slices
+    assert all("run_class_audit_slices.py" in entry.command.display_command for entry in class_slices)
+    assert all("run_fighter_audit.py --quick" not in entry.command.display_command for entry in class_slices)
+    assert all("run_barbarian_audit.py --quick" not in entry.command.display_command for entry in class_slices)
+    assert all(entry.command.timeout_seconds == 7 * 60 for entry in class_slices)
+    assert any(entry.slice_id == "barbarian_martial_mixed_party_wolf_harriers" for entry in class_slices)
 
 
 def test_markdown_report_includes_blocker_and_reports() -> None:

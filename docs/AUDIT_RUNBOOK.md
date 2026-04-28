@@ -105,6 +105,7 @@ For Fighter/Barbarian checkpoint evidence, use the segmented route instead of mo
 ```
 
 The monolithic `fighter-audit-*` and `barbarian-audit-*` commands remain available for targeted manual checks, but they are not the recommended full-matrix evidence route.
+Nightly Fighter/Barbarian rotating coverage also uses segmented class slices so one slow row cannot stall the whole nightly audit.
 
 ## Active Waivers
 

@@ -179,6 +179,37 @@ def parse_class_audit_report(path: Path) -> tuple[Status, list[str]]:
     return "pass", []
 
 
+def parse_class_slice_summary_report(path: Path) -> tuple[Status, list[str]]:
+    payload = load_json(path)
+    overall_status = payload.get("overallStatus")
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise ValueError("Class slice summary report is missing results.")
+
+    failures: list[str] = []
+    warnings: list[str] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        label = (
+            f"{result.get('class', 'unknown')} / "
+            f"{result.get('playerPresetId', 'unknown')} / "
+            f"{result.get('scenarioId', 'unknown')}"
+        )
+        status = result.get("status")
+        detail = str(result.get("detail") or f"status={status}")
+        if status in {"fail", "timeout"} or result.get("hardBlocker"):
+            failures.append(f"{label}: {detail}")
+        elif status == "warn":
+            warnings.append(f"{label}: status=warn")
+
+    if overall_status == "fail":
+        return "fail", failures[:8] or ["Class slice summary reported overallStatus=fail."]
+    if overall_status == "warn":
+        return "warn", warnings[:8] or ["Class slice summary reported overallStatus=warn."]
+    return "pass", []
+
+
 def parse_code_health_report(path: Path) -> tuple[Status, list[str]]:
     payload = load_json(path)
     warnings: list[str] = []
@@ -228,6 +259,63 @@ def make_python_script_spec(
     )
 
 
+def make_class_slice_spec(
+    report_dir: Path,
+    *,
+    slice_id: str,
+    label: str,
+    audit_class: str,
+    player_preset_id: str,
+    scenario_id: str,
+) -> RotatingSlice:
+    class_slice_dir = report_dir / "class_slices"
+    summary_json = class_slice_dir / f"{slice_id}_latest.json"
+    summary_md = class_slice_dir / f"{slice_id}_latest.md"
+    detail_dir = class_slice_dir / "details"
+    display_command = (
+        "py -3.13 .\\scripts\\run_class_audit_slices.py"
+        f" --class {audit_class} --profile quick"
+        f" --player-preset {player_preset_id} --scenario {scenario_id}"
+        " --force --timeout-seconds 300"
+        f" --report-dir .\\reports\\nightly\\class_slices\\details"
+        f" --summary-json-path .\\reports\\nightly\\class_slices\\{slice_id}_latest.json"
+        f" --summary-markdown-path .\\reports\\nightly\\class_slices\\{slice_id}_latest.md"
+    )
+    return RotatingSlice(
+        slice_id=slice_id,
+        label=label,
+        command=CommandSpec(
+            step_id="rotating_slice",
+            label="Rotating slice",
+            argv=(
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "run_class_audit_slices.py"),
+                "--class",
+                audit_class,
+                "--profile",
+                "quick",
+                "--player-preset",
+                player_preset_id,
+                "--scenario",
+                scenario_id,
+                "--force",
+                "--timeout-seconds",
+                "300",
+                "--report-dir",
+                str(detail_dir),
+                "--summary-json-path",
+                str(summary_json),
+                "--summary-markdown-path",
+                str(summary_md),
+            ),
+            display_command=display_command,
+            timeout_seconds=7 * 60,
+            report_paths=(summary_json, summary_md),
+            report_parser=parse_class_slice_summary_report,
+        ),
+    )
+
+
 def run_sequential_step(step_id: str, label: str, commands: list[CommandSpec], timeout_seconds: int) -> StepResult:
     output_tail: list[str] = []
     for command in commands:
@@ -257,63 +345,65 @@ def run_sequential_step(step_id: str, label: str, commands: list[CommandSpec], t
 
 
 def build_rotating_slices(report_dir: Path) -> tuple[RotatingSlice, ...]:
-    fighter_json = report_dir / "fighter_audit_latest.json"
-    fighter_md = report_dir / "fighter_audit_latest.md"
-    barbarian_json = report_dir / "barbarian_audit_latest.json"
-    barbarian_md = report_dir / "barbarian_audit_latest.md"
     marsh_json = report_dir / "marsh_predators_deep_latest.json"
     orc_json = report_dir / "orc_push_deep_latest.json"
 
     return (
-        RotatingSlice(
-            slice_id="fighter_quick",
-            label="Fighter quick audit",
-            command=CommandSpec(
-                step_id="rotating_slice",
-                label="Rotating slice",
-                argv=(
-                    sys.executable,
-                    str(REPO_ROOT / "scripts" / "run_fighter_audit.py"),
-                    "--quick",
-                    "--json-path",
-                    str(fighter_json),
-                    "--markdown-path",
-                    str(fighter_md),
-                ),
-                display_command=(
-                    "py -3.13 .\\scripts\\run_fighter_audit.py --quick"
-                    " --json-path .\\reports\\nightly\\fighter_audit_latest.json"
-                    " --markdown-path .\\reports\\nightly\\fighter_audit_latest.md"
-                ),
-                timeout_seconds=30 * 60,
-                report_paths=(fighter_json, fighter_md),
-                report_parser=parse_class_audit_report,
-            ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="fighter_martial_mixed_party_orc_push",
+            label="Fighter segmented slice: martial_mixed_party / orc_push",
+            audit_class="fighter",
+            player_preset_id="martial_mixed_party",
+            scenario_id="orc_push",
         ),
-        RotatingSlice(
-            slice_id="barbarian_quick",
-            label="Barbarian quick audit",
-            command=CommandSpec(
-                step_id="rotating_slice",
-                label="Rotating slice",
-                argv=(
-                    sys.executable,
-                    str(REPO_ROOT / "scripts" / "run_barbarian_audit.py"),
-                    "--quick",
-                    "--json-path",
-                    str(barbarian_json),
-                    "--markdown-path",
-                    str(barbarian_md),
-                ),
-                display_command=(
-                    "py -3.13 .\\scripts\\run_barbarian_audit.py --quick"
-                    " --json-path .\\reports\\nightly\\barbarian_audit_latest.json"
-                    " --markdown-path .\\reports\\nightly\\barbarian_audit_latest.md"
-                ),
-                timeout_seconds=30 * 60,
-                report_paths=(barbarian_json, barbarian_md),
-                report_parser=parse_class_audit_report,
-            ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="fighter_level2_sample_trio_predator_rampage",
+            label="Fighter segmented slice: fighter_level2_sample_trio / predator_rampage",
+            audit_class="fighter",
+            player_preset_id="fighter_level2_sample_trio",
+            scenario_id="predator_rampage",
+        ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="fighter_level2_sample_trio_mixed_patrol",
+            label="Fighter segmented slice: fighter_level2_sample_trio / mixed_patrol",
+            audit_class="fighter",
+            player_preset_id="fighter_level2_sample_trio",
+            scenario_id="mixed_patrol",
+        ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="fighter_martial_mixed_party_predator_rampage",
+            label="Fighter segmented slice: martial_mixed_party / predator_rampage",
+            audit_class="fighter",
+            player_preset_id="martial_mixed_party",
+            scenario_id="predator_rampage",
+        ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="fighter_martial_mixed_party_captains_crossfire",
+            label="Fighter segmented slice: martial_mixed_party / captains_crossfire",
+            audit_class="fighter",
+            player_preset_id="martial_mixed_party",
+            scenario_id="captains_crossfire",
+        ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="barbarian_martial_mixed_party_wolf_harriers",
+            label="Barbarian segmented slice: martial_mixed_party / wolf_harriers",
+            audit_class="barbarian",
+            player_preset_id="martial_mixed_party",
+            scenario_id="wolf_harriers",
+        ),
+        make_class_slice_spec(
+            report_dir,
+            slice_id="fighter_martial_mixed_party_goblin_screen_control",
+            label="Fighter segmented control slice: martial_mixed_party / goblin_screen",
+            audit_class="fighter",
+            player_preset_id="martial_mixed_party",
+            scenario_id="goblin_screen",
         ),
         RotatingSlice(
             slice_id="marsh_predators_deep",

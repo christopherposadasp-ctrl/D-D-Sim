@@ -189,7 +189,7 @@ These map to:
 - `rogue-audit-full`: the dedicated Rogue audit full profile
 - `class-audit-slices`: canonical timeout-safe segmented Fighter/Barbarian checkpoint evidence
 - `behavior-diagnostics`: smart-vs-dumb behavior investigation helper
-- `nightly-audit`: the nightly layered audit protocol
+- `nightly-audit`: the nightly layered audit protocol; Fighter/Barbarian rotating coverage uses segmented class slices
 - `pass2-stability`: the deterministic replay/batch and async stability gate
 - `pass3-clarity`: the clarity, docs, report, and audit-maintainability gate
 
@@ -215,7 +215,8 @@ Routine development should usually run:
 
 Use the broader audit commands before major merges, broad rules changes, or release checkpoints. Fighter/Barbarian
 checkpoint evidence should use `class-audit-slices`; the monolithic Fighter/Barbarian commands are targeted legacy tools,
-not the recommended full-matrix route.
+not the recommended full-matrix route. Nightly Fighter/Barbarian rotating coverage also uses segmented class slices so a
+single class row can timeout without stalling the full nightly protocol.
 
 ## Direct Python Commands
 
