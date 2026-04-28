@@ -5,6 +5,7 @@ import time
 from fastapi.testclient import TestClient
 
 from backend.api.app import app
+from backend.content.player_loadouts import ACTIVE_PLAYER_PRESET_IDS
 from backend.engine import run_batch, run_encounter
 from backend.engine.constants import DEFAULT_POSITIONS
 from backend.engine.models.state import EncounterConfig
@@ -24,32 +25,6 @@ ACTIVE_SCENARIO_IDS = [
     "captains_crossfire",
 ]
 
-ACTIVE_PLAYER_PRESET_IDS = [
-    "fighter_sample_trio",
-    "fighter_level2_sample_trio",
-    "fighter_level3_sample_trio",
-    "fighter_level4_sample_trio",
-    "fighter_level5_sample_trio",
-    "rogue_ranged_trio",
-    "rogue_melee_trio",
-    "rogue_level2_ranged_trio",
-    "rogue_level2_melee_trio",
-    "rogue_level3_ranged_assassin_trio",
-    "rogue_level4_ranged_assassin_trio",
-    "rogue_level5_ranged_assassin_trio",
-    "barbarian_sample_trio",
-    "barbarian_level2_sample_trio",
-    "monk_sample_trio",
-    "monk_level2_sample_trio",
-    "paladin_level1_sample_trio",
-    "paladin_level2_sample_trio",
-    "paladin_level3_sample_trio",
-    "paladin_level4_sample_trio",
-    "paladin_level5_sample_trio",
-    "wizard_sample_trio",
-    "martial_mixed_party",
-]
-
 CURRENT_MARSH_PREDATORS_UNITS = [
     {"unitId": "E1", "variantId": "giant_toad", "position": {"x": 9, "y": 7}},
     {"unitId": "E2", "variantId": "crocodile", "position": {"x": 1, "y": 1}},
@@ -64,7 +39,7 @@ CURRENT_MARTIAL_MIXED_PARTY_UNITS = [
     {"unitId": "F1", "loadoutId": "fighter_level5_sample_build"},
     {"unitId": "F2", "loadoutId": "paladin_level5_sample_build"},
     {"unitId": "F3", "loadoutId": "rogue_ranged_level5_assassin_sample_build"},
-    {"unitId": "F4", "loadoutId": "wizard_sample_build"},
+    {"unitId": "F4", "loadoutId": "wizard_level5_evoker_sample_build"},
 ]
 
 
@@ -154,9 +129,9 @@ def test_player_catalog_exposes_frozen_active_player_surface() -> None:
 
     classes_by_id = {player_class["id"]: player_class for player_class in payload["classes"]}
     assert "wizard" in classes_by_id
-    assert classes_by_id["wizard"]["maxSupportedLevel"] == 1
-    assert [preset["id"] for preset in payload["playerPresets"]] == ACTIVE_PLAYER_PRESET_IDS
-    assert len(payload["playerPresets"]) == 23
+    assert classes_by_id["wizard"]["maxSupportedLevel"] == 5
+    assert [preset["id"] for preset in payload["playerPresets"]] == list(ACTIVE_PLAYER_PRESET_IDS)
+    assert len(payload["playerPresets"]) == len(ACTIVE_PLAYER_PRESET_IDS)
 
     presets_by_id = {preset["id"]: preset for preset in payload["playerPresets"]}
     assert presets_by_id["martial_mixed_party"]["units"] == CURRENT_MARTIAL_MIXED_PARTY_UNITS
