@@ -3954,7 +3954,17 @@ def resolve_cast_spell_action(
         return spell_events + follow_up_events
 
     if spell.targeting_mode == "multi_ray_spell_attack":
-        raw_spell_events = spell_resolvers.resolve_scorching_ray(state, actor_id, action["target_id"], overrides)
+        target_ids = action.get("target_ids")
+        if not isinstance(target_ids, list):
+            target_ids = [action["target_id"]]
+        raw_spell_events = spell_resolvers.resolve_scorching_ray(
+            state,
+            actor_id,
+            action["target_id"],
+            overrides,
+            target_ids=[str(target_id) for target_id in target_ids],
+            spell_level=int(action["spell_level"]) if "spell_level" in action else None,
+        )
         spell_events: list[CombatEvent] = []
         for event in raw_spell_events:
             if event.event_type == "attack":
@@ -3967,6 +3977,32 @@ def resolve_cast_spell_action(
                     if state.units[target_id].conditions.dead:
                         spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
                         spell_events.extend(release_swallowed_units_from_source(state, target_id))
+        return spell_events
+
+    if spell.targeting_mode == "auto_hit_single_target" and action["spell_id"] == "magic_missile":
+        target_ids = action.get("target_ids")
+        if not isinstance(target_ids, list):
+            target_ids = [action["target_id"]]
+        raw_spell_events = spell_resolvers.resolve_magic_missile_projectiles(
+            state,
+            actor_id,
+            [str(target_id) for target_id in target_ids],
+            overrides,
+            spell_level=int(action["spell_level"]) if "spell_level" in action else None,
+        )
+        spell_events: list[CombatEvent] = []
+        for event in raw_spell_events:
+            if event.event_type == "attack":
+                spell_events.extend(build_attack_reaction_pre_events(state, event))
+                spell_events.extend(build_attack_reaction_phase_events(state, event))
+            spell_events.append(event)
+            if event.event_type != "attack":
+                continue
+            spell_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, event))
+            for target_id in event.target_ids:
+                if state.units[target_id].conditions.dead:
+                    spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
+                    spell_events.extend(release_swallowed_units_from_source(state, target_id))
         return spell_events
 
     if spell.targeting_mode == "multi_ally_buff":

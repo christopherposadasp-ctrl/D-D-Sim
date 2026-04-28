@@ -414,7 +414,8 @@ def record_wizard_attack(metrics: dict[str, Any], event: Any) -> None:
         if any("cannot take reactions" in delta.lower() for delta in event.condition_deltas):
             add_metric(metrics, "shockingGraspNoReactionApplications")
     elif spell_id == "magic_missile":
-        add_metric(metrics, "magicMissileCasts")
+        if resolved_totals.get("spellCastEvent") is not False:
+            add_metric(metrics, "magicMissileCasts")
         add_metric(metrics, "magicMissileDamage", damage_to_hp)
         if resolved_totals.get("targetDroppedToZero") is True:
             add_metric(metrics, "magicMissileKillSecures")
@@ -495,6 +496,12 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
                     add_metric(metrics, "burningHandsFriendlyFireCasts")
                 continue
 
+            if is_actor and spell_id == "scorching_ray" and event.event_type == "phase_change":
+                spell_id_text = str(spell_id)
+                metrics["wizardSpellCasts"][spell_id_text] += 1
+                record_wizard_spell_slot_spend(metrics, spell_id_text, resolved_totals)
+                continue
+
             if is_actor and resolved_totals.get("reaction") == "shield" and event.event_type == "phase_change":
                 spell_id_text = "shield"
                 metrics["wizardSpellCasts"][spell_id_text] += 1
@@ -513,7 +520,8 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
                 continue
 
             if is_actor and event.event_type == "attack":
-                if spell_id and spell_id != "burning_hands":
+                spell_cast_event = resolved_totals.get("spellCastEvent") is not False
+                if spell_id and spell_id not in {"burning_hands", "scorching_ray"} and spell_cast_event:
                     metrics["wizardSpellCasts"][str(spell_id)] += 1
                     record_wizard_spell_slot_spend(metrics, str(spell_id), resolved_totals)
                 record_wizard_attack(metrics, event)

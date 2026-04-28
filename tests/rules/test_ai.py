@@ -893,6 +893,70 @@ def test_smart_wizard_uses_baseline_fire_bolt_instead_of_magic_missile_for_bad_a
     assert dumb_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
 
 
+def test_wizard_magic_missile_split_is_smart_only_and_dumb_focus_fires() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-smart-split",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 7, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-dumb-focus",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 7, "y": 1}, G2={"x": 8, "y": 1}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    for encounter in (smart, dumb):
+        keep_only_active_units(encounter, "F1", "G1", "G2")
+        encounter.units["G1"].current_hp = 2
+        encounter.units["G2"].current_hp = 2
+
+    smart_decision = choose_turn_decision(smart, "F1")
+    dumb_decision = choose_turn_decision(dumb, "F1")
+
+    assert smart_decision.action == {
+        "kind": "cast_spell",
+        "spell_id": "magic_missile",
+        "target_id": "G1",
+        "target_ids": ["G1", "G2", "G2"],
+        "spell_level": 1,
+    }
+    assert dumb_decision.action == {
+        "kind": "cast_spell",
+        "spell_id": "magic_missile",
+        "target_id": "G1",
+        "target_ids": ["G1", "G1", "G1"],
+        "spell_level": 1,
+    }
+
+
+def test_level4_wizard_uses_level2_magic_missile_for_guaranteed_finisher() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-level2-ai",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["G1"].current_hp = 8
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action == {
+        "kind": "cast_spell",
+        "spell_id": "magic_missile",
+        "target_id": "G1",
+        "target_ids": ["G1", "G1", "G1", "G1"],
+        "spell_level": 2,
+    }
+
+
 def test_smart_wizard_uses_baseline_fire_bolt_instead_of_repositioning_for_burning_hands() -> None:
     encounter = create_encounter(
         EncounterConfig(

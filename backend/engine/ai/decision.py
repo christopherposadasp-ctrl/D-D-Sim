@@ -76,7 +76,7 @@ from backend.engine.rules.spatial import (
     is_within_bounds,
     path_provokes_opportunity_attack,
 )
-from backend.engine.rules.spell_resolvers import targets_are_within_spell_cluster
+from backend.engine.rules.spell_resolvers import get_magic_missile_dart_count, targets_are_within_spell_cluster
 from backend.engine.utils.helpers import get_units_by_faction, is_unit_conscious, unit_can_take_reactions, unit_sort_key
 
 SMART_PRECISION_ATTACK_DEFAULT_MAX_MISS_MARGIN = 2
@@ -3391,7 +3391,54 @@ def sharpshooter_allows_adjacent_ranged_pressure(
     return False
 
 
-def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, conscious_enemies: list[UnitState]) -> str | None:
+def choose_magic_missile_spell_level(actor: UnitState, target_hp: int) -> int | None:
+    if actor.resources.spell_slots_level_1 > 0 and target_hp <= 6:
+        return 1
+    if actor.resources.spell_slots_level_2 > 0 and target_hp <= 8:
+        return 2
+    return None
+
+
+def build_magic_missile_target_ids(
+    state: EncounterState,
+    actor: UnitState,
+    prioritized_targets: list[UnitState],
+    spell_level: int,
+) -> list[str]:
+    dart_count = get_magic_missile_dart_count(spell_level)
+    primary_target = prioritized_targets[0]
+    if state.player_behavior == "dumb":
+        return [primary_target.id for _ in range(dart_count)]
+
+    target_ids: list[str] = []
+    remaining_darts = dart_count
+    magic_missile_profile = build_spell_attack_context_profile("magic_missile")
+    for target in prioritized_targets:
+        if remaining_darts <= 0:
+            break
+        if not target.position:
+            continue
+        magic_missile_context = get_attack_context(state, actor.id, target.id, magic_missile_profile)
+        if not magic_missile_context.legal or not magic_missile_context.within_normal_range:
+            continue
+        darts_needed_for_guaranteed_drop = max(1, (target.current_hp + 1) // 2)
+        if darts_needed_for_guaranteed_drop > remaining_darts:
+            continue
+        target_ids.extend([target.id for _ in range(darts_needed_for_guaranteed_drop)])
+        remaining_darts -= darts_needed_for_guaranteed_drop
+
+    if not target_ids:
+        target_ids = [primary_target.id]
+        remaining_darts = dart_count - 1
+    target_ids.extend([target_ids[-1] for _ in range(remaining_darts)])
+    return target_ids
+
+
+def choose_magic_missile_action(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+) -> dict[str, object] | None:
     if not actor.position or not can_cast_combat_spell(actor, "magic_missile"):
         return None
 
@@ -3412,10 +3459,18 @@ def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, cons
         if not magic_missile_context.legal or not magic_missile_context.within_normal_range:
             continue
 
-        obvious_finish = target.current_hp <= 6
+        spell_level = choose_magic_missile_spell_level(actor, target.current_hp)
+        obvious_finish = spell_level is not None
         if not use_class_smart_delta(state, "wizard_magic_missile_bad_attack"):
             if obvious_finish:
-                return target.id
+                target_ids = build_magic_missile_target_ids(state, actor, prioritized_targets, spell_level)
+                return {
+                    "kind": "cast_spell",
+                    "spell_id": "magic_missile",
+                    "target_id": target.id,
+                    "target_ids": target_ids,
+                    "spell_level": spell_level,
+                }
             continue
 
         fire_bolt_context = get_attack_context(state, actor.id, target.id, fire_bolt_profile)
@@ -3423,7 +3478,14 @@ def choose_magic_missile_target_id(state: EncounterState, actor: UnitState, cons
             "adjacent_enemy" in fire_bolt_context.disadvantage_sources or fire_bolt_context.cover_ac_bonus > 0
         )
         if obvious_finish or (avoids_bad_attack_roll and target.current_hp <= 10):
-            return target.id
+            target_ids = build_magic_missile_target_ids(state, actor, prioritized_targets, spell_level or 1)
+            return {
+                "kind": "cast_spell",
+                "spell_id": "magic_missile",
+                "target_id": target.id,
+                "target_ids": target_ids,
+                "spell_level": spell_level or 1,
+            }
 
     return None
 
@@ -3466,9 +3528,9 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     if scorching_ray_decision:
         return scorching_ray_decision
 
-    magic_missile_target_id = choose_magic_missile_target_id(state, actor, conscious_enemies)
-    if magic_missile_target_id:
-        return TurnDecision(action={"kind": "cast_spell", "spell_id": "magic_missile", "target_id": magic_missile_target_id})
+    magic_missile_action = choose_magic_missile_action(state, actor, conscious_enemies)
+    if magic_missile_action:
+        return TurnDecision(action=magic_missile_action)
 
     fire_bolt_decision = (
         build_player_spell_attack_decision(state, actor, conscious_enemies, "fire_bolt", move_squares, position_index)
@@ -3484,7 +3546,7 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
         adjacent_targets = [
             target for target in melee_targets if actor.position and target.position and get_distance_between_units(actor, target) <= 1
         ]
-        if adjacent_targets and not magic_missile_target_id:
+        if adjacent_targets and not magic_missile_action:
             return TurnDecision(action={"kind": "attack", "target_id": adjacent_targets[0].id, "weapon_id": melee_weapon_id})
 
     if fire_bolt_decision:

@@ -1584,6 +1584,41 @@ def test_magic_missile_fails_cleanly_when_no_level1_slots_remain() -> None:
     assert "No level 1 spell slots remain" in spell_events[0].text_summary
 
 
+def test_magic_missile_can_upcast_to_level2_and_split_darts() -> None:
+    encounter = create_encounter(build_level4_wizard_config("wizard-magic-missile-level2-split"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+    encounter.units["E2"].position = GridPosition(x=9, y=5)
+    encounter.units["E1"].max_hp = 4
+    encounter.units["E1"].current_hp = 4
+    encounter.units["E2"].max_hp = 4
+    encounter.units["E2"].current_hp = 4
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "magic_missile",
+            "spell_level": 2,
+            "target_id": "E1",
+            "target_ids": ["E1", "E1", "E2", "E2"],
+        },
+        overrides=AttackRollOverrides(damage_rolls=[1, 1, 1, 1]),
+    )
+    attack_events = [event for event in spell_events if event.event_type == "attack"]
+
+    assert [event.target_ids[0] for event in attack_events] == ["E1", "E2"]
+    assert [event.raw_rolls["damageRolls"] for event in attack_events] == [[1, 1], [1, 1]]
+    assert [event.damage_details.total_damage for event in attack_events] == [4, 4]
+    assert [event.resolved_totals["dartsInGroup"] for event in attack_events] == [2, 2]
+    assert [event.resolved_totals["spellCastEvent"] for event in attack_events] == [True, False]
+    assert all(event.resolved_totals["spellLevel"] == 2 for event in attack_events)
+    assert all(event.resolved_totals["targetDroppedToZero"] is True for event in attack_events)
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 2
+
+
 def test_fire_bolt_spell_damage_reports_target_drops_to_zero() -> None:
     encounter = create_encounter(build_wizard_config("wizard-fire-bolt-drop-metadata"))
     defeat_other_enemies(encounter, "E1")
@@ -2964,6 +2999,37 @@ def test_scorching_ray_stops_remaining_rays_after_target_drops() -> None:
     assert attack_events[0].resolved_totals["rayIndex"] == 1
     assert attack_events[0].damage_details.total_damage == 6
     assert encounter.units["E1"].conditions.dead is True
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 1
+
+
+def test_scorching_ray_can_split_rays_across_targets() -> None:
+    encounter = create_encounter(build_level3_wizard_config("wizard-scorching-ray-split-rays"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=11, y=5)
+    encounter.units["E1"].max_hp = 5
+    encounter.units["E1"].current_hp = 5
+    encounter.units["E2"].max_hp = 50
+    encounter.units["E2"].current_hp = 50
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "scorching_ray",
+            "target_id": "E1",
+            "target_ids": ["E1", "E2", "E2"],
+        },
+        overrides=AttackRollOverrides(attack_rolls=[18, 18, 18], damage_rolls=[3, 3, 1, 2, 3, 4]),
+    )
+    attack_events = [event for event in spell_events if event.event_type == "attack"]
+
+    assert [event.target_ids[0] for event in attack_events] == ["E1", "E2", "E2"]
+    assert [event.resolved_totals["rayIndex"] for event in attack_events] == [1, 2, 3]
+    assert [event.damage_details.total_damage for event in attack_events] == [6, 3, 7]
+    assert attack_events[0].resolved_totals["targetDroppedToZero"] is True
     assert encounter.units["F1"].resources.spell_slots_level_2 == 1
 
 

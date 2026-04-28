@@ -10,6 +10,7 @@ from backend.engine.models.state import (
     DamageCandidate,
     DamageComponentResult,
     DamageDetails,
+    DiceSpec,
     DivineFavorEffect,
     EncounterState,
     HealingBlockedEffect,
@@ -590,16 +591,22 @@ def resolve_magic_missile(
     attacker_id: str,
     target_id: str,
     overrides: AttackRollOverrides | None = None,
+    *,
+    spell_level: int | None = None,
 ) -> CombatEvent:
     attacker = state.units[attacker_id]
     spell = get_spell_definition("magic_missile")
     weapon = build_spell_attack_profile(attacker, "magic_missile")
+    cast_level = max(spell.level, int(spell_level or spell.level))
+    dart_count = get_magic_missile_dart_count(cast_level)
+    weapon.damage_dice = [DiceSpec(count=dart_count, sides=4)]
+    weapon.damage_modifier = dart_count
     attack_context = get_attack_context(state, attacker_id, target_id, weapon)
 
     if not attack_context.legal or not attack_context.within_normal_range:
         return build_spell_skip_event(state, attacker_id, "magic_missile", "is not in range.")
-    if not attacker.resources.spend_pool("spell_slots_level_1", 1):
-        return build_spell_skip_event(state, attacker_id, "magic_missile", "No level 1 spell slots remain.")
+    if not spend_spell_slot(attacker, cast_level):
+        return build_spell_skip_event(state, attacker_id, "magic_missile", f"No level {cast_level} spell slots remain.")
 
     target = state.units[target_id]
     target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
@@ -645,13 +652,21 @@ def resolve_magic_missile(
     raw_rolls = {"damageRolls": primary_candidate.raw_rolls if primary_candidate else []}
     resolved_totals = {
         "spellId": "magic_missile",
-        "spellLevel": 1,
+        "spellLevel": cast_level,
         "hit": True,
         "critical": False,
         "distanceSquares": attack_context.distance_squares,
         "distanceFeet": attack_context.distance_feet,
         "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+        "spellSlotsLevel2Remaining": attacker.resources.spell_slots_level_2,
+        f"spellSlotsLevel{cast_level}Remaining": get_remaining_spell_slots(attacker, cast_level),
         "blockedByShield": blocked_by_shield,
+        "dartCount": dart_count,
+        "dartsInGroup": dart_count,
+        "projectileGroupIndex": 1,
+        "projectileGroupCount": 1,
+        "spellCastEvent": True,
+        "projectileTargetIds": [target_id for _ in range(dart_count)],
         **(defense_reaction_data or {}),
     }
     attach_spell_target_outcome_fields(state, resolved_totals, target_id, target_was_alive_before_hit)
@@ -696,6 +711,187 @@ def resolve_magic_missile(
             )
         ),
     )
+
+
+def get_magic_missile_dart_count(spell_level: int) -> int:
+    return 3 + max(0, spell_level - 1)
+
+
+def normalize_projectile_target_ids(target_ids: list[str], projectile_count: int) -> list[str]:
+    if not target_ids:
+        return []
+    normalized = list(target_ids[:projectile_count])
+    while len(normalized) < projectile_count:
+        normalized.append(normalized[-1])
+    return normalized
+
+
+def resolve_magic_missile_projectiles(
+    state: EncounterState,
+    attacker_id: str,
+    target_ids: list[str],
+    overrides: AttackRollOverrides | None = None,
+    *,
+    spell_level: int | None = None,
+) -> list[CombatEvent]:
+    attacker = state.units[attacker_id]
+    spell = get_spell_definition("magic_missile")
+    if not unit_has_combat_spell(attacker, "magic_missile"):
+        return [build_spell_skip_event(state, attacker_id, "magic_missile", "is not prepared.")]
+
+    cast_level = max(spell.level, int(spell_level or spell.level))
+    dart_count = get_magic_missile_dart_count(cast_level)
+    projectile_target_ids = normalize_projectile_target_ids(target_ids, dart_count)
+    if not projectile_target_ids:
+        return [build_spell_skip_event(state, attacker_id, "magic_missile", "has no target.")]
+
+    weapon = build_spell_attack_profile(attacker, "magic_missile")
+    attack_contexts = {}
+    for target_id in dict.fromkeys(projectile_target_ids):
+        target = state.units.get(target_id)
+        if not target or target.conditions.dead:
+            return [build_spell_skip_event(state, attacker_id, "magic_missile", "target is unavailable.")]
+        attack_context = get_attack_context(state, attacker_id, target_id, weapon)
+        if not attack_context.legal or not attack_context.within_normal_range:
+            return [build_spell_skip_event(state, attacker_id, "magic_missile", "is not in range.")]
+        attack_contexts[target_id] = attack_context
+
+    if not spend_spell_slot(attacker, cast_level):
+        return [build_spell_skip_event(state, attacker_id, "magic_missile", f"No level {cast_level} spell slots remain.")]
+
+    grouped_projectiles: list[tuple[str, int]] = []
+    for target_id in projectile_target_ids:
+        if grouped_projectiles and grouped_projectiles[-1][0] == target_id:
+            previous_target_id, previous_count = grouped_projectiles[-1]
+            grouped_projectiles[-1] = (previous_target_id, previous_count + 1)
+        else:
+            grouped_projectiles.append((target_id, 1))
+
+    damage_overrides = AttackRollOverrides(
+        damage_rolls=list(overrides.damage_rolls if overrides else []),
+        concentration_rolls=list(overrides.concentration_rolls if overrides else []),
+    )
+    events: list[CombatEvent] = []
+
+    for group_index, (target_id, darts_in_group) in enumerate(grouped_projectiles, start=1):
+        target = state.units[target_id]
+        attack_context = attack_contexts[target_id]
+        target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
+        defense_reaction_data = (
+            maybe_apply_shield_reaction(state, attacker_id=attacker_id, target_id=target_id, trigger="magic_missile")
+            if not unit_has_shield_effect(target)
+            else None
+        )
+        blocked_by_shield = unit_has_shield_effect(state.units[target_id])
+        primary_candidate: DamageCandidate | None = None
+        final_damage_components: list[DamageComponentResult] = []
+        total_damage = 0
+        damage_result = build_no_damage_result()
+        condition_deltas: list[str] = []
+
+        if blocked_by_shield:
+            condition_deltas.append(f"{target_id}'s Shield blocks Magic Missile.")
+        else:
+            damage_rolls = [
+                pull_die(
+                    state,
+                    4,
+                    damage_overrides.damage_rolls.pop(0) if damage_overrides.damage_rolls else None,
+                )
+                for _ in range(darts_in_group)
+            ]
+            damage_component = DamageComponentResult(
+                damage_type=spell.damage_type,
+                raw_rolls=list(damage_rolls),
+                adjusted_rolls=list(damage_rolls),
+                subtotal=sum(damage_rolls),
+                flat_modifier=darts_in_group,
+                total_damage=sum(damage_rolls) + darts_in_group,
+            )
+            final_damage_components = [damage_component]
+            primary_candidate = DamageCandidate(
+                components=list(final_damage_components),
+                raw_rolls=list(damage_rolls),
+                adjusted_rolls=list(damage_rolls),
+                subtotal=sum(damage_rolls),
+            )
+            damage_result = apply_damage(
+                state,
+                target_id,
+                final_damage_components,
+                False,
+                concentration_save_rolls=damage_overrides.concentration_rolls,
+            )
+            total_damage = sum(component.total_damage for component in final_damage_components)
+            condition_deltas = list(damage_result.condition_deltas)
+
+        raw_rolls = {"damageRolls": primary_candidate.raw_rolls if primary_candidate else []}
+        resolved_totals = {
+            "spellId": "magic_missile",
+            "spellLevel": cast_level,
+            "hit": True,
+            "critical": False,
+            "distanceSquares": attack_context.distance_squares,
+            "distanceFeet": attack_context.distance_feet,
+            "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+            "spellSlotsLevel2Remaining": attacker.resources.spell_slots_level_2,
+            f"spellSlotsLevel{cast_level}Remaining": get_remaining_spell_slots(attacker, cast_level),
+            "blockedByShield": blocked_by_shield,
+            "dartCount": dart_count,
+            "dartsInGroup": darts_in_group,
+            "projectileGroupIndex": group_index,
+            "projectileGroupCount": len(grouped_projectiles),
+            "spellCastEvent": group_index == 1,
+            "projectileTargetIds": list(projectile_target_ids),
+            **(defense_reaction_data or {}),
+        }
+        attach_spell_target_outcome_fields(state, resolved_totals, target_id, target_was_alive_before_hit)
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
+
+        events.append(
+            CombatEvent(
+                **event_base(state, attacker_id),
+                target_ids=[target_id],
+                event_type="attack",
+                raw_rolls=raw_rolls,
+                resolved_totals=resolved_totals,
+                movement_details=None,
+                damage_details=DamageDetails(
+                    weapon_id="magic_missile",
+                    weapon_name=spell.display_name,
+                    damage_components=final_damage_components,
+                    primary_candidate=primary_candidate,
+                    savage_candidate=None,
+                    chosen_candidate="primary",
+                    critical_applied=False,
+                    critical_multiplier=1,
+                    flat_modifier=sum(component.flat_modifier for component in final_damage_components),
+                    advantage_bonus_candidate=None,
+                    mastery_applied=None,
+                    mastery_notes=None,
+                    attack_riders_applied=None,
+                    total_damage=total_damage,
+                    resisted_damage=damage_result.resisted_damage,
+                    amplified_damage=damage_result.amplified_damage or None,
+                    temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                    final_damage_to_hp=damage_result.final_damage_to_hp,
+                    hp_delta=damage_result.hp_delta,
+                ),
+                condition_deltas=condition_deltas,
+                text_summary=(
+                    f"{attacker_id} casts {spell.display_name} at {target_id}, but Shield blocks it."
+                    if blocked_by_shield
+                    else (
+                        f"{attacker_id} casts {spell.display_name} at {target_id} "
+                        f"with {darts_in_group} dart{'s' if darts_in_group != 1 else ''} for {total_damage} damage"
+                        f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                        f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+                    )
+                ),
+            )
+        )
+
+    return events
 
 
 def build_burning_hands_damage_component(
@@ -794,6 +990,8 @@ def resolve_scorching_ray(
     require_prepared: bool = True,
     attack_bonus_override: int | None = None,
     spellcasting_ability_override: str | None = None,
+    target_ids: list[str] | None = None,
+    spell_level: int | None = None,
 ) -> list[CombatEvent]:
     attacker = state.units[attacker_id]
     spell = get_spell_definition("scorching_ray")
@@ -813,25 +1011,30 @@ def resolve_scorching_ray(
     attack_context = get_attack_context(state, attacker_id, target_id, weapon)
     if not attack_context.legal or not attack_context.within_normal_range:
         return [build_spell_skip_event(state, attacker_id, "scorching_ray", "is not in range.")]
-    if spend_slot and not spend_spell_slot(attacker, spell.level):
-        return [build_spell_skip_event(state, attacker_id, "scorching_ray", "No level 2 spell slots remain.")]
+    cast_level = max(spell.level, int(spell_level or spell.level))
+    ray_count = spell.ray_count + max(0, cast_level - spell.level)
+    ray_target_ids = normalize_projectile_target_ids(target_ids or [target_id], ray_count)
+    if spend_slot and not spend_spell_slot(attacker, cast_level):
+        return [build_spell_skip_event(state, attacker_id, "scorching_ray", f"No level {cast_level} spell slots remain.")]
 
     attack_rolls_override = list(overrides.attack_rolls if overrides else [])
     damage_rolls_override = list(overrides.damage_rolls if overrides else [])
     concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
     phase_totals = {
         "spellId": "scorching_ray",
-        "spellLevel": spell.level,
-        "rayCount": spell.ray_count,
+        "spellLevel": cast_level,
+        "rayCount": ray_count,
+        "rayTargetIds": list(ray_target_ids),
     }
     if spend_slot:
-        phase_totals["spellSlotsLevel2Remaining"] = get_remaining_spell_slots(attacker, spell.level)
+        phase_totals[f"spellSlotsLevel{cast_level}Remaining"] = get_remaining_spell_slots(attacker, cast_level)
+        phase_totals["spellSlotsLevel2Remaining"] = attacker.resources.spell_slots_level_2
     else:
         phase_totals["spellLikeAction"] = True
     events: list[CombatEvent] = [
         CombatEvent(
             **event_base(state, attacker_id),
-            target_ids=[target_id],
+            target_ids=list(ray_target_ids),
             event_type="phase_change",
             raw_rolls={},
             resolved_totals=phase_totals,
@@ -842,14 +1045,14 @@ def resolve_scorching_ray(
         )
     ]
 
-    for ray_index in range(1, spell.ray_count + 1):
-        target = state.units.get(target_id)
+    for ray_index, ray_target_id in enumerate(ray_target_ids, start=1):
+        target = state.units.get(ray_target_id)
         if not target or target.conditions.dead or target.current_hp <= 0:
-            break
+            continue
         attack_roll_count = resolve_spell_attack_roll_count(
             state,
             attacker,
-            target_id,
+            ray_target_id,
             "scorching_ray",
             attack_bonus_override=attack_bonus_override,
             spellcasting_ability_override=spellcasting_ability_override,
@@ -865,7 +1068,7 @@ def resolve_scorching_ray(
         ray_event = resolve_ranged_spell_attack(
             state,
             attacker_id,
-            target_id,
+            ray_target_id,
             "scorching_ray",
             ray_overrides,
             spend_slot=False,
@@ -881,9 +1084,13 @@ def resolve_scorching_ray(
         if ray_event.damage_details and ray_event.damage_details.final_damage_to_hp > 0:
             concentration_rolls_override = []
         ray_event.resolved_totals["rayIndex"] = ray_index
-        ray_event.resolved_totals["rayCount"] = spell.ray_count
+        ray_event.resolved_totals["rayCount"] = ray_count
+        ray_event.resolved_totals["rayTargetIds"] = list(ray_target_ids)
         if spend_slot:
-            ray_event.resolved_totals["spellSlotsLevel2Remaining"] = get_remaining_spell_slots(attacker, spell.level)
+            ray_event.resolved_totals[f"spellSlotsLevel{cast_level}Remaining"] = get_remaining_spell_slots(
+                attacker, cast_level
+            )
+            ray_event.resolved_totals["spellSlotsLevel2Remaining"] = attacker.resources.spell_slots_level_2
         else:
             ray_event.resolved_totals["spellLikeAction"] = True
         events.append(ray_event)
