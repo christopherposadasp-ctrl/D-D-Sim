@@ -183,6 +183,7 @@ def test_coverage_review_assigns_risk_areas_to_every_known_mechanism() -> None:
 
     assert {entry["task"] for entry in review["mechanisms"]} == {mechanism.task for mechanism in audit_validation.MECHANISMS}
     assert all(entry["riskAreas"] for entry in review["mechanisms"])
+    assert review["coverageMapSummary"]["riskAreaCount"] == 17
     assert any(entry["id"] == "nightly.scenario_quick" for entry in review["trimCandidates"])
     assert any(entry["id"] == "nightly.code_health" for entry in review["trimCandidates"])
 
@@ -291,6 +292,49 @@ def test_coverage_review_keeps_legacy_class_audits_forensic_and_non_required() -
     assert entry["candidateAction"] == "demote_candidate"
 
 
+def test_coverage_map_assigns_primary_owner_to_every_known_risk_area() -> None:
+    coverage_map = audit_validation.build_coverage_map()
+    by_risk = {entry["riskArea"]: entry for entry in coverage_map["riskAreaCoverage"]}
+
+    assert set(by_risk) == {
+        "rule correctness",
+        "focused AI decisions",
+        "monster behavior",
+        "content integrity",
+        "golden drift",
+        "API contract",
+        "frontend contract",
+        "scenario behavior",
+        "class behavior",
+        "Rogue behavior",
+        "determinism",
+        "async reliability",
+        "code health",
+        "benchmark diagnostics",
+        "docs/runbook consistency",
+        "report freshness",
+        "forensic traces",
+    }
+    assert all(entry["primaryOwner"] for entry in by_risk.values())
+    assert by_risk["rule correctness"]["primaryOwner"] == "unit/rules tests"
+    assert by_risk["benchmark diagnostics"]["overlapPolicy"] == "needs_canary"
+    assert coverage_map["summary"]["primaryPhase3CanaryTarget"] == "monster_benchmarks_vs_audit_health"
+
+
+def test_coverage_map_distinguishes_intentional_overlap_from_duplicates_and_canaries() -> None:
+    coverage_map = audit_validation.build_coverage_map()
+    by_group = {entry["groupId"]: entry for entry in coverage_map["overlapGroups"]}
+    decisions = {entry["id"]: entry for entry in coverage_map["candidateDecisions"]}
+
+    assert by_group["goldens_vs_pass2"]["overlapPolicy"] == "intentional"
+    assert by_group["goldens_vs_pass2"]["primaryOwner"] == "Pass 2 stability"
+    assert by_group["segmented_vs_monolithic_class_audits"]["overlapPolicy"] == "candidate_duplicate"
+    assert by_group["segmented_vs_monolithic_class_audits"]["primaryOwner"] == "class-audit-slices"
+    assert by_group["monster_benchmarks_vs_audit_health"]["overlapPolicy"] == "needs_canary"
+    assert decisions["segmented_vs_monolithic_class_audits"]["recommendedAction"] == "demote_candidate"
+    assert decisions["monster_benchmarks_vs_audit_health"]["recommendedAction"] == "canary_validate"
+
+
 def test_parse_pytest_collection_extracts_selected_and_deselected_counts() -> None:
     collection = audit_validation.parse_pytest_collection(
         "\n".join(
@@ -394,8 +438,12 @@ def test_test_coverage_ledger_records_inventory_and_canary_specs(tmp_path: Path)
     }
     assert payload["auditMechanisms"][0]["task"] == "pass2-stability"
     assert payload["auditMechanisms"][0]["riskAreas"] == ["determinism", "async reliability"]
+    assert payload["coverageMapSummary"]["riskAreaCount"] == 17
+    assert payload["coverageMapSummary"]["needsCanary"] == ["monster_benchmarks_vs_audit_health"]
     assert "Test Coverage Ledger" in markdown
     assert "Audit Mechanisms" in markdown
+    assert "Risk Ownership" in markdown
+    assert "Overlap Groups" in markdown
     assert "Canary Specs" in markdown
 
 

@@ -562,6 +562,211 @@ NIGHTLY_STEP_COVERAGE: tuple[dict[str, Any], ...] = (
     },
 )
 
+RISK_AREA_COVERAGE: tuple[dict[str, Any], ...] = (
+    {
+        "riskArea": "rule correctness",
+        "primaryOwner": "unit/rules tests",
+        "secondaryOwners": ("golden tests", "scenario audits"),
+        "canonicalGateLevel": "inner_loop",
+        "overlapPolicy": "intentional",
+        "rationale": "Focused tests own exact rule invariants; broader audits only prove those rules appear in live play.",
+    },
+    {
+        "riskArea": "focused AI decisions",
+        "primaryOwner": "unit/rules AI tests",
+        "secondaryOwners": ("class audits", "behavior-diagnostics"),
+        "canonicalGateLevel": "inner_loop",
+        "overlapPolicy": "intentional",
+        "rationale": "AI unit tests isolate one decision at a time while audits observe aggregate behavior.",
+    },
+    {
+        "riskArea": "monster behavior",
+        "primaryOwner": "monster behavior tests",
+        "secondaryOwners": ("scenario audits", "audit-health", "monster benchmarks"),
+        "canonicalGateLevel": "inner_loop",
+        "overlapPolicy": "intentional",
+        "rationale": "Monster tests own stat/action correctness; scenario audits own live encounter exposure.",
+    },
+    {
+        "riskArea": "content integrity",
+        "primaryOwner": "content and preset tests",
+        "secondaryOwners": ("API catalog tests", "scenario audits"),
+        "canonicalGateLevel": "inner_loop",
+        "overlapPolicy": "intentional",
+        "rationale": "Content tests catch registry drift before catalog/API or scenario checks consume that content.",
+    },
+    {
+        "riskArea": "golden drift",
+        "primaryOwner": "golden tests",
+        "secondaryOwners": ("Pass 2 stability",),
+        "canonicalGateLevel": "inner_loop",
+        "overlapPolicy": "intentional",
+        "rationale": "Goldens provide cheap exact fixture drift checks while Pass 2 proves broader repeatability.",
+    },
+    {
+        "riskArea": "API contract",
+        "primaryOwner": "API integration tests",
+        "secondaryOwners": ("frontend tests", "Pass 2 async checks"),
+        "canonicalGateLevel": "inner_loop",
+        "overlapPolicy": "intentional",
+        "rationale": "API tests own route/catalog contracts before frontend or async checks depend on them.",
+    },
+    {
+        "riskArea": "frontend contract",
+        "primaryOwner": "npm test and npm build",
+        "secondaryOwners": ("API integration tests", "nightly-audit"),
+        "canonicalGateLevel": "nightly",
+        "overlapPolicy": "intentional",
+        "rationale": "Frontend gates own browser-facing compilation/test coverage; backend API fixtures only support them.",
+    },
+    {
+        "riskArea": "scenario behavior",
+        "primaryOwner": "audit-quick",
+        "secondaryOwners": ("audit-full", "nightly scenario_quick", "Pass 2 stability"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "intentional",
+        "rationale": "Scenario quick is the checkpoint owner; full/nightly/Pass 2 rerun it at different cadence and depth.",
+    },
+    {
+        "riskArea": "class behavior",
+        "primaryOwner": "class-audit-slices",
+        "secondaryOwners": ("party-validation", "legacy monolithic class audits", "nightly rotating_slice"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "candidate_duplicate",
+        "rationale": "Segmented slices are canonical; monolithic Fighter/Barbarian audits are retained only as forensic legacy tools.",
+    },
+    {
+        "riskArea": "Rogue behavior",
+        "primaryOwner": "rogue-audit-quick",
+        "secondaryOwners": ("rogue-audit-full", "party-validation", "pc-tuning-sample"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "intentional",
+        "rationale": "The Rogue runner owns the dedicated ranged Rogue surface; other checks provide smoke or tuning context.",
+    },
+    {
+        "riskArea": "determinism",
+        "primaryOwner": "Pass 2 stability",
+        "secondaryOwners": ("golden tests",),
+        "canonicalGateLevel": "release",
+        "overlapPolicy": "intentional",
+        "rationale": "Pass 2 owns broad replay and batch determinism while goldens remain cheap exact sentinels.",
+    },
+    {
+        "riskArea": "async reliability",
+        "primaryOwner": "Pass 2 stability",
+        "secondaryOwners": ("API integration tests",),
+        "canonicalGateLevel": "release",
+        "overlapPolicy": "intentional",
+        "rationale": "Pass 2 owns long async job reliability; API tests only prove the endpoint contract works.",
+    },
+    {
+        "riskArea": "code health",
+        "primaryOwner": "audit-health",
+        "secondaryOwners": ("nightly code_health", "Pass 3 clarity"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "intentional",
+        "rationale": "Audit-health owns code-health evidence; nightly repeats it while runtime remains under budget.",
+    },
+    {
+        "riskArea": "benchmark diagnostics",
+        "primaryOwner": "audit-health",
+        "secondaryOwners": ("monster benchmark tests", "nightly code_health"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "needs_canary",
+        "rationale": "Benchmark checks overlap heavily and need canary/runtime proof before deciding what can be trimmed.",
+    },
+    {
+        "riskArea": "docs/runbook consistency",
+        "primaryOwner": "Pass 3 clarity",
+        "secondaryOwners": ("daily-housekeeping", "audit-validation"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "intentional",
+        "rationale": "Pass 3 owns full docs/runbook consistency; housekeeping provides cheap daily drift detection.",
+    },
+    {
+        "riskArea": "report freshness",
+        "primaryOwner": "audit-validation",
+        "secondaryOwners": ("daily-housekeeping", "Pass 3 clarity"),
+        "canonicalGateLevel": "checkpoint",
+        "overlapPolicy": "intentional",
+        "rationale": "Audit-validation owns report evidence freshness; housekeeping and Pass 3 provide supporting checks.",
+    },
+    {
+        "riskArea": "forensic traces",
+        "primaryOwner": "behavior-diagnostics",
+        "secondaryOwners": ("pc-tuning-sample", "legacy monolithic class audits"),
+        "canonicalGateLevel": "forensic",
+        "overlapPolicy": "intentional",
+        "rationale": "Forensic tools preserve detailed traces for investigations and should not be treated as release gates.",
+    },
+)
+
+OVERLAP_GROUPS: tuple[dict[str, Any], ...] = (
+    {
+        "groupId": "unit_rules_vs_behavior_audits",
+        "title": "Unit/rules tests vs scenario/class audits",
+        "members": ("unit/rules tests", "audit-quick", "class-audit-slices"),
+        "overlapPolicy": "intentional",
+        "primaryOwner": "unit/rules tests",
+        "decision": "keep",
+        "rationale": "Unit tests own exact mechanics; audits own live exposure and aggregate behavior.",
+    },
+    {
+        "groupId": "goldens_vs_pass2",
+        "title": "Golden tests vs Pass 2 stability",
+        "members": ("golden tests", "pass2-stability"),
+        "overlapPolicy": "intentional",
+        "primaryOwner": "Pass 2 stability",
+        "decision": "keep",
+        "rationale": "Goldens are cheap exact sentinels and Pass 2 is the release-scale determinism owner.",
+    },
+    {
+        "groupId": "scenario_quick_full_nightly",
+        "title": "Scenario quick/full/nightly cadence",
+        "members": ("audit-quick", "audit-full", "nightly scenario_quick"),
+        "overlapPolicy": "intentional",
+        "primaryOwner": "audit-quick",
+        "decision": "keep",
+        "rationale": "These checks differ by cadence and sample depth; keep while nightly stays under one hour.",
+    },
+    {
+        "groupId": "segmented_vs_monolithic_class_audits",
+        "title": "Segmented class slices vs monolithic Fighter/Barbarian audits",
+        "members": ("class-audit-slices", "fighter-audit-quick/full", "barbarian-audit-quick/full"),
+        "overlapPolicy": "candidate_duplicate",
+        "primaryOwner": "class-audit-slices",
+        "decision": "demote_monolithic",
+        "rationale": "Segmented slices are timeout-safe canonical evidence; monoliths should remain forensic.",
+    },
+    {
+        "groupId": "monster_benchmarks_vs_audit_health",
+        "title": "Monster benchmarks vs audit-health",
+        "members": ("tests/rules/test_monster_benchmarks.py", "audit-health", "nightly code_health"),
+        "overlapPolicy": "needs_canary",
+        "primaryOwner": "audit-health",
+        "decision": "canary_validate",
+        "rationale": "Benchmark overlap is the first Phase 3 target because ownership is plausible but not proven by canaries.",
+    },
+    {
+        "groupId": "housekeeping_vs_pass3",
+        "title": "Daily housekeeping vs Pass 3 clarity",
+        "members": ("daily-housekeeping", "pass3-clarity"),
+        "overlapPolicy": "intentional",
+        "primaryOwner": "pass3-clarity",
+        "decision": "keep",
+        "rationale": "Housekeeping is the cheap daily check and Pass 3 is the checkpoint clarity gate.",
+    },
+    {
+        "groupId": "party_validation_vs_class_slices",
+        "title": "Party validation vs class slices",
+        "members": ("party-validation", "class-audit-slices"),
+        "overlapPolicy": "intentional",
+        "primaryOwner": "class-audit-slices",
+        "decision": "keep",
+        "rationale": "Party validation owns current-party smoke confidence and class slices own class matrix evidence.",
+    },
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate the current audit and testing mechanisms without trimming them.")
@@ -814,6 +1019,107 @@ def build_pytest_file_rows(full_collection: PytestCollection, not_slow_collectio
     return rows
 
 
+def build_risk_area_coverage() -> list[dict[str, Any]]:
+    return [
+        {
+            "riskArea": entry["riskArea"],
+            "primaryOwner": entry["primaryOwner"],
+            "secondaryOwners": list(entry["secondaryOwners"]),
+            "canonicalGateLevel": entry["canonicalGateLevel"],
+            "overlapPolicy": entry["overlapPolicy"],
+            "rationale": entry["rationale"],
+        }
+        for entry in RISK_AREA_COVERAGE
+    ]
+
+
+def build_overlap_groups() -> list[dict[str, Any]]:
+    return [
+        {
+            "groupId": entry["groupId"],
+            "title": entry["title"],
+            "members": list(entry["members"]),
+            "overlapPolicy": entry["overlapPolicy"],
+            "primaryOwner": entry["primaryOwner"],
+            "decision": entry["decision"],
+            "rationale": entry["rationale"],
+        }
+        for entry in OVERLAP_GROUPS
+    ]
+
+
+def build_candidate_decisions(overlap_groups: list[dict[str, Any]]) -> list[dict[str, str]]:
+    decisions: list[dict[str, str]] = [
+        {
+            "id": "keep_core_unit_golden_api_tests",
+            "recommendedAction": "keep",
+            "source": "riskAreaCoverage",
+            "rationale": "Core unit, golden, and API tests remain cheap primary owners for exact regressions.",
+        },
+        {
+            "id": "keep_nightly_scenario_breadth",
+            "recommendedAction": "keep",
+            "source": "nightlyRuntimeBudget",
+            "rationale": "Broad nightly scenario coverage stays under the one-hour runtime budget.",
+        },
+        {
+            "id": "keep_segmented_class_slices",
+            "recommendedAction": "keep",
+            "source": "classAuditEvidence",
+            "rationale": "Segmented class slices remain canonical Fighter/Barbarian evidence.",
+        },
+        {
+            "id": "measure_nightly_check_fast_and_code_health",
+            "recommendedAction": "measure_more",
+            "source": "coverageReview",
+            "rationale": "These nightly steps are candidates only if runtime approaches or exceeds the one-hour budget.",
+        },
+    ]
+    for group in overlap_groups:
+        if group["overlapPolicy"] == "candidate_duplicate":
+            decisions.append(
+                {
+                    "id": group["groupId"],
+                    "recommendedAction": "demote_candidate",
+                    "source": "overlapGroups",
+                    "rationale": group["rationale"],
+                }
+            )
+        elif group["overlapPolicy"] == "needs_canary":
+            decisions.append(
+                {
+                    "id": group["groupId"],
+                    "recommendedAction": "canary_validate",
+                    "source": "overlapGroups",
+                    "rationale": group["rationale"],
+                }
+            )
+    return decisions
+
+
+def build_coverage_map() -> dict[str, Any]:
+    risk_area_coverage = build_risk_area_coverage()
+    overlap_groups = build_overlap_groups()
+    candidate_decisions = build_candidate_decisions(overlap_groups)
+    needs_canary = [group["groupId"] for group in overlap_groups if group["overlapPolicy"] == "needs_canary"]
+    candidate_duplicates = [
+        group["groupId"] for group in overlap_groups if group["overlapPolicy"] == "candidate_duplicate"
+    ]
+    return {
+        "riskAreaCoverage": risk_area_coverage,
+        "overlapGroups": overlap_groups,
+        "candidateDecisions": candidate_decisions,
+        "summary": {
+            "riskAreaCount": len(risk_area_coverage),
+            "overlapGroupCount": len(overlap_groups),
+            "candidateDecisionCount": len(candidate_decisions),
+            "needsCanary": needs_canary,
+            "candidateDuplicates": candidate_duplicates,
+            "primaryPhase3CanaryTarget": "monster_benchmarks_vs_audit_health",
+        },
+    }
+
+
 def build_canary_specs() -> list[dict[str, str]]:
     return [
         {
@@ -855,6 +1161,7 @@ def build_test_coverage_ledger(
 ) -> dict[str, Any]:
     file_rows = build_pytest_file_rows(full_collection, not_slow_collection)
     dominant_files = [row for row in file_rows if row["path"] in PYTEST_RUNTIME_BASELINE_FILES]
+    coverage_map = build_coverage_map()
     summary = {
         "totalCollected": full_collection.total_count,
         "notSlowSelected": not_slow_collection.selected_count,
@@ -895,6 +1202,10 @@ def build_test_coverage_ledger(
         "summary": summary,
         "testFiles": file_rows,
         "auditMechanisms": [build_coverage_mechanism_review(row) for row in mechanism_rows] if mechanism_rows else [],
+        "riskAreaCoverage": coverage_map["riskAreaCoverage"],
+        "overlapGroups": coverage_map["overlapGroups"],
+        "candidateDecisions": coverage_map["candidateDecisions"],
+        "coverageMapSummary": coverage_map["summary"],
         "canarySpecs": build_canary_specs(),
     }
 
@@ -937,6 +1248,39 @@ def format_test_coverage_ledger_markdown(payload: dict[str, Any]) -> str:
                 f"| `{row['task']}` | {', '.join(row['riskAreas'])} | `{row['overlapClassification']}` | "
                 f"`{row['recommendedPlacement']}` | `{row['candidateAction']}` |"
             )
+    lines.extend(
+        [
+            "",
+            "## Risk Ownership",
+            "",
+            "| risk area | primary owner | secondary owners | gate | overlap policy | rationale |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for row in payload["riskAreaCoverage"]:
+        lines.append(
+            f"| `{row['riskArea']}` | `{row['primaryOwner']}` | {', '.join(row['secondaryOwners']) or '-'} | "
+            f"`{row['canonicalGateLevel']}` | `{row['overlapPolicy']}` | {row['rationale']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Overlap Groups",
+            "",
+            "| group | members | policy | primary owner | decision | rationale |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for row in payload["overlapGroups"]:
+        lines.append(
+            f"| `{row['groupId']}` | {', '.join(row['members'])} | `{row['overlapPolicy']}` | "
+            f"`{row['primaryOwner']}` | `{row['decision']}` | {row['rationale']} |"
+        )
+    lines.extend(["", "## Candidate Decisions", ""])
+    for decision in payload["candidateDecisions"]:
+        lines.append(
+            f"- `{decision['id']}`: `{decision['recommendedAction']}` - {decision['rationale']}"
+        )
     lines.extend(["", "## Canary Specs", ""])
     for spec in payload["canarySpecs"]:
         lines.append(
@@ -1449,6 +1793,7 @@ def build_coverage_decision_summary(runtime_status: str, latest_runtime_seconds:
 
 def build_coverage_review(rows: list[dict[str, Any]]) -> dict[str, Any]:
     mechanism_reviews = [build_coverage_mechanism_review(row) for row in rows]
+    coverage_map = build_coverage_map()
     latest_runtime_seconds, slowest_step_id = extract_latest_nightly_runtime(rows)
     budget_status = runtime_budget_status(latest_runtime_seconds)
     nightly_steps = [
@@ -1483,6 +1828,7 @@ def build_coverage_review(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "latestNightlySlowestStepId": slowest_step_id,
         "runtimeBudgetStatus": budget_status,
         "decisionSummary": build_coverage_decision_summary(budget_status, latest_runtime_seconds),
+        "coverageMapSummary": coverage_map["summary"],
     }
 
 
@@ -1617,6 +1963,8 @@ def format_report_markdown(payload: dict[str, Any]) -> str:
                 f"- Latest nightly runtime seconds: `{coverage_review['latestNightlyRuntimeSeconds']}`",
                 f"- Latest nightly slowest step: `{coverage_review['latestNightlySlowestStepId']}`",
                 f"- Runtime budget status: `{coverage_review['runtimeBudgetStatus']}`",
+                f"- Coverage map risk areas: `{coverage_review['coverageMapSummary']['riskAreaCount']}`",
+                f"- Coverage map needs canary: `{', '.join(coverage_review['coverageMapSummary']['needsCanary']) or 'none'}`",
                 "",
                 "| command | risks | overlap | placement | action | reason |",
                 "| --- | --- | --- | --- | --- | --- |",
