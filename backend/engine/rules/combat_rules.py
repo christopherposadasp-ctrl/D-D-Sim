@@ -2607,9 +2607,12 @@ def maybe_apply_shield_reaction(
     if trigger == "attack_hit":
         if attack_total is None or target_ac is None:
             return None
-        # Baseline Wizard behavior intentionally overuses Shield. We will add
-        # conservative smart Shield timing back as a separate tuning step.
-        should_cast = True
+        if natural_twenty:
+            return None
+        should_cast = (
+            state.player_behavior != "smart"
+            or attack_total < target_ac + shield_spell.ac_bonus
+        )
 
     if not should_cast:
         return None

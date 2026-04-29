@@ -3471,7 +3471,7 @@ def test_shield_reaction_turns_a_stoppable_hit_into_a_miss() -> None:
     assert any(effect.kind == "shield" for effect in encounter.units["F1"].temporary_effects)
 
 
-def test_baseline_shield_overuses_against_unstoppable_hits() -> None:
+def test_smart_shield_skips_unstoppable_hits_but_dumb_still_overuses() -> None:
     smart = create_encounter(build_wizard_config("wizard-shield-smart-skip", player_behavior="smart"))
     dumb = create_encounter(build_wizard_config("wizard-shield-dumb-cast", player_behavior="dumb"))
     for encounter in (smart, dumb):
@@ -3500,13 +3500,35 @@ def test_baseline_shield_overuses_against_unstoppable_hits() -> None:
         ),
     )
 
-    assert smart_attack.resolved_totals["defenseReaction"] == "shield"
-    assert smart.units["F1"].resources.spell_slots_level_1 == 1
-    assert any(effect.kind == "shield" for effect in smart.units["F1"].temporary_effects)
+    assert "defenseReaction" not in smart_attack.resolved_totals
+    assert smart.units["F1"].resources.spell_slots_level_1 == 2
+    assert all(effect.kind != "shield" for effect in smart.units["F1"].temporary_effects)
 
     assert dumb_attack.resolved_totals["defenseReaction"] == "shield"
     assert dumb.units["F1"].resources.spell_slots_level_1 == 1
     assert any(effect.kind == "shield" for effect in dumb.units["F1"].temporary_effects)
+
+
+def test_smart_shield_does_not_fire_on_natural_twenty() -> None:
+    encounter = create_encounter(build_wizard_config("wizard-shield-smart-critical-skip", player_behavior="smart"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="scimitar",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[20], damage_rolls=[4]),
+        ),
+    )
+
+    assert attack_event.resolved_totals["critical"] is True
+    assert "defenseReaction" not in attack_event.resolved_totals
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
 
 
 def test_magic_missile_triggers_shield_and_is_fully_blocked() -> None:
