@@ -364,6 +364,101 @@ def test_monster_benchmark_canary_validation_maps_expected_capabilities() -> Non
     ]
 
 
+def test_test_signal_review_flags_low_signal_patterns_without_removing_tests() -> None:
+    full = make_collection(
+        [
+            "tests/rules/test_ai.py::test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout",
+            "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_batches_report_health_metrics[wolf]",
+            "tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]",
+            "tests/golden/test_python_goldens.py::test_python_run_cases_match_python_goldens",
+            "tests/rules/test_rules.py::test_rage_activation_consumes_a_use_and_grants_temp_hp",
+        ]
+    )
+    not_slow = make_collection(
+        [
+            "tests/rules/test_ai.py::test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout",
+            "tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]",
+            "tests/golden/test_python_goldens.py::test_python_run_cases_match_python_goldens",
+            "tests/rules/test_rules.py::test_rage_activation_consumes_a_use_and_grants_temp_hp",
+        ],
+        total_count=5,
+        deselected_count=1,
+    )
+
+    review = audit_validation.build_test_signal_review(full, not_slow)
+    by_name = {row["testName"]: row for row in review["reviewRows"]}
+
+    assert review["status"] == "advisory"
+    assert "candidate_remove_after_canary" not in review["summary"]["candidateActionCounts"]
+    assert by_name["test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout"][
+        "candidateAction"
+    ] == "rewrite_behavior_level"
+    assert by_name["test_monster_benchmark_batches_report_health_metrics"]["candidateAction"] == "demote_to_checkpoint"
+    assert by_name["test_python_run_cases_match_python_goldens"]["candidateAction"] == "keep"
+    assert "Do not remove" in review["decisionRule"]
+
+
+def test_test_coverage_ledger_includes_unmeasured_monster_benchmark_runtime_by_default(tmp_path: Path) -> None:
+    full = make_collection(["tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]"])
+    not_slow = make_collection(["tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]"])
+
+    payload = audit_validation.build_test_coverage_ledger(
+        context={"branch": "integration", "commit": "abc123", "generatedAt": "now", "gitStatusShort": []},
+        full_collection=full,
+        not_slow_collection=not_slow,
+        json_path=tmp_path / "ledger.json",
+        markdown_path=tmp_path / "ledger.md",
+    )
+    markdown = audit_validation.format_test_coverage_ledger_markdown(payload)
+
+    assert payload["monsterBenchmarkRuntime"]["status"] == "not_measured"
+    assert {entry["sliceId"] for entry in payload["monsterBenchmarkRuntime"]["slices"]} == {
+        "benchmark_structure_non_slow",
+        "benchmark_batch_health_slow",
+        "benchmark_primary_behavior_slow",
+    }
+    assert "Monster Benchmark Runtime Slices" in markdown
+    assert "`not_measured`" in markdown
+
+
+def test_test_coverage_ledger_can_include_measured_monster_benchmark_runtime(tmp_path: Path) -> None:
+    full = make_collection(["tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]"])
+    not_slow = make_collection(["tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]"])
+    runtime = {
+        "target": "tests/rules/test_monster_benchmarks.py",
+        "status": "pass",
+        "totalElapsedSeconds": 12.5,
+        "slowestSliceId": "benchmark_batch_health_slow",
+        "interpretation": "sample interpretation",
+        "slices": [
+            {
+                "sliceId": "benchmark_batch_health_slow",
+                "label": "Benchmark batch health metrics",
+                "nodeId": "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_batches_report_health_metrics",
+                "signal": "aggregate sanity",
+                "candidateAction": "demote_to_checkpoint",
+                "status": "pass",
+                "elapsedSeconds": 12.5,
+            }
+        ],
+    }
+
+    payload = audit_validation.build_test_coverage_ledger(
+        context={"branch": "integration", "commit": "abc123", "generatedAt": "now", "gitStatusShort": []},
+        full_collection=full,
+        not_slow_collection=not_slow,
+        monster_benchmark_runtime=runtime,
+        json_path=tmp_path / "ledger.json",
+        markdown_path=tmp_path / "ledger.md",
+    )
+    markdown = audit_validation.format_test_coverage_ledger_markdown(payload)
+
+    assert payload["monsterBenchmarkRuntime"]["totalElapsedSeconds"] == 12.5
+    assert payload["monsterBenchmarkRuntime"]["slowestSliceId"] == "benchmark_batch_health_slow"
+    assert "benchmark_batch_health_slow" in markdown
+    assert "12.5" in markdown
+
+
 def test_parse_pytest_collection_extracts_selected_and_deselected_counts() -> None:
     collection = audit_validation.parse_pytest_collection(
         "\n".join(
@@ -470,12 +565,18 @@ def test_test_coverage_ledger_records_inventory_and_canary_specs(tmp_path: Path)
     assert payload["coverageMapSummary"]["riskAreaCount"] == 17
     assert payload["coverageMapSummary"]["needsCanary"] == ["monster_benchmarks_vs_audit_health"]
     assert payload["canaryValidation"]["preliminaryDecision"]["status"] == "do_not_trim_yet"
+    assert payload["testSignalReview"]["status"] == "advisory"
+    assert payload["testSignalReview"]["summary"]["reviewedTestCount"] == 2
+    assert payload["monsterBenchmarkRuntime"]["status"] == "not_measured"
     assert "Test Coverage Ledger" in markdown
     assert "Audit Mechanisms" in markdown
     assert "Risk Ownership" in markdown
     assert "Overlap Groups" in markdown
     assert "Canary Validation: Monster Benchmarks vs Audit Health" in markdown
     assert "Capability Table" in markdown
+    assert "Test Signal Review" in markdown
+    assert "Top Signal Review Candidates" in markdown
+    assert "Monster Benchmark Runtime Slices" in markdown
     assert "Canary Specs" in markdown
 
 

@@ -828,10 +828,35 @@ MONSTER_BENCHMARK_CANARIES: tuple[dict[str, Any], ...] = (
     },
 )
 
+MONSTER_BENCHMARK_RUNTIME_SLICES: tuple[dict[str, str], ...] = (
+    {
+        "sliceId": "benchmark_structure_non_slow",
+        "label": "Benchmark preset structure and first-step smoke",
+        "nodeId": "tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step",
+        "signal": "generated benchmark preset validity, legal layout, and first-step execution",
+        "candidateAction": "keep",
+    },
+    {
+        "sliceId": "benchmark_batch_health_slow",
+        "label": "Benchmark batch health metrics",
+        "nodeId": "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_batches_report_health_metrics",
+        "signal": "aggregate per-DM-mode health summary sanity for generated benchmark presets",
+        "candidateAction": "demote_to_checkpoint",
+    },
+    {
+        "sliceId": "benchmark_primary_behavior_slow",
+        "label": "Benchmark primary behavior replays",
+        "nodeId": "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_replays_show_primary_behavior_across_dm_modes",
+        "signal": "primary monster behavior and weapon ordering across DM modes",
+        "candidateAction": "checkpoint_or_release",
+    },
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate the current audit and testing mechanisms without trimming them.")
     parser.add_argument("--measure-smoke", action="store_true", help="Run bounded smoke measurements for cheap/scoped commands.")
+    parser.add_argument("--measure-test-slices", action="store_true", help="Run bounded test-slice runtime measurements for signal review candidates.")
     parser.add_argument("--include-heavy", action="store_true", help="Allow heavy release commands to run in smoke measurement mode.")
     parser.add_argument("--explain-coverage", action="store_true", help="Add an advisory redundancy map without changing audit behavior.")
     parser.add_argument("--timeout-seconds", type=int, default=300, help="Per-command timeout for smoke measurements.")
@@ -910,6 +935,75 @@ def collect_pytest_inventory(mark_expression: str | None = None, targets: tuple[
         elapsed_seconds,
         status,
     )
+
+
+def run_pytest_slice_measurement(slice_spec: dict[str, str], timeout_seconds: int) -> dict[str, Any]:
+    command = [sys.executable, "-m", "pytest", "-q", slice_spec["nodeId"]]
+    started = time.perf_counter()
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+            check=False,
+        )
+        elapsed_seconds = time.perf_counter() - started
+        status: Status = "pass" if completed.returncode == 0 else "fail"
+        return {
+            "sliceId": slice_spec["sliceId"],
+            "label": slice_spec["label"],
+            "nodeId": slice_spec["nodeId"],
+            "signal": slice_spec["signal"],
+            "candidateAction": slice_spec["candidateAction"],
+            "status": status,
+            "command": command,
+            "exitCode": completed.returncode,
+            "elapsedSeconds": round(elapsed_seconds, 3),
+            "timeoutSeconds": timeout_seconds,
+            "outputTail": output_tail(completed.stdout, completed.stderr, limit=8),
+        }
+    except subprocess.TimeoutExpired as error:
+        elapsed_seconds = time.perf_counter() - started
+        stdout = error.stdout.decode("utf-8", errors="replace") if isinstance(error.stdout, bytes) else error.stdout
+        stderr = error.stderr.decode("utf-8", errors="replace") if isinstance(error.stderr, bytes) else error.stderr
+        return {
+            "sliceId": slice_spec["sliceId"],
+            "label": slice_spec["label"],
+            "nodeId": slice_spec["nodeId"],
+            "signal": slice_spec["signal"],
+            "candidateAction": slice_spec["candidateAction"],
+            "status": "fail",
+            "command": command,
+            "exitCode": None,
+            "elapsedSeconds": round(elapsed_seconds, 3),
+            "timeoutSeconds": timeout_seconds,
+            "outputTail": output_tail(stdout, stderr, limit=8),
+            "failureReason": "timeout",
+        }
+
+
+def measure_monster_benchmark_runtime_slices(timeout_seconds: int) -> dict[str, Any]:
+    slices = [
+        run_pytest_slice_measurement(slice_spec, timeout_seconds)
+        for slice_spec in MONSTER_BENCHMARK_RUNTIME_SLICES
+    ]
+    total_elapsed = sum(float(entry["elapsedSeconds"]) for entry in slices)
+    slowest = max(slices, key=lambda entry: float(entry["elapsedSeconds"])) if slices else None
+    return {
+        "target": "tests/rules/test_monster_benchmarks.py",
+        "status": "fail" if any(entry["status"] == "fail" for entry in slices) else "pass",
+        "totalElapsedSeconds": round(total_elapsed, 3),
+        "slowestSliceId": slowest["sliceId"] if slowest else None,
+        "slices": slices,
+        "interpretation": (
+            "Use measured runtime to decide gate placement. Slow batch-health checks are the first demotion "
+            "candidate if they dominate runtime and provide only aggregate sanity signal."
+        ),
+    }
 
 
 def normalize_node_path(node_id: str) -> str:
@@ -1078,6 +1172,116 @@ def build_pytest_file_rows(full_collection: PytestCollection, not_slow_collectio
         )
     rows.sort(key=lambda row: (-int(row["totalCount"]), row["path"]))
     return rows
+
+
+def get_test_name_from_node_id(node_id: str) -> str:
+    return node_id.rsplit("::", 1)[-1].split("[", 1)[0]
+
+
+def classify_test_signal(node_id: str, selected_by_not_slow: bool) -> dict[str, Any]:
+    path = normalize_node_path(node_id)
+    test_name = get_test_name_from_node_id(node_id)
+    path_name = Path(path).name
+    lowered = test_name.lower()
+
+    category = "mechanic_rule"
+    signal_level = "high"
+    candidate_action = "keep"
+    rationale = "Focused test names a specific rule or behavior invariant."
+
+    if path.startswith("tests/golden/"):
+        category = "golden_drift"
+        rationale = "Golden tests are cheap exact drift locks for replay and batch fixtures."
+    elif path.startswith("tests/integration/"):
+        category = "content_shape" if "catalog" in lowered else "mechanic_rule"
+        rationale = "Integration tests protect public API and catalog contract behavior."
+    elif "audit" in path_name or path_name in {
+        "test_nightly_audit.py",
+        "test_party_validation.py",
+        "test_pc_tuning_sample.py",
+        "test_pass2_stability.py",
+        "test_pass3_clarity.py",
+        "test_daily_housekeeping.py",
+    }:
+        category = "audit_runner_contract"
+        rationale = "Audit-runner tests protect report shape, wrapper behavior, and gate semantics."
+    elif path_name == "test_monster_benchmarks.py":
+        category = "benchmark_health"
+        if "batches_report_health_metrics" in lowered:
+            signal_level = "medium"
+            candidate_action = "demote_to_checkpoint"
+            rationale = "This slow benchmark-health sanity check is useful but better suited to checkpoint/release evidence."
+        elif "replays_show_primary_behavior" in lowered:
+            signal_level = "medium"
+            candidate_action = "demote_to_checkpoint"
+            rationale = "Slow primary-behavior benchmark replays are valuable but not default-gate material."
+        else:
+            category = "content_shape"
+            rationale = "Non-slow benchmark preset structure checks guard generated benchmark fixture validity."
+    elif path_name == "test_ai.py" or "smart" in lowered or "dumb" in lowered:
+        category = "ai_decision"
+        if any(marker in lowered for marker in ("opens_with", "prefers", "uses_", "does_not", "keeps_existing")):
+            signal_level = "medium"
+            candidate_action = "rewrite_behavior_level"
+            rationale = "Exact AI choice tests may be high-value, but should be reviewed for behavior-level intent."
+        else:
+            rationale = "AI decision tests isolate behavior that broad audits only observe indirectly."
+    elif any(marker in lowered for marker in ("smoke", "completes", "first_step")):
+        category = "smoke_completion"
+        signal_level = "medium"
+        candidate_action = "rewrite_behavior_level"
+        rationale = "Smoke-only completion checks should be reviewed for a more specific behavioral assertion."
+    elif any(marker in lowered for marker in ("preset", "catalog", "registry", "definition", "surface", "ids", "layout")):
+        category = "content_shape"
+        rationale = "Content shape tests catch registry and fixture drift before behavior gates consume the content."
+
+    if not selected_by_not_slow and candidate_action == "keep":
+        candidate_action = "demote_to_checkpoint"
+        signal_level = "medium"
+        rationale = f"{rationale} It is already outside the non-slow gate and should remain checkpoint/release scoped."
+
+    return {
+        "nodeId": node_id,
+        "path": path,
+        "testName": test_name,
+        "category": category,
+        "signalLevel": signal_level,
+        "candidateAction": candidate_action,
+        "selectedByNotSlow": selected_by_not_slow,
+        "rationale": rationale,
+    }
+
+
+def build_test_signal_review(full_collection: PytestCollection, not_slow_collection: PytestCollection) -> dict[str, Any]:
+    not_slow_nodes = set(not_slow_collection.node_ids)
+    rows = [classify_test_signal(node_id, node_id in not_slow_nodes) for node_id in full_collection.node_ids]
+    category_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+    for row in rows:
+        category_counts[row["category"]] = category_counts.get(row["category"], 0) + 1
+        action_counts[row["candidateAction"]] = action_counts.get(row["candidateAction"], 0) + 1
+
+    candidate_rows = [
+        row
+        for row in rows
+        if row["candidateAction"] in {"rewrite_behavior_level", "demote_to_checkpoint", "merge_with_related_test", "candidate_remove_after_canary"}
+    ]
+    candidate_rows.sort(key=lambda row: (row["candidateAction"], row["path"], row["testName"]))
+    return {
+        "status": "advisory",
+        "summary": {
+            "reviewedTestCount": len(rows),
+            "categoryCounts": dict(sorted(category_counts.items())),
+            "candidateActionCounts": dict(sorted(action_counts.items())),
+            "candidateCount": len(candidate_rows),
+        },
+        "reviewRows": rows,
+        "topCandidates": candidate_rows[:50],
+        "decisionRule": (
+            "Do not remove a test from this report alone; use candidate actions to choose manual review "
+            "or canary validation targets."
+        ),
+    }
 
 
 def build_risk_area_coverage() -> list[dict[str, Any]]:
@@ -1254,12 +1458,14 @@ def build_test_coverage_ledger(
     full_collection: PytestCollection,
     not_slow_collection: PytestCollection,
     mechanism_rows: list[dict[str, Any]] | None = None,
+    monster_benchmark_runtime: dict[str, Any] | None = None,
     json_path: Path = DEFAULT_TEST_LEDGER_JSON_PATH,
     markdown_path: Path = DEFAULT_TEST_LEDGER_MARKDOWN_PATH,
 ) -> dict[str, Any]:
     file_rows = build_pytest_file_rows(full_collection, not_slow_collection)
     dominant_files = [row for row in file_rows if row["path"] in PYTEST_RUNTIME_BASELINE_FILES]
     coverage_map = build_coverage_map()
+    signal_review = build_test_signal_review(full_collection, not_slow_collection)
     summary = {
         "totalCollected": full_collection.total_count,
         "notSlowSelected": not_slow_collection.selected_count,
@@ -1305,6 +1511,23 @@ def build_test_coverage_ledger(
         "candidateDecisions": coverage_map["candidateDecisions"],
         "coverageMapSummary": coverage_map["summary"],
         "canaryValidation": build_monster_benchmark_canary_validation(),
+        "testSignalReview": signal_review,
+        "monsterBenchmarkRuntime": monster_benchmark_runtime
+        or {
+            "status": "not_measured",
+            "target": "tests/rules/test_monster_benchmarks.py",
+            "slices": [
+                {
+                    "sliceId": entry["sliceId"],
+                    "label": entry["label"],
+                    "nodeId": entry["nodeId"],
+                    "signal": entry["signal"],
+                    "candidateAction": entry["candidateAction"],
+                    "status": "not_measured",
+                }
+                for entry in MONSTER_BENCHMARK_RUNTIME_SLICES
+            ],
+        },
         "canarySpecs": build_canary_specs(),
     }
 
@@ -1404,6 +1627,72 @@ def format_test_coverage_ledger_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "### Mechanisms", ""])
     for mechanism in validation["mechanisms"]:
         lines.append(f"- `{mechanism['mechanismId']}` ({mechanism['label']}): {mechanism['scope']}")
+    signal_review = payload["testSignalReview"]
+    lines.extend(
+        [
+            "",
+            "## Test Signal Review",
+            "",
+            f"- Status: `{signal_review['status']}`",
+            f"- Reviewed tests: `{signal_review['summary']['reviewedTestCount']}`",
+            f"- Candidate count: `{signal_review['summary']['candidateCount']}`",
+            f"- Decision rule: {signal_review['decisionRule']}",
+            "",
+            "### Category Counts",
+            "",
+        ]
+    )
+    for category, count in signal_review["summary"]["categoryCounts"].items():
+        lines.append(f"- `{category}`: {count}")
+    lines.extend(
+        [
+            "",
+            "### Candidate Action Counts",
+            "",
+        ]
+    )
+    for action, count in signal_review["summary"]["candidateActionCounts"].items():
+        lines.append(f"- `{action}`: {count}")
+    lines.extend(
+        [
+            "",
+            "### Top Signal Review Candidates",
+            "",
+            "| action | category | test | rationale |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for row in signal_review["topCandidates"][:20]:
+        lines.append(
+            f"| `{row['candidateAction']}` | `{row['category']}` | `{row['nodeId']}` | {row['rationale']} |"
+        )
+    runtime_review = payload["monsterBenchmarkRuntime"]
+    lines.extend(
+        [
+            "",
+            "## Monster Benchmark Runtime Slices",
+            "",
+            f"- Status: `{runtime_review['status']}`",
+            f"- Target: `{runtime_review['target']}`",
+        ]
+    )
+    if "totalElapsedSeconds" in runtime_review:
+        lines.append(f"- Total elapsed seconds: `{runtime_review['totalElapsedSeconds']}`")
+        lines.append(f"- Slowest slice: `{runtime_review['slowestSliceId']}`")
+    if runtime_review.get("interpretation"):
+        lines.append(f"- Interpretation: {runtime_review['interpretation']}")
+    lines.extend(
+        [
+            "",
+            "| slice | status | elapsed | signal | action |",
+            "| --- | --- | ---: | --- | --- |",
+        ]
+    )
+    for row in runtime_review["slices"]:
+        lines.append(
+            f"| `{row['sliceId']}` | `{row['status']}` | `{row.get('elapsedSeconds', '-')}` | "
+            f"{row['signal']} | `{row['candidateAction']}` |"
+        )
     lines.extend(["", "## Canary Specs", ""])
     for spec in payload["canarySpecs"]:
         lines.append(
@@ -2182,11 +2471,17 @@ def main() -> None:
     if args.explain_coverage:
         full_collection = collect_pytest_inventory()
         not_slow_collection = collect_pytest_inventory('not slow')
+        monster_benchmark_runtime = (
+            measure_monster_benchmark_runtime_slices(args.timeout_seconds)
+            if args.measure_test_slices
+            else None
+        )
         test_coverage_ledger = build_test_coverage_ledger(
             context=context,
             full_collection=full_collection,
             not_slow_collection=not_slow_collection,
             mechanism_rows=rows,
+            monster_benchmark_runtime=monster_benchmark_runtime,
         )
         write_json_report(DEFAULT_TEST_LEDGER_JSON_PATH, test_coverage_ledger)
         write_text_report(DEFAULT_TEST_LEDGER_MARKDOWN_PATH, format_test_coverage_ledger_markdown(test_coverage_ledger))
