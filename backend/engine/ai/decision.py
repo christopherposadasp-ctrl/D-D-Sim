@@ -3256,9 +3256,27 @@ def build_shatter_decision(
         if state.player_behavior == "smart"
         else [ReachableSquare(position=actor.position, path=[actor.position], distance=0)]
     )
+    current_enemy_distance = get_min_distance_to_faction(
+        state,
+        actor.position,
+        "goblins" if actor.faction == "fighters" else "fighters",
+        position_index,
+        get_unit_footprint(actor),
+    )
     candidate_options: list[tuple[ReachableSquare, UnitState, list[str]]] = []
 
     for square in candidate_squares:
+        if state.player_behavior == "smart" and square.distance > 0:
+            candidate_enemy_distance = get_min_distance_to_faction(
+                state,
+                square.position,
+                "goblins" if actor.faction == "fighters" else "fighters",
+                position_index,
+                get_unit_footprint(actor),
+            )
+            if candidate_enemy_distance < current_enemy_distance:
+                continue
+
         for primary in prioritized_targets:
             if not primary.position:
                 continue
@@ -3335,6 +3353,110 @@ def build_shatter_decision(
     return None
 
 
+def get_ray_hit_probability(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    attacker_position: GridPosition,
+    position_index: PositionIndex | None,
+) -> float | None:
+    if not target.position:
+        return None
+    spell_profile = build_spell_attack_profile(actor, "scorching_ray")
+    context = get_attack_context(
+        state,
+        actor.id,
+        target.id,
+        spell_profile,
+        attacker_position,
+        target.position,
+        position_index,
+    )
+    if not context.legal or not context.within_normal_range:
+        return None
+    attack_mode = get_attack_mode_for_context(state, actor, target, spell_profile, context)
+    if attack_mode == "disadvantage":
+        return None
+    target_ac = target.ac + get_shield_ac_bonus(target) + context.cover_ac_bonus
+    return get_hit_probability(spell_profile.attack_bonus, target_ac, attack_mode)
+
+
+def get_scorching_ray_kill_probability(hit_probability: float, target_hp: int, ray_count: int) -> float:
+    if target_hp <= 0:
+        return 1.0
+    if ray_count <= 0 or hit_probability <= 0:
+        return 0.0
+
+    two_d6_counts: dict[int, int] = {}
+    for first_die in range(1, 7):
+        for second_die in range(1, 7):
+            two_d6_counts[first_die + second_die] = two_d6_counts.get(first_die + second_die, 0) + 1
+
+    single_ray_distribution: dict[int, float] = {0: 1.0 - hit_probability}
+    for damage, count in two_d6_counts.items():
+        single_ray_distribution[damage] = single_ray_distribution.get(damage, 0.0) + hit_probability * count / 36.0
+
+    combined_distribution: dict[int, float] = {0: 1.0}
+    for _ in range(ray_count):
+        next_distribution: dict[int, float] = {}
+        for current_damage, current_probability in combined_distribution.items():
+            for ray_damage, ray_probability in single_ray_distribution.items():
+                total_damage = current_damage + ray_damage
+                next_distribution[total_damage] = next_distribution.get(total_damage, 0.0) + current_probability * ray_probability
+        combined_distribution = next_distribution
+
+    return sum(probability for damage, probability in combined_distribution.items() if damage >= target_hp)
+
+
+def build_scorching_ray_target_ids(
+    state: EncounterState,
+    actor: UnitState,
+    primary_target: UnitState,
+    prioritized_targets: list[UnitState],
+    attack_position: GridPosition,
+    position_index: PositionIndex | None,
+) -> list[str]:
+    ray_count = get_spell_definition("scorching_ray").ray_count
+    if state.player_behavior == "dumb":
+        return [primary_target.id for _ in range(ray_count)]
+
+    clean_targets: list[tuple[UnitState, float]] = []
+    ordered_targets = [primary_target, *(target for target in prioritized_targets if target.id != primary_target.id)]
+    for target in ordered_targets:
+        hit_probability = get_ray_hit_probability(state, actor, target, attack_position, position_index)
+        if hit_probability is None:
+            continue
+        clean_targets.append((target, hit_probability))
+
+    if not clean_targets:
+        return [primary_target.id for _ in range(ray_count)]
+
+    target_ids: list[str] = []
+    remaining_rays = ray_count
+    committed_target_ids: set[str] = set()
+    for target, hit_probability in clean_targets:
+        if remaining_rays <= 0:
+            break
+        for rays_needed in range(1, remaining_rays + 1):
+            if get_scorching_ray_kill_probability(hit_probability, target.current_hp, rays_needed) >= 0.8:
+                target_ids.extend([target.id for _ in range(rays_needed)])
+                remaining_rays -= rays_needed
+                committed_target_ids.add(target.id)
+                break
+
+    if not target_ids:
+        return [clean_targets[0][0].id for _ in range(ray_count)]
+
+    if remaining_rays > 0:
+        followup_target = next(
+            (target for target, _ in clean_targets if target.id not in committed_target_ids),
+            state.units[target_ids[-1]],
+        )
+        target_ids.extend([followup_target.id for _ in range(remaining_rays)])
+
+    return target_ids
+
+
 def build_scorching_ray_decision(
     state: EncounterState,
     actor: UnitState,
@@ -3355,8 +3477,6 @@ def build_scorching_ray_decision(
     )
 
     for target in ranged_targets:
-        if target.current_hp <= 10:
-            continue
         spell_plan = build_spell_attack_plan(
             state,
             actor,
@@ -3370,6 +3490,18 @@ def build_scorching_ray_decision(
 
         pre_action_movement = MovementPlan(path=spell_plan.path, mode="move") if len(spell_plan.path) > 1 else None
         attack_position = spell_plan.path[-1] if spell_plan.path else actor.position
+        if not attack_position:
+            continue
+        if get_ray_hit_probability(state, actor, target, attack_position, position_index) is None:
+            continue
+        ray_target_ids = build_scorching_ray_target_ids(state, actor, target, ranged_targets, attack_position, position_index)
+        if (
+            state.player_behavior == "smart"
+            and target.current_hp <= 8
+            and len(set(ray_target_ids)) == 1
+            and ray_target_ids[0] == target.id
+        ):
+            continue
         post_action_movement = (
             build_post_action_retreat(
                 state,
@@ -3383,7 +3515,12 @@ def build_scorching_ray_decision(
         return TurnDecision(
             pre_action_movement=pre_action_movement,
             post_action_movement=post_action_movement,
-            action={"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": spell_plan.target_id},
+            action={
+                "kind": "cast_spell",
+                "spell_id": "scorching_ray",
+                "target_id": spell_plan.target_id,
+                "target_ids": ray_target_ids,
+            },
         )
 
     return None
@@ -3412,9 +3549,6 @@ def build_shocking_grasp_decision(
     ]
     if not adjacent_threats:
         return None
-
-    if not use_class_smart_delta(state, "wizard_shocking_grasp_retreat"):
-        return TurnDecision(action={"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": adjacent_threats[0].id})
 
     if len(adjacent_threats) != 1:
         return None
@@ -3470,6 +3604,16 @@ def choose_magic_missile_spell_level(actor: UnitState, target_hp: int) -> int | 
     return None
 
 
+def can_cast_magic_missile(actor: UnitState) -> bool:
+    return (
+        actor.current_hp > 0
+        and not actor.conditions.dead
+        and not actor.conditions.unconscious
+        and "magic_missile" in actor.prepared_combat_spell_ids
+        and (actor.resources.spell_slots_level_1 > 0 or actor.resources.spell_slots_level_2 > 0)
+    )
+
+
 def build_magic_missile_target_ids(
     state: EncounterState,
     actor: UnitState,
@@ -3505,12 +3649,81 @@ def build_magic_missile_target_ids(
     return target_ids
 
 
+def build_magic_missile_guaranteed_kill_target_ids(
+    state: EncounterState,
+    actor: UnitState,
+    prioritized_targets: list[UnitState],
+    spell_level: int,
+    required_kills: int,
+) -> list[str] | None:
+    dart_count = get_magic_missile_dart_count(spell_level)
+    target_ids: list[str] = []
+    remaining_darts = dart_count
+    magic_missile_profile = build_spell_attack_context_profile("magic_missile")
+    for target in prioritized_targets:
+        if remaining_darts <= 0 or len(set(target_ids)) >= required_kills:
+            break
+        if not target.position or target.current_hp <= 0:
+            continue
+        magic_missile_context = get_attack_context(state, actor.id, target.id, magic_missile_profile)
+        if not magic_missile_context.legal or not magic_missile_context.within_normal_range:
+            continue
+        darts_needed_for_guaranteed_drop = max(1, (target.current_hp + 1) // 2)
+        if darts_needed_for_guaranteed_drop > remaining_darts:
+            continue
+        target_ids.extend([target.id for _ in range(darts_needed_for_guaranteed_drop)])
+        remaining_darts -= darts_needed_for_guaranteed_drop
+
+    if len(set(target_ids)) < required_kills:
+        return None
+    target_ids.extend([target_ids[-1] for _ in range(remaining_darts)])
+    return target_ids
+
+
+def choose_magic_missile_multikill_action(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+) -> dict[str, object] | None:
+    if state.player_behavior != "smart" or not actor.position or not can_cast_magic_missile(actor):
+        return None
+
+    prioritized_targets = sort_player_ranged_targets(
+        state,
+        actor,
+        conscious_enemies,
+        state.player_behavior,
+        attack_profile=build_spell_attack_profile(actor, "magic_missile"),
+    )
+    if actor.resources.spell_slots_level_2 > 0:
+        target_ids = build_magic_missile_guaranteed_kill_target_ids(state, actor, prioritized_targets, 2, 4)
+        if target_ids:
+            return {
+                "kind": "cast_spell",
+                "spell_id": "magic_missile",
+                "target_id": target_ids[0],
+                "target_ids": target_ids,
+                "spell_level": 2,
+            }
+    if actor.resources.spell_slots_level_1 > 0:
+        target_ids = build_magic_missile_guaranteed_kill_target_ids(state, actor, prioritized_targets, 1, 3)
+        if target_ids:
+            return {
+                "kind": "cast_spell",
+                "spell_id": "magic_missile",
+                "target_id": target_ids[0],
+                "target_ids": target_ids,
+                "spell_level": 1,
+            }
+    return None
+
+
 def choose_magic_missile_action(
     state: EncounterState,
     actor: UnitState,
     conscious_enemies: list[UnitState],
 ) -> dict[str, object] | None:
-    if not actor.position or not can_cast_combat_spell(actor, "magic_missile"):
+    if not actor.position or not can_cast_magic_missile(actor):
         return None
 
     magic_missile_profile = build_spell_attack_context_profile("magic_missile")
@@ -3583,13 +3796,9 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
         actor.position and target.position and get_distance_between_units(actor, target) <= 1 for target in conscious_enemies
     )
 
-    shocking_grasp_decision = build_shocking_grasp_decision(state, actor, conscious_enemies, move_squares)
-    if shocking_grasp_decision:
-        return shocking_grasp_decision
-
-    burning_hands_decision = build_burning_hands_decision(state, actor, move_squares, position_index)
-    if burning_hands_decision:
-        return burning_hands_decision
+    magic_missile_multikill_action = choose_magic_missile_multikill_action(state, actor, conscious_enemies)
+    if magic_missile_multikill_action:
+        return TurnDecision(action=magic_missile_multikill_action)
 
     shatter_decision = build_shatter_decision(state, actor, conscious_enemies, move_squares, position_index)
     if shatter_decision:
@@ -3599,9 +3808,17 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     if scorching_ray_decision:
         return scorching_ray_decision
 
+    burning_hands_decision = build_burning_hands_decision(state, actor, move_squares, position_index)
+    if burning_hands_decision:
+        return burning_hands_decision
+
     magic_missile_action = choose_magic_missile_action(state, actor, conscious_enemies)
     if magic_missile_action:
         return TurnDecision(action=magic_missile_action)
+
+    shocking_grasp_decision = build_shocking_grasp_decision(state, actor, conscious_enemies, move_squares)
+    if shocking_grasp_decision:
+        return shocking_grasp_decision
 
     fire_bolt_decision = (
         build_player_spell_attack_decision(state, actor, conscious_enemies, "fire_bolt", move_squares, position_index)

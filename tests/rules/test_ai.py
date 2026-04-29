@@ -799,7 +799,7 @@ def test_smart_evoker_wizard_shatter_maximizes_ally_safe_cluster_size() -> None:
     assert set(decision.action["target_ids"]) == {"G3", "G4", "G5"}
 
 
-def test_smart_evoker_wizard_moves_safely_to_maximize_shatter_cluster() -> None:
+def test_smart_evoker_wizard_does_not_advance_to_maximize_shatter_cluster() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="wizard-shatter-move-max-smart",
@@ -838,10 +838,10 @@ def test_smart_evoker_wizard_moves_safely_to_maximize_shatter_cluster() -> None:
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.pre_action_movement is not None
+    assert smart_decision.pre_action_movement is None
     assert smart_decision.action["kind"] == "cast_spell"
     assert smart_decision.action["spell_id"] == "shatter"
-    assert set(smart_decision.action["target_ids"]) == {"G3", "G4", "G5"}
+    assert set(smart_decision.action["target_ids"]) == {"G1", "G2"}
     assert dumb_decision.pre_action_movement is None
     assert dumb_decision.action["kind"] == "cast_spell"
     assert dumb_decision.action["spell_id"] == "shatter"
@@ -907,9 +907,123 @@ def test_level3_evoker_wizard_uses_scorching_ray_for_healthy_single_target() -> 
     decision = choose_turn_decision(encounter, "F1")
 
     assert_spell_action_core(decision.action, "scorching_ray", "G1")
+    assert decision.action["target_ids"] == ["G1", "G1", "G1"]
 
 
-def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_by_one_enemy() -> None:
+def test_smart_evoker_wizard_splits_scorching_ray_when_ray_kill_allocation_is_clear() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-scorching-ray-smart-split",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 8, "y": 5}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 10
+    encounter.units["G1"].max_hp = 10
+    encounter.units["G1"].ac = 5
+    encounter.units["G2"].current_hp = 2
+    encounter.units["G2"].max_hp = 2
+    encounter.units["G2"].ac = 5
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "scorching_ray", "G2")
+    assert decision.action["target_ids"] == ["G2", "G1", "G1"]
+
+
+def test_smart_evoker_wizard_can_start_scorching_ray_on_low_hp_target_when_rays_split() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-scorching-ray-low-hp-primary-split",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 8, "y": 5}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 2
+    encounter.units["G1"].max_hp = 2
+    encounter.units["G1"].ac = 5
+    encounter.units["G2"].current_hp = 10
+    encounter.units["G2"].max_hp = 10
+    encounter.units["G2"].ac = 5
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
+    assert decision.action["target_ids"] == ["G1", "G2", "G2"]
+
+
+def test_smart_evoker_wizard_skips_scorching_ray_when_low_hp_target_would_absorb_all_rays() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-scorching-ray-low-hp-single-target-skip",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1")
+    encounter.units["G1"].current_hp = 2
+    encounter.units["G1"].max_hp = 2
+    encounter.units["G1"].ac = 5
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "magic_missile", "G1")
+    assert decision.action["spell_level"] == 1
+
+
+def test_smart_evoker_wizard_does_not_split_scorching_ray_into_disadvantaged_target() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-scorching-ray-no-disadvantaged-split",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 8, "y": 5}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 10
+    encounter.units["G1"].max_hp = 10
+    encounter.units["G1"].ac = 5
+    encounter.units["G2"].current_hp = 2
+    encounter.units["G2"].max_hp = 2
+    encounter.units["G2"].ac = 5
+    encounter.units["G2"].conditions.prone = True
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
+    assert decision.action["target_ids"] == ["G1", "G1", "G1"]
+
+
+def test_dumb_evoker_wizard_focus_fires_scorching_ray() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-scorching-ray-dumb-focus",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 8, "y": 5}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 10
+    encounter.units["G1"].max_hp = 10
+    encounter.units["G1"].ac = 5
+    encounter.units["G2"].current_hp = 2
+    encounter.units["G2"].max_hp = 2
+    encounter.units["G2"].ac = 5
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
+    assert decision.action["target_ids"] == ["G1", "G1", "G1"]
+
+
+def test_smart_wizard_uses_shocking_grasp_with_escape_when_pinned_by_one_enemy() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="wizard-shocking-grasp-smart",
@@ -923,10 +1037,10 @@ def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_b
     decision = choose_turn_decision(encounter, "F1")
 
     assert_spell_action_core(decision.action, "shocking_grasp", "G1")
-    assert decision.post_action_movement is None
+    assert decision.post_action_movement is not None
 
 
-def test_dumb_wizard_uses_shocking_grasp_opportunistically_without_retreat_plan() -> None:
+def test_dumb_wizard_uses_shocking_grasp_with_escape_when_pinned_by_one_enemy() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="wizard-shocking-grasp-dumb",
@@ -940,7 +1054,23 @@ def test_dumb_wizard_uses_shocking_grasp_opportunistically_without_retreat_plan(
     decision = choose_turn_decision(encounter, "F1")
 
     assert_spell_action_core(decision.action, "shocking_grasp", "G1")
-    assert decision.post_action_movement is None
+    assert decision.post_action_movement is not None
+
+
+def test_wizard_does_not_use_shocking_grasp_without_escape_value() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-shocking-grasp-no-escape",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}, G2={"x": 5, "y": 6}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1", "G2")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["spell_id"] != "shocking_grasp"
 
 
 def test_smart_wizard_uses_baseline_fire_bolt_instead_of_magic_missile_for_bad_attack_rolls() -> None:
@@ -1010,6 +1140,71 @@ def test_wizard_magic_missile_split_is_smart_only_and_dumb_focus_fires() -> None
     assert_spell_action_core(dumb_decision.action, "magic_missile", "G1")
     assert dumb_decision.action["target_ids"] == ["G1", "G1", "G1"]
     assert dumb_decision.action["spell_level"] == 1
+
+
+def test_smart_wizard_uses_level2_magic_missile_for_four_guaranteed_kills_before_shatter() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-four-kill-opener",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 7, "y": 1},
+                G2={"x": 7, "y": 5},
+                G3={"x": 7, "y": 9},
+                G4={"x": 7, "y": 13},
+            ),
+            player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3", "G4")
+    for target_id in ("G1", "G2", "G3", "G4"):
+        encounter.units[target_id].current_hp = 2
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "magic_missile", "G1")
+    assert decision.action["spell_level"] == 2
+    assert set(decision.action["target_ids"]) == {"G1", "G2", "G3", "G4"}
+
+
+def test_smart_wizard_uses_level1_magic_missile_for_three_guaranteed_kills_before_shatter() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-three-kill-opener",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 7, "y": 1}, G2={"x": 7, "y": 5}, G3={"x": 7, "y": 9}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3")
+    for target_id in ("G1", "G2", "G3"):
+        encounter.units[target_id].current_hp = 2
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "magic_missile", "G1")
+    assert decision.action["spell_level"] == 1
+    assert set(decision.action["target_ids"]) == {"G1", "G2", "G3"}
+
+
+def test_dumb_wizard_skips_magic_missile_multikill_openers() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-magic-missile-dumb-skip-opener",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 7, "y": 1}, G2={"x": 7, "y": 5}, G3={"x": 7, "y": 9}),
+            player_preset_id="wizard_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3")
+    for target_id in ("G1", "G2", "G3"):
+        encounter.units[target_id].current_hp = 2
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "magic_missile", "G1")
+    assert decision.action["target_ids"] == ["G1", "G1", "G1"]
 
 
 def test_level4_wizard_uses_level2_magic_missile_for_guaranteed_finisher() -> None:
