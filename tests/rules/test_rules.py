@@ -2127,7 +2127,7 @@ def test_mage_armor_raises_ac_spends_slot_and_logs_event() -> None:
     assert encounter.units["F1"].resources.spell_slots_level_1 == 1
 
 
-def test_smart_default_party_wizard_starts_with_precombat_mage_armor() -> None:
+def test_smart_default_party_starts_with_precombat_aid_and_mage_armor() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="wizard-precombat-mage-armor-smart",
@@ -2147,12 +2147,32 @@ def test_smart_default_party_wizard_starts_with_precombat_mage_armor() -> None:
 
     smart_wizard = smart.units["F4"]
     dumb_wizard = dumb.units["F4"]
+    smart_paladin = smart.units["F2"]
+    dumb_paladin = dumb.units["F2"]
 
     assert smart_wizard.class_id == "wizard"
     assert smart_wizard.ac == 15
     assert smart_wizard.resources.spell_slots_level_1 == 3
     assert dumb_wizard.ac == 12
     assert dumb_wizard.resources.spell_slots_level_1 == 4
+    assert smart_paladin.resources.spell_slots_level_2 == 1
+    assert dumb_paladin.resources.spell_slots_level_2 == 2
+    assert smart.units["F1"].max_hp == 50
+    assert smart.units["F1"].current_hp == 50
+    assert smart.units["F2"].max_hp == 54
+    assert smart.units["F2"].current_hp == 54
+    assert smart.units["F3"].max_hp == 42
+    assert smart.units["F4"].max_hp == 37
+    assert smart.units["F4"].current_hp == 37
+    assert dumb.units["F1"].max_hp == 45
+    assert dumb.units["F2"].max_hp == 49
+    assert dumb.units["F4"].max_hp == 32
+    for unit_id in ("F1", "F2", "F4"):
+        assert any(
+            isinstance(effect, AidEffect) and effect.source_id == "F2" and effect.hp_bonus == 5
+            for effect in smart.units[unit_id].temporary_effects
+        )
+    assert not any(isinstance(effect, AidEffect) for effect in smart.units["F3"].temporary_effects)
     assert smart_wizard.initiative_score == dumb_wizard.initiative_score
     assert smart.combat_log == []
 
@@ -4043,7 +4063,13 @@ def test_bless_applies_to_weapon_attacks_and_saving_throws() -> None:
 
 
 def test_paladin_level5_bless_uses_level2_slot_and_four_targets() -> None:
-    encounter = create_encounter(EncounterConfig(seed="paladin-level5-bless", enemy_preset_id="goblin_screen"))
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="paladin-level5-bless",
+            enemy_preset_id="goblin_screen",
+            player_behavior="dumb",
+        )
+    )
 
     bless_event = resolve_bless(encounter, "F2", ["F2", "F1", "F3", "F4", "E1"])
 

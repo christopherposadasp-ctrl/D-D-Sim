@@ -119,6 +119,9 @@ def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
         "endingLayOnHands": [],
         "paladinDownAtEnd": 0,
         "paladinEvents": 0,
+        "aidCasts": 0,
+        "aidTargets": 0,
+        "aidHpBonusTotal": 0,
         "blessCasts": 0,
         "divineSmites": 0,
         "sentinelGuardianTriggers": 0,
@@ -302,6 +305,21 @@ def add_metric(counter: dict[str, Any], key: str, value: int = 1) -> None:
     counter[key] = int(counter.get(key, 0)) + value
 
 
+def get_precombat_aid_targets(result: RunEncounterResult, source_id: str) -> list[tuple[str, int]]:
+    if not result.replay_frames:
+        return []
+    initial_units = result.replay_frames[0].state.units
+    aid_targets: list[tuple[str, int]] = []
+    for target_id, unit in initial_units.items():
+        if unit.faction != "fighters":
+            continue
+        for effect in unit.temporary_effects:
+            if effect.kind == "aid" and effect.source_id == source_id:
+                aid_targets.append((target_id, int(effect.hp_bonus)))
+                break
+    return sorted(aid_targets)
+
+
 def record_paladin_run(metrics: dict[str, Any], result: RunEncounterResult, unit_id: str) -> None:
     final_state = result.final_state
     paladin = final_state.units[unit_id]
@@ -316,6 +334,12 @@ def record_paladin_run(metrics: dict[str, Any], result: RunEncounterResult, unit
     metrics["endingLayOnHands"].append(paladin.resources.lay_on_hands_points)
     if paladin.current_hp <= 0 or paladin.conditions.dead or paladin.conditions.unconscious:
         add_metric(metrics, "paladinDownAtEnd")
+
+    aid_targets = get_precombat_aid_targets(result, unit_id)
+    if aid_targets:
+        add_metric(metrics, "aidCasts")
+        add_metric(metrics, "aidTargets", len(aid_targets))
+        add_metric(metrics, "aidHpBonusTotal", sum(hp_bonus for _, hp_bonus in aid_targets))
 
     previous_unconscious: dict[str, bool] = {}
     if result.replay_frames:
@@ -356,6 +380,7 @@ def record_paladin_run(metrics: dict[str, Any], result: RunEncounterResult, unit
             was_down = bool(target_id and previous_unconscious.get(target_id))
             is_lay_on_hands = "lay on hands" in text or "layOnHandsPointsRemaining" in resolved_totals
             is_cure_wounds = resolved_totals.get("spellId") == "cure_wounds" or "cure wounds" in text
+            is_aid = resolved_totals.get("spellId") == "aid" or "casts aid" in text
 
             if is_lay_on_hands:
                 add_metric(metrics, "layOnHandsUses")
@@ -369,6 +394,11 @@ def record_paladin_run(metrics: dict[str, Any], result: RunEncounterResult, unit
                 metrics["cureWoundsHeals"].append(healing_total)
                 if was_down:
                     add_metric(metrics, "cureWoundsDownedPickups")
+            elif is_aid:
+                applied_target_ids = resolved_totals.get("aidAppliedTargetIds") or []
+                add_metric(metrics, "aidCasts")
+                add_metric(metrics, "aidTargets", len(applied_target_ids))
+                add_metric(metrics, "aidHpBonusTotal", int(resolved_totals.get("aidHpBonus") or 0) * len(applied_target_ids))
 
         for current_unit_id, unit in frame.state.units.items():
             previous_unconscious[current_unit_id] = unit.conditions.unconscious or unit.current_hp <= 0
@@ -1005,6 +1035,12 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         "paladinDownAtEnd": metrics["paladinDownAtEnd"],
         "paladinDownAtEndRate": percent(metrics["paladinDownAtEnd"], runs),
         "paladinEvents": metrics["paladinEvents"],
+        "aidCasts": metrics["aidCasts"],
+        "aidTargets": metrics["aidTargets"],
+        "aidAverageTargets": round(float(metrics["aidTargets"]) / metrics["aidCasts"], 2)
+        if metrics["aidCasts"]
+        else 0.0,
+        "aidHpBonusTotal": metrics["aidHpBonusTotal"],
         "blessCasts": metrics["blessCasts"],
         "divineSmites": metrics["divineSmites"],
         "sentinelGuardianTriggers": metrics["sentinelGuardianTriggers"],
@@ -1923,6 +1959,7 @@ def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
     if profile == "paladin":
         return (
             f"- paladin ({unit_id}): Bless {overall['blessCasts']}, "
+            f"Aid {overall['aidCasts']}, "
             f"down {overall['paladinDownAtEndRate']}%, "
             f"LoH {overall['layOnHandsUses']} ({overall['layOnHandsDownedPickups']} pickups), "
             f"Cure {overall['cureWoundsUses']}, Smite {overall['divineSmites']}, "
@@ -2040,7 +2077,8 @@ def format_selected_console_summary(payload: dict[str, Any]) -> str:
             f"Cure Wounds {overall['cureWoundsUses']} use(s), {overall['cureWoundsTotalHealing']} HP"
         ),
         (
-            f"- features: Divine Smite {overall['divineSmites']}, "
+            f"- features: Aid {overall['aidCasts']} cast(s), "
+            f"Divine Smite {overall['divineSmites']}, "
             f"Sentinel Guardian {overall['sentinelGuardianTriggers']}, "
             f"Sentinel Halt {overall['sentinelHaltApplied']}, "
             f"Nature's Wrath {overall['naturesWrathUses']} use(s), "
@@ -2402,6 +2440,9 @@ def format_selected_markdown_report(payload: dict[str, Any]) -> str:
         f"| Average ending 1st-level slots | {overall['averageEndingSpellSlotsLevel1']} |",
         f"| Average ending 2nd-level slots | {overall['averageEndingSpellSlotsLevel2']} |",
         f"| Runs with unused spell slots | {overall['runsWithUnusedSpellSlots']} |",
+        f"| Aid casts | {overall['aidCasts']} |",
+        f"| Aid targets | {overall['aidTargets']} |",
+        f"| Aid HP bonus total | {overall['aidHpBonusTotal']} |",
         f"| Average ending Lay on Hands | {overall['averageEndingLayOnHands']} |",
         f"| Runs with unused Lay on Hands | {overall['runsWithUnusedLayOnHands']} |",
         f"| Lay on Hands uses | {overall['layOnHandsUses']} |",
@@ -2418,13 +2459,13 @@ def format_selected_markdown_report(payload: dict[str, Any]) -> str:
         "",
         "## Scenarios",
         "",
-        "| Scenario | Win Rate | Avg Rounds | Smite | LoH Uses | Cure | Nature | Avg Restrained | Sentinel | Halt |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Scenario | Win Rate | Avg Rounds | Aid | Smite | LoH Uses | Cure | Nature | Avg Restrained | Sentinel | Halt |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in payload["scenarios"]:
         lines.append(
             f"| `{row['scenarioId']}` | {row['playerWinRate']}% | {row['averageRounds']} | "
-            f"{row['divineSmites']} | {row['layOnHandsUses']} | {row['cureWoundsUses']} | "
+            f"{row['aidCasts']} | {row['divineSmites']} | {row['layOnHandsUses']} | {row['cureWoundsUses']} | "
             f"{row['naturesWrathUses']} | {row['naturesWrathAverageRestrained']} | "
             f"{row['sentinelGuardianTriggers']} | {row['sentinelHaltApplied']} |"
         )

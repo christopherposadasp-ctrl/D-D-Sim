@@ -38,6 +38,9 @@ def test_pc_tuning_sample_summary_tracks_paladin_resources_and_feature_rates() -
     metrics["endingSpellSlotsLevel1"].extend([0, 2])
     metrics["endingSpellSlotsLevel2"].extend([0, 1])
     metrics["endingLayOnHands"].extend([0, 4])
+    metrics["aidCasts"] = 1
+    metrics["aidTargets"] = 3
+    metrics["aidHpBonusTotal"] = 15
     metrics["divineSmites"] = 3
     metrics["sentinelGuardianTriggers"] = 4
     metrics["sentinelHaltApplied"] = 2
@@ -62,6 +65,9 @@ def test_pc_tuning_sample_summary_tracks_paladin_resources_and_feature_rates() -
     assert summary["averageEndingSpellSlotsLevel2"] == 0.5
     assert summary["runsWithUnusedLayOnHands"] == 1
     assert summary["averageEndingLayOnHands"] == 2
+    assert summary["aidCasts"] == 1
+    assert summary["aidAverageTargets"] == 3
+    assert summary["aidHpBonusTotal"] == 15
     assert summary["divineSmites"] == 3
     assert summary["sentinelHaltPerGuardianRate"] == 50.0
     assert summary["naturesWrathAverageTargets"] == 5

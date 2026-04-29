@@ -9,7 +9,7 @@ from backend.content.feature_definitions import (
 )
 from backend.engine import create_encounter
 from backend.engine.constants import DEFAULT_POSITIONS
-from backend.engine.models.state import EncounterConfig, GridPosition
+from backend.engine.models.state import AidEffect, EncounterConfig, GridPosition
 from backend.engine.rules.combat_rules import AttackRollOverrides, ResolveAttackArgs, resolve_attack
 from backend.engine.services.catalog import get_player_catalog
 
@@ -809,21 +809,32 @@ def test_default_player_preset_loads_fighter_paladin_rogue_and_wizard() -> None:
     assert encounter.units["F2"].loadout_id == "paladin_level5_sample_build"
     assert encounter.units["F2"].level == 5
     assert encounter.units["F2"].ac == 21
+    assert encounter.units["F2"].max_hp == 54
+    assert encounter.units["F2"].current_hp == 54
     assert encounter.units["F2"].resources.lay_on_hands_points == 25
     assert encounter.units["F2"].resources.spell_slots_level_1 == 4
-    assert encounter.units["F2"].resources.spell_slots_level_2 == 2
+    assert encounter.units["F2"].resources.spell_slots_level_2 == 1
     assert encounter.units["F2"].resources.channel_divinity_uses == 2
     assert encounter.units["F3"].loadout_id == "rogue_ranged_level5_assassin_sample_build"
     assert encounter.units["F3"].level == 5
+    assert encounter.units["F3"].max_hp == 42
     assert encounter.units["F4"].loadout_id == "wizard_level5_evoker_sample_build"
     assert encounter.units["F4"].level == 5
     assert encounter.units["F4"].class_id == "wizard"
     assert encounter.units["F4"].ac == 15
+    assert encounter.units["F4"].max_hp == 37
+    assert encounter.units["F4"].current_hp == 37
     assert encounter.units["F4"].resources.spell_slots_level_1 == 3
     assert encounter.units["F4"].resources.spell_slots_level_2 == 3
     assert encounter.units["F4"].resources.spell_slots_level_3 == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}
-    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 168
+    assert sum(encounter.units[unit_id].max_hp for unit_id in ("F1", "F2", "F3", "F4")) == 183
+    for unit_id in ("F1", "F2", "F4"):
+        assert any(
+            isinstance(effect, AidEffect) and effect.source_id == "F2" and effect.hp_bonus == 5
+            for effect in encounter.units[unit_id].temporary_effects
+        )
+    assert not any(isinstance(effect, AidEffect) for effect in encounter.units["F3"].temporary_effects)
 
 
 def test_barbarian_attack_action_uses_greataxe_and_handaxe_choices() -> None:

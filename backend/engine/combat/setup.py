@@ -8,6 +8,7 @@ from backend.content.player_loadouts import (
     get_player_preset_footprints,
     get_player_preset_unit_ids,
 )
+from backend.content.spell_definitions import get_spell_definition
 from backend.engine.constants import (
     DEFAULT_MONSTER_BEHAVIOR,
     DEFAULT_PLAYER_BEHAVIOR,
@@ -15,6 +16,7 @@ from backend.engine.constants import (
     GOBLIN_IDS,
 )
 from backend.engine.models.state import (
+    AidEffect,
     EncounterConfig,
     EncounterState,
     Footprint,
@@ -194,11 +196,74 @@ def maybe_apply_smart_precombat_mage_armor(unit: UnitState, player_behavior: Res
         unit.ac = mage_armor_ac
 
 
+def unit_can_receive_precombat_aid(unit: UnitState) -> bool:
+    return unit.current_hp > 0 and not unit.conditions.dead and not unit.conditions.unconscious
+
+
+def find_first_player_by_class(
+    units: dict[str, UnitState],
+    player_unit_ids: list[str],
+    class_id: str,
+) -> UnitState | None:
+    for player_unit_id in player_unit_ids:
+        unit = units[player_unit_id]
+        if unit.class_id == class_id and unit_can_receive_precombat_aid(unit):
+            return unit
+    return None
+
+
+def get_active_aid_bonus(unit: UnitState) -> int:
+    return max((effect.hp_bonus for effect in unit.temporary_effects if effect.kind == "aid"), default=0)
+
+
+def maybe_apply_smart_precombat_aid(
+    units: dict[str, UnitState],
+    player_unit_ids: list[str],
+    player_behavior: ResolvedPlayerBehavior,
+) -> None:
+    if player_behavior != "smart":
+        return
+
+    paladin = find_first_player_by_class(units, player_unit_ids, "paladin")
+    fighter = find_first_player_by_class(units, player_unit_ids, "fighter")
+    wizard = find_first_player_by_class(units, player_unit_ids, "wizard")
+    if not paladin or not fighter or not wizard:
+        return
+    if "aid" not in paladin.prepared_combat_spell_ids:
+        return
+    if paladin.resources.spell_slots_level_2 <= 0:
+        return
+
+    spell = get_spell_definition("aid")
+    targets = [paladin, fighter, wizard]
+    targets_to_apply = [target for target in targets if get_active_aid_bonus(target) < spell.hp_bonus]
+    if not targets_to_apply:
+        return
+    if not paladin.resources.spend_pool("spell_slots_level_2", 1):
+        return
+
+    for target in targets_to_apply:
+        existing_bonus = get_active_aid_bonus(target)
+        bonus_delta = spell.hp_bonus - existing_bonus
+        target.max_hp += bonus_delta
+        target.current_hp += bonus_delta
+        target.temporary_effects = [effect for effect in target.temporary_effects if effect.kind != "aid"]
+        target.temporary_effects.append(
+            AidEffect(
+                kind="aid",
+                source_id=paladin.id,
+                hp_bonus=spell.hp_bonus,
+                remaining_rounds=spell.duration_rounds,
+            )
+        )
+
+
 def apply_smart_precombat_buffs(
     units: dict[str, UnitState],
     player_unit_ids: list[str],
     player_behavior: ResolvedPlayerBehavior,
 ) -> None:
+    maybe_apply_smart_precombat_aid(units, player_unit_ids, player_behavior)
     for player_unit_id in player_unit_ids:
         maybe_apply_smart_precombat_mage_armor(units[player_unit_id], player_behavior)
 
