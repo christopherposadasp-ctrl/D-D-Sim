@@ -10,6 +10,7 @@ from backend.engine.services.scenario_audit import (
     build_quick_scenario_audit_config,
     build_report_payload,
     build_simple_suggestion,
+    determine_status,
     get_active_scenario_ids,
     has_swallow_action,
 )
@@ -49,6 +50,19 @@ def test_simple_suggestion_rules_are_scenario_specific() -> None:
     assert build_simple_suggestion("deadwatch_phalanx", 0.07, 0.93) == (
         "Move the enemy front line 1 square back, or spread the back line by 1 square."
     )
+
+
+def test_simple_suggestions_do_not_promote_scenario_status() -> None:
+    suggestion = build_simple_suggestion("goblin_screen", 0.95, 0.05)
+
+    assert suggestion == "Move the enemy front line 1 square closer."
+    assert determine_status([], [], 5, []) == "pass"
+
+
+def test_scenario_status_still_warns_on_diagnostic_findings() -> None:
+    assert determine_status([], [], 4, []) == "warn"
+    assert determine_status([], [], 5, ["Smart players underperformed dumb players."]) == "warn"
+    assert determine_status(["Duplicate unit id."], [], 5, []) == "fail"
 
 
 def test_audit_profiles_expose_quick_and_full_defaults() -> None:

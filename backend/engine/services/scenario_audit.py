@@ -578,10 +578,15 @@ def build_diagnostic_warnings(summary: BatchSummary, signature_mechanic_count: i
     return warnings
 
 
-def determine_status(structural_issues: list[str], smoke_issues: list[str], signature_mechanic_count: int, simple_suggestion: str | None, warnings: list[str]) -> AuditStatus:
+def determine_status(
+    structural_issues: list[str],
+    smoke_issues: list[str],
+    signature_mechanic_count: int,
+    warnings: list[str],
+) -> AuditStatus:
     if structural_issues or smoke_issues or signature_mechanic_count == 0:
         return "fail"
-    if signature_mechanic_count < 5 or simple_suggestion or warnings:
+    if signature_mechanic_count < 5 or warnings:
         return "warn"
     return "pass"
 
@@ -665,7 +670,7 @@ def audit_scenario(
     evil_summary = get_combination_summary(summary, "evil")
     simple_suggestion = build_simple_suggestion(preset_id, float(summary.player_win_rate), float(summary.goblin_win_rate))
     warnings = build_diagnostic_warnings(summary, signature_mechanic_count, structural_issues, smoke_issues)
-    status = determine_status(structural_issues, smoke_issues, signature_mechanic_count, simple_suggestion, warnings)
+    status = determine_status(structural_issues, smoke_issues, signature_mechanic_count, warnings)
 
     row = ScenarioAuditRow(
         scenario_id=preset.preset_id,

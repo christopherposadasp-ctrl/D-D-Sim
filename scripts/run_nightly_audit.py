@@ -138,7 +138,7 @@ def parse_scenario_audit_report(path: Path) -> tuple[Status, list[str]]:
         scenario_id = str(row.get("scenarioId", "unknown"))
         row_status = row.get("status")
         row_warnings = [entry for entry in row.get("warnings", []) if isinstance(entry, str)]
-        message = row_warnings[0] if row_warnings else str(row.get("simpleSuggestion") or f"status={row_status}")
+        message = row_warnings[0] if row_warnings else f"status={row_status}"
         if row_status == "fail":
             failures.append(f"{scenario_id}: {message}")
         elif row_status == "warn":

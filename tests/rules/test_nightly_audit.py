@@ -56,6 +56,36 @@ def test_scenario_audit_parser_distinguishes_pass_warn_and_fail(tmp_path: Path) 
     assert warnings == ["orc_push: One or more required signature mechanics never appeared."]
 
 
+def test_scenario_audit_parser_ignores_simple_suggestions(tmp_path: Path) -> None:
+    report_path = tmp_path / "scenario.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "scenarioId": "goblin_screen",
+                        "status": "pass",
+                        "simpleSuggestion": "Move the enemy front line 1 square closer.",
+                        "warnings": [],
+                    },
+                    {
+                        "scenarioId": "bandit_ambush",
+                        "status": "warn",
+                        "simpleSuggestion": "Move the enemy front line 1 square closer.",
+                        "warnings": [],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status, warnings = nightly_audit.parse_scenario_audit_report(report_path)
+
+    assert status == "warn"
+    assert warnings == ["bandit_ambush: status=warn"]
+
+
 def test_class_audit_parser_uses_overall_status_and_row_messages(tmp_path: Path) -> None:
     report_path = tmp_path / "class.json"
     report_path.write_text(
