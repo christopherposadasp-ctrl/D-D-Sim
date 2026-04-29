@@ -724,6 +724,7 @@ def test_level4_evoker_wizard_keeps_existing_spell_priority_and_ignores_mage_arm
             player_behavior="smart",
         )
     )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -778,6 +779,83 @@ def test_evoker_wizard_shatter_plans_only_mutually_legal_cluster_targets() -> No
         assert decision.action["spell_id"] == "shatter"
         assert len(decision.action["target_ids"]) == 2
         assert set(decision.action["target_ids"]) != {"G1", "G2", "G3"}
+
+
+def test_smart_evoker_wizard_shatter_maximizes_ally_safe_cluster_size() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-shatter-max-cluster",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 8, "y": 1},
+                G2={"x": 9, "y": 1},
+                G3={"x": 8, "y": 8},
+                G4={"x": 9, "y": 8},
+                G5={"x": 10, "y": 8},
+            ),
+            player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3", "G4", "G5")
+    encounter.units["G1"].current_hp = 1
+    for target_id in ("G2", "G3", "G4", "G5"):
+        encounter.units[target_id].current_hp = 20
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.action["kind"] == "cast_spell"
+    assert decision.action["spell_id"] == "shatter"
+    assert set(decision.action["target_ids"]) == {"G3", "G4", "G5"}
+
+
+def test_smart_evoker_wizard_moves_safely_to_maximize_shatter_cluster() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="wizard-shatter-move-max-smart",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 10, "y": 1},
+                G2={"x": 11, "y": 1},
+                G3={"x": 14, "y": 12},
+                G4={"x": 15, "y": 12},
+                G5={"x": 14, "y": 13},
+            ),
+            player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="wizard-shatter-move-max-dumb",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 10, "y": 1},
+                G2={"x": 11, "y": 1},
+                G3={"x": 14, "y": 12},
+                G4={"x": 15, "y": 12},
+                G5={"x": 14, "y": 13},
+            ),
+            player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    for encounter in (smart, dumb):
+        keep_only_active_units(encounter, "F1", "G1", "G2", "G3", "G4", "G5")
+        for target_id in ("G1", "G2", "G3", "G4", "G5"):
+            encounter.units[target_id].current_hp = 20
+
+    smart_decision = choose_turn_decision(smart, "F1")
+    dumb_decision = choose_turn_decision(dumb, "F1")
+
+    assert smart_decision.pre_action_movement is not None
+    assert smart_decision.action["kind"] == "cast_spell"
+    assert smart_decision.action["spell_id"] == "shatter"
+    assert set(smart_decision.action["target_ids"]) == {"G3", "G4", "G5"}
+    assert dumb_decision.pre_action_movement is None
+    assert dumb_decision.action["kind"] == "cast_spell"
+    assert dumb_decision.action["spell_id"] == "shatter"
+    assert set(dumb_decision.action["target_ids"]) == {"G1", "G2"}
 
 
 def test_level3_evoker_wizard_uses_shatter_over_scorching_ray_for_ally_safe_cluster() -> None:

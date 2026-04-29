@@ -3230,6 +3230,8 @@ def build_shatter_decision(
     state: EncounterState,
     actor: UnitState,
     conscious_enemies: list[UnitState],
+    move_squares: int,
+    position_index: PositionIndex | None,
 ) -> TurnDecision | None:
     if not actor.position or not can_cast_combat_spell(actor, "shatter"):
         return None
@@ -3248,38 +3250,87 @@ def build_shatter_decision(
         for unit in sorted(state.units.values(), key=lambda item: unit_sort_key(item.id))
         if unit.faction == actor.faction and unit.id != actor.id and unit.position and not unit.conditions.dead
     ]
+    target_rank = {target.id: index for index, target in enumerate(prioritized_targets)}
+    candidate_squares = (
+        get_safe_reachable_squares(state, actor.id, move_squares, False, position_index)
+        if state.player_behavior == "smart"
+        else [ReachableSquare(position=actor.position, path=[actor.position], distance=0)]
+    )
+    candidate_options: list[tuple[ReachableSquare, UnitState, list[str]]] = []
 
-    for primary in prioritized_targets:
-        if not primary.position:
-            continue
-        primary_context = get_attack_context(state, actor.id, primary.id, shatter_profile)
-        if not primary_context.legal or not primary_context.within_normal_range:
-            continue
-
-        if any(ally.position and get_distance_between_units(primary, ally) <= 2 for ally in allies):
-            continue
-
-        cluster = [primary.id]
-        for target in sorted(conscious_enemies, key=lambda item: unit_sort_key(item.id)):
-            if target.id == primary.id or not target.position:
+    for square in candidate_squares:
+        for primary in prioritized_targets:
+            if not primary.position:
                 continue
-            target_context = get_attack_context(state, actor.id, target.id, shatter_profile)
-            if not target_context.legal or not target_context.within_normal_range:
-                continue
-            if get_distance_between_units(primary, target) <= 2:
-                candidate_cluster = [*cluster, target.id]
-                if targets_are_within_spell_cluster(state, candidate_cluster, spell.target_cluster_feet):
-                    cluster.append(target.id)
-
-        if len(cluster) >= 2:
-            return TurnDecision(
-                action={
-                    "kind": "cast_spell",
-                    "spell_id": "shatter",
-                    "target_id": primary.id,
-                    "target_ids": cluster[: spell.max_targets],
-                }
+            primary_context = get_attack_context(
+                state,
+                actor.id,
+                primary.id,
+                shatter_profile,
+                square.position,
+                primary.position,
+                position_index,
             )
+            if not primary_context.legal or not primary_context.within_normal_range:
+                continue
+
+            if any(ally.position and get_distance_between_units(primary, ally) <= 2 for ally in allies):
+                continue
+
+            cluster = [primary.id]
+            for target in sorted(conscious_enemies, key=lambda item: unit_sort_key(item.id)):
+                if target.id == primary.id or not target.position:
+                    continue
+                target_context = get_attack_context(
+                    state,
+                    actor.id,
+                    target.id,
+                    shatter_profile,
+                    square.position,
+                    target.position,
+                    position_index,
+                )
+                if not target_context.legal or not target_context.within_normal_range:
+                    continue
+                if get_distance_between_units(primary, target) <= 2:
+                    candidate_cluster = [*cluster, target.id]
+                    if targets_are_within_spell_cluster(state, candidate_cluster, spell.target_cluster_feet):
+                        cluster.append(target.id)
+
+            if len(cluster) >= 2:
+                if state.player_behavior != "smart":
+                    return TurnDecision(
+                        action={
+                            "kind": "cast_spell",
+                            "spell_id": "shatter",
+                            "target_id": primary.id,
+                            "target_ids": cluster[: spell.max_targets],
+                        }
+                    )
+                candidate_options.append((square, primary, cluster[: spell.max_targets]))
+
+    if candidate_options:
+        best_square, best_primary, best_cluster = sorted(
+            candidate_options,
+            key=lambda item: (
+                -len(item[2]),
+                item[0].distance,
+                target_rank.get(item[1].id, 999),
+                sum(state.units[target_id].current_hp for target_id in item[2]),
+                item[0].position.x,
+                item[0].position.y,
+                item[1].id,
+            ),
+        )[0]
+        return TurnDecision(
+            pre_action_movement=MovementPlan(path=best_square.path, mode="move") if best_square.distance > 0 else None,
+            action={
+                "kind": "cast_spell",
+                "spell_id": "shatter",
+                "target_id": best_primary.id,
+                "target_ids": best_cluster,
+            },
+        )
 
     return None
 
@@ -3540,7 +3591,7 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     if burning_hands_decision:
         return burning_hands_decision
 
-    shatter_decision = build_shatter_decision(state, actor, conscious_enemies)
+    shatter_decision = build_shatter_decision(state, actor, conscious_enemies, move_squares, position_index)
     if shatter_decision:
         return shatter_decision
 
