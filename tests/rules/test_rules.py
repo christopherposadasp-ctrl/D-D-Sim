@@ -3941,8 +3941,8 @@ def test_wizard_sample_trio_smoke_run_completes() -> None:
     assert result.final_state.winner in {"fighters", "goblins", "mutual_annihilation"}
 
 
-def test_lay_on_hands_restores_downed_target_to_twenty_five_percent_hp() -> None:
-    encounter = create_encounter(build_paladin_config("paladin-lay-on-hands-downed"))
+def test_lay_on_hands_restores_downed_target_to_thirty_percent_hp() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-lay-on-hands-downed", player_behavior="dumb"))
     encounter.units["F1"].position = GridPosition(x=4, y=4)
     encounter.units["F2"].position = GridPosition(x=5, y=4)
     encounter.units["F2"].current_hp = 0
@@ -3952,21 +3952,45 @@ def test_lay_on_hands_restores_downed_target_to_twenty_five_percent_hp() -> None
     heal_event = attempt_lay_on_hands(encounter, "F1", "F2")
 
     assert heal_event.event_type == "heal"
-    assert heal_event.resolved_totals["healingTotal"] == 4
-    assert encounter.units["F2"].current_hp == 4
+    assert heal_event.resolved_totals["healingTotal"] == 15
+    assert encounter.units["F2"].current_hp == 15
     assert encounter.units["F2"].conditions.unconscious is False
-    assert encounter.units["F1"].resources.lay_on_hands_points == 1
+    assert encounter.units["F1"].resources.lay_on_hands_points == 10
 
 
-def test_lay_on_hands_living_target_heals_to_half_hp_when_triggered() -> None:
-    encounter = create_encounter(build_paladin_config("paladin-lay-on-hands-living"))
-    encounter.units["F1"].current_hp = 4
+def test_lay_on_hands_living_ally_heals_to_fifty_five_percent_hp_when_triggered() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-lay-on-hands-living-ally", player_behavior="dumb"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F2"].current_hp = 10
+
+    heal_event = attempt_lay_on_hands(encounter, "F1", "F2")
+
+    assert heal_event.resolved_totals["healingTotal"] == 17
+    assert encounter.units["F2"].current_hp == 27
+    assert encounter.units["F1"].resources.lay_on_hands_points == 8
+
+
+def test_lay_on_hands_self_heals_to_sixty_percent_hp_when_triggered() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-lay-on-hands-self", player_behavior="dumb"))
+    encounter.units["F1"].current_hp = 15
 
     heal_event = attempt_lay_on_hands(encounter, "F1", "F1")
 
-    assert heal_event.resolved_totals["healingTotal"] == 3
-    assert encounter.units["F1"].current_hp == 7
-    assert encounter.units["F1"].resources.lay_on_hands_points == 2
+    assert heal_event.resolved_totals["healingTotal"] == 15
+    assert encounter.units["F1"].current_hp == 30
+    assert encounter.units["F1"].resources.lay_on_hands_points == 10
+
+
+def test_lay_on_hands_spends_remaining_pool_when_planned_heal_would_leave_small_remainder() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-lay-on-hands-remainder", player_behavior="dumb"))
+    encounter.units["F1"].current_hp = 5
+
+    heal_event = attempt_lay_on_hands(encounter, "F1", "F1")
+
+    assert heal_event.resolved_totals["healingTotal"] == 25
+    assert encounter.units["F1"].current_hp == 30
+    assert encounter.units["F1"].resources.lay_on_hands_points == 0
 
 
 def test_adjacent_lay_on_hands_rescue_executes_before_paladin_attack() -> None:
@@ -4751,7 +4775,7 @@ def test_divine_smite_fires_on_surviving_critical_melee_hit() -> None:
     assert encounter.units["F1"]._bonus_action_used_this_turn is True
 
 
-def test_divine_smite_fires_on_normal_hit_only_when_average_smite_can_finish() -> None:
+def test_divine_smite_fires_on_normal_hit_when_average_finishes_or_level1_slots_are_surplus() -> None:
     encounter = create_encounter(build_level2_paladin_config("paladin-smite-kill-confirm"))
     encounter.units["F1"].position = GridPosition(x=4, y=4)
     encounter.units["E1"].position = GridPosition(x=5, y=4)
@@ -4790,8 +4814,9 @@ def test_divine_smite_fires_on_normal_hit_only_when_average_smite_can_finish() -
         ),
     )
 
-    assert no_smite_event.resolved_totals.get("divineSmiteApplied") is None
-    assert no_smite.units["F1"].resources.spell_slots_level_1 == 2
+    assert no_smite_event.resolved_totals["divineSmiteApplied"] is True
+    assert no_smite_event.resolved_totals["spellLevel"] == 1
+    assert no_smite.units["F1"].resources.spell_slots_level_1 == 1
 
 
 def test_divine_smite_spends_early_slot_on_surviving_target_at_twelve_hp_or_less() -> None:
@@ -4836,6 +4861,77 @@ def test_divine_smite_spends_early_slot_on_surviving_target_at_twelve_hp_or_less
 
     assert conserve_event.resolved_totals.get("divineSmiteApplied") is None
     assert conserve.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_level5_divine_smite_spends_surplus_level1_slots_on_surviving_melee_hits() -> None:
+    surplus = create_encounter(build_level5_paladin_config("paladin-smite-surplus-level1"))
+    surplus.units["F1"].position = GridPosition(x=4, y=4)
+    surplus.units["E1"].position = GridPosition(x=5, y=4)
+    surplus.units["E1"].max_hp = 23
+    surplus.units["E1"].current_hp = 23
+
+    surplus_event, _ = resolve_attack(
+        surplus,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[1, 1]),
+        ),
+    )
+
+    assert surplus_event.resolved_totals["divineSmiteApplied"] is True
+    assert surplus_event.resolved_totals["spellLevel"] == 1
+    assert surplus.units["F1"].resources.spell_slots_level_1 == 3
+    assert surplus.units["F1"].resources.spell_slots_level_2 == 2
+
+    mid_slots = create_encounter(build_level5_paladin_config("paladin-smite-mid-level1"))
+    mid_slots.units["F1"].position = GridPosition(x=4, y=4)
+    mid_slots.units["E1"].position = GridPosition(x=5, y=4)
+    mid_slots.units["E1"].max_hp = 19
+    mid_slots.units["E1"].current_hp = 19
+    mid_slots.units["F1"].resources.spell_slots_level_1 = 2
+
+    mid_slots_event, _ = resolve_attack(
+        mid_slots,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[1, 1]),
+        ),
+    )
+
+    assert mid_slots_event.resolved_totals["divineSmiteApplied"] is True
+    assert mid_slots_event.resolved_totals["spellLevel"] == 1
+    assert mid_slots.units["F1"].resources.spell_slots_level_1 == 1
+    assert mid_slots.units["F1"].resources.spell_slots_level_2 == 2
+
+
+def test_level5_divine_smite_conserves_last_level1_slot_without_kill_confirm() -> None:
+    encounter = create_encounter(build_level5_paladin_config("paladin-smite-surplus-conserve"))
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["E1"].position = GridPosition(x=5, y=4)
+    encounter.units["E1"].max_hp = 20
+    encounter.units["E1"].current_hp = 20
+    encounter.units["F1"].resources.spell_slots_level_1 = 1
+
+    attack_event, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E1",
+            weapon_id="longsword",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[1], smite_damage_rolls=[8, 8]),
+        ),
+    )
+
+    assert attack_event.resolved_totals.get("divineSmiteApplied") is None
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 2
 
 
 def test_level5_divine_smite_uses_level2_slot_when_level1_average_would_not_finish() -> None:

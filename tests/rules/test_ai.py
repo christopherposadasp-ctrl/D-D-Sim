@@ -1557,6 +1557,30 @@ def test_paladin_moves_to_rescue_downed_ally_and_still_acts_from_rescue_square()
     assert_bonus_action_core(decision.bonus_action, "lay_on_hands", "after_action", "F1")
 
 
+def test_paladin_uses_lay_on_hands_on_self_at_thirty_five_percent_hp() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-self-lay-on-hands-thirty-five", placements=DEFAULT_POSITIONS))
+    paladin = encounter.units["F2"]
+    paladin.resources.spell_slots_level_1 = 0
+    paladin.resources.spell_slots_level_2 = 0
+    paladin.current_hp = 18
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert_bonus_action_core(decision.bonus_action, "lay_on_hands", "before_action", "F2")
+
+
+def test_paladin_does_not_use_lay_on_hands_on_self_above_thirty_five_percent_hp() -> None:
+    encounter = create_encounter(EncounterConfig(seed="paladin-self-lay-on-hands-above-thirty-five", placements=DEFAULT_POSITIONS))
+    paladin = encounter.units["F2"]
+    paladin.resources.spell_slots_level_1 = 0
+    paladin.resources.spell_slots_level_2 = 0
+    paladin.current_hp = 19
+
+    decision = choose_turn_decision(encounter, "F2")
+
+    assert decision.bonus_action is None or decision.bonus_action.get("kind") != "lay_on_hands"
+
+
 def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
     melee = create_encounter(EncounterConfig(seed="paladin-melee", placements=DEFAULT_POSITIONS))
     melee.units["F2"].resources.spell_slots_level_1 = 0

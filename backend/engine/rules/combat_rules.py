@@ -1574,10 +1574,17 @@ def attempt_lay_on_hands(state: EncounterState, actor_id: str, target_id: str | 
 
     if target.current_hp == 0:
         # Rescue pickups should leave the ally with enough HP to survive incidental follow-up damage.
-        intended_healing = max(1, (target.max_hp + 3) // 4)
+        intended_healing = max(1, (target.max_hp * 3 + 9) // 10)
+    elif target.id == actor.id:
+        target_sixty_percent_hp = max(1, (target.max_hp * 3 + 4) // 5)
+        intended_healing = max(1, target_sixty_percent_hp - target.current_hp)
     else:
-        target_half_hp = max(1, (target.max_hp + 1) // 2)
-        intended_healing = max(1, target_half_hp - target.current_hp)
+        target_fifty_five_percent_hp = max(1, (target.max_hp * 11 + 19) // 20)
+        intended_healing = max(1, target_fifty_five_percent_hp - target.current_hp)
+    max_lay_on_hands_pool = actor.resource_pools.get("lay_on_hands", actor.resources.lay_on_hands_points)
+    low_remainder_threshold = max(1, max_lay_on_hands_pool // 5)
+    if 0 < actor.resources.lay_on_hands_points - intended_healing < low_remainder_threshold:
+        intended_healing = actor.resources.lay_on_hands_points
     healing_total = min(intended_healing, target.max_hp - target.current_hp, actor.resources.lay_on_hands_points)
     if healing_total <= 0:
         return create_skip_event(state, actor_id, "Lay on Hands target does not need healing.")
@@ -1926,7 +1933,8 @@ def choose_divine_smite_spell_level(
     if not has_level_1_slot and has_level_2_slot and level_2_average_finishes:
         return 2
 
-    if has_level_1_slot and not has_level_2_slot and attacker.resources.spell_slots_level_1 >= 2 and remaining_effective_hp <= 12:
+    # Spend surplus level 1 slots aggressively before carrying them unused through the fight.
+    if has_level_1_slot and attacker.resources.spell_slots_level_1 >= 2:
         return 1
 
     return None
