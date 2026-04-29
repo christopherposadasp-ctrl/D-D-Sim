@@ -26,6 +26,7 @@ from backend.engine.combat.engine import (
     resolve_bonus_attack_action,
     resolve_cast_spell_action,
     resolve_hasted_action_events,
+    resolve_special_action_events,
     run_batch_parallel,
     run_batch_serial,
     run_encounter_summary_fast,
@@ -1552,6 +1553,123 @@ def test_level4_evoker_fire_bolt_uses_int_asi_spell_attack_bonus() -> None:
     assert attack_event.resolved_totals["selectedRoll"] == 9
     assert attack_event.resolved_totals["attackTotal"] == 15
     assert attack_event.resolved_totals["hit"] is True
+    assert "cantripScale" not in attack_event.resolved_totals
+    assert attack_event.damage_details.total_damage == 6
+
+
+def test_level5_evoker_fire_bolt_scales_to_two_d10() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-fire-bolt-scale"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E1"].max_hp = 50
+    encounter.units["E1"].current_hp = 50
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[12], damage_rolls=[6, 7]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "fire_bolt"
+    assert attack_event.resolved_totals["cantripScale"] == 2
+    assert attack_event.damage_details.damage_components[0].raw_rolls == [6, 7]
+    assert attack_event.damage_details.total_damage == 13
+
+
+def test_level5_evoker_shocking_grasp_scales_to_two_d8_and_keeps_hit_rider() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-shocking-grasp-scale"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[4, 5]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "shocking_grasp"
+    assert attack_event.resolved_totals["cantripScale"] == 2
+    assert attack_event.damage_details.damage_components[0].raw_rolls == [4, 5]
+    assert attack_event.damage_details.total_damage == 9
+    assert any(effect.kind == "no_reactions" for effect in encounter.units["E1"].temporary_effects)
+
+
+def test_level5_evoker_potent_cantrip_uses_scaled_fire_bolt_damage_on_miss() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-potent-fire-bolt-scale"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E1"].max_hp = 50
+    encounter.units["E1"].current_hp = 50
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[1], damage_rolls=[1, 10]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "fire_bolt"
+    assert attack_event.resolved_totals["hit"] is False
+    assert attack_event.resolved_totals["cantripScale"] == 2
+    assert attack_event.resolved_totals["potentCantripApplied"] is True
+    assert attack_event.resolved_totals["potentCantripDamage"] == 5
+    assert attack_event.damage_details.damage_components[0].raw_rolls == [1, 10]
+    assert attack_event.damage_details.total_damage == 5
+
+
+def test_level5_save_cantrip_uses_scaled_damage_dice() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-poison-spray-scale"))
+    prepare_poison_spray_test_wizard(encounter)
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=8, y=5)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "poison_spray", "target_id": "E1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[6, 7]),
+    )
+    attack_event = next(event for event in spell_events if event.event_type == "attack")
+
+    assert attack_event.resolved_totals["spellId"] == "poison_spray"
+    assert attack_event.resolved_totals["cantripScale"] == 2
+    assert attack_event.raw_rolls["damageRolls"] == [6, 7]
+    assert attack_event.damage_details.damage_components[0].raw_rolls == [6, 7]
+    assert attack_event.damage_details.total_damage == 13
+
+
+def test_level5_evoker_leveled_spells_do_not_get_cantrip_scaling() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-scorching-ray-no-cantrip-scale"))
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E1"].max_hp = 50
+    encounter.units["E1"].current_hp = 50
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": "E1"},
+        overrides=AttackRollOverrides(attack_rolls=[15, 15, 15], damage_rolls=[6, 6, 1, 1, 1, 1]),
+    )
+    attack_events = [event for event in spell_events if event.event_type == "attack"]
+
+    assert attack_events[0].resolved_totals["spellId"] == "scorching_ray"
+    assert all("cantripScale" not in event.resolved_totals for event in attack_events)
+    assert [event.damage_details.damage_components[0].raw_rolls for event in attack_events] == [
+        [6, 6],
+        [1, 1],
+        [1, 1],
+    ]
 
 
 def test_magic_missile_auto_hits_and_spends_a_level1_slot() -> None:
@@ -2991,23 +3109,178 @@ def test_level4_evoker_scorching_ray_uses_int_asi_spell_attack_bonus_and_third_l
     assert encounter.units["F1"].resources.spell_slots_level_2 == 2
 
 
-def test_level5_evoker_metadata_level3_spells_fail_cleanly_without_spending_slots() -> None:
-    encounter = create_encounter(build_level5_wizard_config("wizard-level5-metadata-spells-skip"))
+def test_level5_evoker_counterspell_definition_is_live_and_direct_action_cast_skips() -> None:
+    spell = get_spell_definition("counterspell")
+    encounter = create_encounter(build_level5_wizard_config("wizard-level5-counterspell-metadata"))
     defeat_other_enemies(encounter, "E1")
     encounter.units["F1"].position = GridPosition(x=5, y=5)
     encounter.units["E1"].position = GridPosition(x=10, y=5)
 
-    for spell_id, target_id in (("fireball", "E1"), ("counterspell", "E1")):
-        spell_events = resolve_cast_spell_action(
-            encounter,
-            "F1",
-            {"kind": "cast_spell", "spell_id": spell_id, "target_id": target_id},
-        )
+    assert spell.level == 3
+    assert spell.school == "abjuration"
+    assert spell.timing == "reaction"
+    assert spell.targeting_mode == "reaction_counterspell"
+    assert spell.range_feet == 60
+    assert "counterspell" in encounter.units["F1"].prepared_combat_spell_ids
 
-        assert len(spell_events) == 1
-        assert spell_events[0].event_type == "skip"
-        assert "cannot be resolved by the live simulator" in spell_events[0].text_summary
-        assert encounter.units["F1"].resources.spell_slots_level_3 == 2
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "counterspell", "target_id": "E1"},
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "cannot be resolved by the live simulator" in spell_events[0].text_summary
+    assert encounter.units["F1"].resources.spell_slots_level_3 == 2
+
+
+def prepare_enemy_wizard_haste_cast(encounter) -> None:
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=11, y=5)
+    for unit_id in ("F2", "F3"):
+        if "counterspell" in encounter.units[unit_id].prepared_combat_spell_ids:
+            encounter.units[unit_id].prepared_combat_spell_ids.remove("counterspell")
+    encounter.units["E1"].class_id = "wizard"
+    encounter.units["E1"].level = 5
+    encounter.units["E1"].prepared_combat_spell_ids = ["haste"]
+    encounter.units["E1"].resources.spell_slots_level_3 = 2
+
+
+def test_counterspell_interrupts_hostile_level3_spell_spends_resources_and_logs_events() -> None:
+    encounter = create_encounter(build_level5_wizard_config("counterspell-hostile-haste"))
+    prepare_enemy_wizard_haste_cast(encounter)
+
+    events = resolve_cast_spell_action(
+        encounter,
+        "E1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "E2"},
+    )
+
+    assert [event.event_type for event in events] == ["phase_change", "phase_change"]
+    counterspell_event = events[0]
+    countered_event = events[1]
+    assert counterspell_event.actor_id == "F1"
+    assert counterspell_event.resolved_totals["spellId"] == "counterspell"
+    assert counterspell_event.resolved_totals["counteredSpellId"] == "haste"
+    assert counterspell_event.resolved_totals["counteredSpellLevel"] == 3
+    assert counterspell_event.resolved_totals["counteredCasterId"] == "E1"
+    assert counterspell_event.resolved_totals["counterspellSucceeded"] is True
+    assert counterspell_event.resolved_totals["spellSlotsLevel3Remaining"] == 1
+    assert countered_event.actor_id == "E1"
+    assert countered_event.resolved_totals["spellId"] == "haste"
+    assert countered_event.resolved_totals["countered"] is True
+    assert countered_event.resolved_totals["spellSlotsLevel3Remaining"] == 1
+    assert encounter.units["F1"].resources.spell_slots_level_3 == 1
+    assert encounter.units["F1"].reaction_available is False
+    assert encounter.units["E1"].resources.spell_slots_level_3 == 1
+    assert not any(isinstance(effect, HasteEffect) for effect in encounter.units["E2"].temporary_effects)
+    assert "Counterspell" in counterspell_event.text_summary
+
+
+@pytest.mark.parametrize(
+    ("label", "arrange"),
+    [
+        ("out-of-range", lambda state: setattr(state.units["F1"], "position", GridPosition(x=30, y=30))),
+        ("no-reaction", lambda state: setattr(state.units["F1"], "reaction_available", False)),
+        ("no-slot", lambda state: setattr(state.units["F1"].resources, "spell_slots_level_3", 0)),
+        ("unprepared", lambda state: state.units["F1"].prepared_combat_spell_ids.remove("counterspell")),
+        ("downed", lambda state: (setattr(state.units["F1"], "current_hp", 0), setattr(state.units["F1"].conditions, "unconscious", True))),
+    ],
+)
+def test_counterspell_invalid_reaction_paths_do_not_spend_resources(label: str, arrange) -> None:
+    encounter = create_encounter(build_level5_wizard_config(f"counterspell-invalid-{label}"))
+    prepare_enemy_wizard_haste_cast(encounter)
+    arrange(encounter)
+    counterspeller_slots_before = encounter.units["F1"].resources.spell_slots_level_3
+
+    events = resolve_cast_spell_action(
+        encounter,
+        "E1",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "E2"},
+    )
+
+    assert events[0].resolved_totals["spellId"] == "haste"
+    assert encounter.units["F1"].resources.spell_slots_level_3 == counterspeller_slots_before
+    assert encounter.units["E1"].resources.spell_slots_level_3 == 1
+    assert any(isinstance(effect, HasteEffect) for effect in encounter.units["E2"].temporary_effects)
+
+
+def test_counterspell_does_not_react_to_friendly_caster_or_cantrip() -> None:
+    friendly = create_encounter(build_level5_wizard_config("counterspell-friendly-caster"))
+    friendly.units["F1"].position = GridPosition(x=5, y=5)
+    friendly.units["F2"].position = GridPosition(x=6, y=5)
+    friendly.units["F3"].position = GridPosition(x=7, y=5)
+    friendly_slots_before = friendly.units["F1"].resources.spell_slots_level_3
+
+    friendly_events = resolve_cast_spell_action(
+        friendly,
+        "F2",
+        {"kind": "cast_spell", "spell_id": "haste", "target_id": "F3"},
+    )
+
+    assert friendly_events[0].resolved_totals["spellId"] == "haste"
+    assert friendly.units["F1"].resources.spell_slots_level_3 == friendly_slots_before
+    assert any(isinstance(effect, HasteEffect) for effect in friendly.units["F3"].temporary_effects)
+
+    cantrip = create_encounter(build_level5_wizard_config("counterspell-cantrip"))
+    defeat_other_enemies(cantrip, "E1")
+    cantrip.units["F1"].position = GridPosition(x=5, y=5)
+    cantrip.units["E1"].position = GridPosition(x=10, y=5)
+    cantrip.units["E1"].class_id = "wizard"
+    cantrip.units["E1"].level = 5
+    cantrip.units["E1"].combat_cantrip_ids = ["fire_bolt"]
+    cantrip_slots_before = cantrip.units["F1"].resources.spell_slots_level_3
+
+    cantrip_events = resolve_cast_spell_action(
+        cantrip,
+        "E1",
+        {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "F1"},
+        overrides=AttackRollOverrides(attack_rolls=[1]),
+    )
+
+    assert cantrip_events[0].event_type == "attack"
+    assert cantrip_events[0].resolved_totals["spellId"] == "fire_bolt"
+    assert cantrip.units["F1"].resources.spell_slots_level_3 == cantrip_slots_before
+
+
+def test_counterspell_interrupts_monster_fireball_and_spends_limited_use_resource() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="counterspell-monster-fireball",
+            enemy_preset_id="adult_red_dragon_benchmark",
+            player_preset_id="martial_mixed_party",
+        )
+    )
+    defeat_other_enemies(encounter, "E1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=10, y=5)
+    encounter.units["F4"].position = GridPosition(x=9, y=5)
+    starting_hp = encounter.units["F1"].current_hp
+
+    events = resolve_special_action_events(
+        encounter,
+        "E1",
+        {"kind": "special_action", "action_id": "fireball", "target_id": "F1", "center_x": 10, "center_y": 5},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[6, 6, 6, 6, 6, 6, 6, 6]),
+    )
+
+    assert [event.event_type for event in events] == ["phase_change", "phase_change"]
+    assert events[0].actor_id == "F4"
+    assert events[0].resolved_totals["spellId"] == "counterspell"
+    assert events[0].resolved_totals["counteredSpellId"] == "fireball"
+    assert events[0].resolved_totals["counterspellSucceeded"] is True
+    assert events[1].actor_id == "E1"
+    assert events[1].resolved_totals["countered"] is True
+    assert events[1].resolved_totals["resourcePoolId"] == "fireball_uses"
+    assert events[1].resolved_totals["resourceRemaining"] == 0
+    assert encounter.units["E1"].resource_pools["fireball_uses"] == 0
+    assert encounter.units["F4"].resources.spell_slots_level_3 == 1
+    assert encounter.units["F4"].reaction_available is False
+    assert encounter.units["F1"].current_hp == starting_hp
+    assert all(event.event_type != "attack" for event in events)
 
 
 def test_haste_applies_buffs_spends_level3_slot_and_logs_event() -> None:
@@ -3582,6 +3855,33 @@ def test_burning_hands_rolls_saves_uses_one_damage_roll_and_can_hit_allies() -> 
     assert [event.damage_details.total_damage for event in attack_events] == [6, 6, 3]
     assert [event.resolved_totals["targetDroppedToZero"] for event in attack_events] == [False, True, False]
     assert all(event.raw_rolls["damageRolls"] == [3, 2, 1] for event in attack_events)
+
+
+def test_burning_hands_can_upcast_to_level2_for_four_damage_dice() -> None:
+    encounter = create_encounter(build_level3_wizard_config("wizard-burning-hands-level2-rules"))
+    defeat_other_enemies(encounter, "E1", "E2", "E3")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=6, y=5)
+    encounter.units["E2"].position = GridPosition(x=7, y=5)
+    encounter.units["E3"].position = GridPosition(x=7, y=6)
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {"kind": "cast_spell", "spell_id": "burning_hands", "spell_level": 2, "target_id": "E2"},
+        overrides=AttackRollOverrides(damage_rolls=[3, 2, 1, 4], save_rolls=[1, 1, 1]),
+    )
+
+    phase_event = spell_events[0]
+    attack_events = [event for event in spell_events if event.event_type == "attack"]
+    assert phase_event.resolved_totals["spellLevel"] == 2
+    assert phase_event.resolved_totals["spellSlotsLevel2Remaining"] == 1
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 4
+    assert encounter.units["F1"].resources.spell_slots_level_2 == 1
+    assert len(attack_events) == 3
+    assert all(event.resolved_totals["spellLevel"] == 2 for event in attack_events)
+    assert all(event.raw_rolls["damageRolls"] == [3, 2, 1, 4] for event in attack_events)
+    assert all(event.damage_details.total_damage == 10 for event in attack_events)
 
 
 def test_wizard_sample_trio_smoke_run_completes() -> None:

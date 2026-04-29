@@ -79,7 +79,29 @@ from backend.engine.rules.spatial import (
     get_attack_context,
     get_min_chebyshev_distance_between_footprints,
     get_unit_footprint,
+    has_line_of_sight_between_units,
 )
+from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
+
+
+def is_damaging_cantrip(spell) -> bool:
+    return spell.level == 0 and bool(spell.damage_dice) and spell.damage_type != "none"
+
+
+def get_cantrip_damage_scale(caster: UnitState) -> int:
+    level = caster.level or 1
+    if level >= 17:
+        return 4
+    if level >= 11:
+        return 3
+    if level >= 5:
+        return 2
+    return 1
+
+
+def get_scaled_spell_damage_dice(caster: UnitState, spell) -> list[DiceSpec]:
+    scale = get_cantrip_damage_scale(caster) if is_damaging_cantrip(spell) else 1
+    return [DiceSpec(count=dice.count * scale, sides=dice.sides) for dice in spell.damage_dice]
 
 
 def build_spell_attack_profile(
@@ -103,7 +125,7 @@ def build_spell_attack_profile(
         display_name=spell.display_name,
         attack_bonus=spell_attack_bonus,
         ability_modifier=ability_modifier if attack_bonus_override is not None else 0,
-        damage_dice=list(spell.damage_dice),
+        damage_dice=get_scaled_spell_damage_dice(attacker, spell),
         damage_modifier=spell.damage_modifier,
         damage_type=spell.damage_type,
         selectable_damage_types=list(spell.selectable_damage_types) or None,
@@ -116,6 +138,147 @@ def build_spell_attack_profile(
 def build_spell_skip_event(state: EncounterState, actor_id: str, spell_id: str, reason: str) -> CombatEvent:
     spell = get_spell_definition(spell_id)
     return build_skip_event(state, actor_id, f"{spell.display_name}: {reason}")
+
+
+def can_attempt_counterspell(
+    state: EncounterState,
+    counterspeller: UnitState,
+    triggering_caster_id: str,
+) -> bool:
+    if counterspeller.id == triggering_caster_id:
+        return False
+    if counterspeller.faction == state.units[triggering_caster_id].faction:
+        return False
+    if counterspeller.current_hp <= 0 or counterspeller.conditions.dead or counterspeller.conditions.unconscious:
+        return False
+    if not unit_can_take_reactions(counterspeller):
+        return False
+    if not unit_has_combat_spell(counterspeller, "counterspell"):
+        return False
+    if get_remaining_spell_slots(counterspeller, 3) <= 0:
+        return False
+    if not units_are_within_spell_range(state, counterspeller.id, triggering_caster_id, 60):
+        return False
+    return has_line_of_sight_between_units(state, counterspeller.id, triggering_caster_id)
+
+
+def find_counterspell_reactor(state: EncounterState, triggering_caster_id: str) -> UnitState | None:
+    if triggering_caster_id not in state.units:
+        return None
+    for unit in sorted(state.units.values(), key=lambda unit: unit_sort_key(unit.id)):
+        if can_attempt_counterspell(state, unit, triggering_caster_id):
+            return unit
+    return None
+
+
+def resolve_counterspell_reaction(
+    state: EncounterState,
+    triggering_caster_id: str,
+    triggering_spell_id: str,
+    triggering_spell_level: int,
+    overrides: AttackRollOverrides | None = None,
+) -> CombatEvent | None:
+    if triggering_spell_id == "counterspell" or triggering_spell_level <= 0:
+        return None
+    if triggering_caster_id not in state.units:
+        return None
+
+    counterspeller = find_counterspell_reactor(state, triggering_caster_id)
+    if counterspeller is None:
+        return None
+
+    counterspell = get_spell_definition("counterspell")
+    triggering_spell = get_spell_definition(triggering_spell_id)
+    if not spend_spell_slot(counterspeller, counterspell.level):
+        return None
+    counterspeller.reaction_available = False
+
+    check_roll: int | None = None
+    check_total: int | None = None
+    check_dc: int | None = None
+    check_ability = get_spellcasting_ability(counterspeller)
+    if triggering_spell_level <= counterspell.level:
+        succeeded = True
+    else:
+        roll_overrides = list(overrides.counterspell_rolls if overrides else [])
+        check_roll = pull_die(state, 20, roll_overrides.pop(0) if roll_overrides else None)
+        check_total = check_roll + get_ability_modifier(counterspeller, check_ability)
+        check_dc = 10 + triggering_spell_level
+        succeeded = check_total >= check_dc
+
+    raw_rolls: dict[str, object] = {}
+    resolved_totals: dict[str, object] = {
+        "spellId": "counterspell",
+        "spellLevel": counterspell.level,
+        "counteredSpellId": triggering_spell_id,
+        "counteredSpellLevel": triggering_spell_level,
+        "counteredCasterId": triggering_caster_id,
+        "counterspellCasterId": counterspeller.id,
+        "counterspellSucceeded": succeeded,
+        "spellSlotsLevel3Remaining": counterspeller.resources.spell_slots_level_3,
+    }
+    if check_roll is not None:
+        raw_rolls["counterspellCheckRolls"] = [check_roll]
+        resolved_totals.update(
+            {
+                "counterspellCheckAbility": check_ability,
+                "counterspellCheckModifier": get_ability_modifier(counterspeller, check_ability),
+                "counterspellCheckTotal": check_total,
+                "counterspellCheckDc": check_dc,
+            }
+        )
+
+    outcome = "interrupts" if succeeded else "fails to interrupt"
+    return CombatEvent(
+        **event_base(state, counterspeller.id),
+        target_ids=[triggering_caster_id],
+        event_type="phase_change",
+        raw_rolls=raw_rolls,
+        resolved_totals=resolved_totals,
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=[
+            f"{counterspeller.id} casts Counterspell and {outcome} {triggering_caster_id}'s {triggering_spell.display_name}."
+        ],
+        text_summary=f"{counterspeller.id} casts Counterspell against {triggering_caster_id}'s {triggering_spell.display_name}.",
+    )
+
+
+def build_countered_spell_event(
+    state: EncounterState,
+    caster_id: str,
+    spell_id: str,
+    spell_level: int,
+    counterspell_event: CombatEvent,
+    *,
+    resource_pool_id: str | None = None,
+    resource_remaining: int | None = None,
+) -> CombatEvent:
+    spell = get_spell_definition(spell_id)
+    resolved_totals: dict[str, object] = {
+        "spellId": spell_id,
+        "spellLevel": spell_level,
+        "countered": True,
+        "counterspellCasterId": counterspell_event.actor_id,
+        "counterspellSucceeded": True,
+    }
+    if resource_pool_id is not None:
+        resolved_totals["resourcePoolId"] = resource_pool_id
+        resolved_totals["resourceRemaining"] = resource_remaining
+    else:
+        resolved_totals[f"spellSlotsLevel{spell_level}Remaining"] = get_remaining_spell_slots(state.units[caster_id], spell_level)
+
+    return CombatEvent(
+        **event_base(state, caster_id),
+        target_ids=list(counterspell_event.target_ids),
+        event_type="phase_change",
+        raw_rolls={},
+        resolved_totals=resolved_totals,
+        movement_details=None,
+        damage_details=None,
+        condition_deltas=[f"{caster_id}'s {spell.display_name} is countered before it takes effect."],
+        text_summary=f"{caster_id}'s {spell.display_name} is countered.",
+    )
 
 
 def can_apply_potent_cantrip(attacker: UnitState, spell_id: str) -> bool:
@@ -446,6 +609,9 @@ def resolve_ranged_spell_attack(
         "shieldAcBonus": get_shield_ac_bonus(target),
         **(defense_reaction_data or {}),
     }
+    cantrip_scale = get_cantrip_damage_scale(attacker) if is_damaging_cantrip(spell) else 1
+    if cantrip_scale > 1:
+        resolved_totals["cantripScale"] = cantrip_scale
     if spell.level > 0:
         resolved_totals[f"spellSlotsLevel{spell.level}Remaining"] = get_remaining_spell_slots(attacker, spell.level)
     if selected_damage_type:
@@ -1195,9 +1361,10 @@ def resolve_multi_target_save_spell(
         return [build_spell_skip_event(state, attacker_id, spell_id, f"No level {spell.level} spell slots remain.")]
 
     damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    damage_dice = get_scaled_spell_damage_dice(attacker, spell)
     damage_rolls = [
         pull_die(state, dice.sides, damage_rolls_override.pop(0) if damage_rolls_override else None)
-        for dice in spell.damage_dice
+        for dice in damage_dice
         for _ in range(dice.count)
     ]
     full_damage = sum(damage_rolls) + spell.damage_modifier
@@ -1280,6 +1447,9 @@ def resolve_multi_target_save_spell(
             "distanceSquares": attack_context.distance_squares,
             "distanceFeet": attack_context.distance_feet,
         }
+        cantrip_scale = get_cantrip_damage_scale(attacker) if is_damaging_cantrip(spell) else 1
+        if cantrip_scale > 1:
+            resolved_totals["cantripScale"] = cantrip_scale
         if potent_cantrip_applied:
             resolved_totals["potentCantripApplied"] = True
             resolved_totals["potentCantripDamage"] = applied_damage
@@ -1337,9 +1507,12 @@ def resolve_burning_hands(
     attacker_id: str,
     target_id: str,
     overrides: AttackRollOverrides | None = None,
+    *,
+    spell_level: int | None = None,
 ) -> list[CombatEvent]:
     attacker = state.units[attacker_id]
     spell = get_spell_definition("burning_hands")
+    cast_level = max(spell.level, int(spell_level or spell.level))
 
     if not unit_has_combat_spell(attacker, "burning_hands"):
         return [build_spell_skip_event(state, attacker_id, "burning_hands", "is not prepared.")]
@@ -1349,13 +1522,17 @@ def resolve_burning_hands(
     targeting = choose_burning_hands_targeting(state, attacker_id, required_primary_target_id=target_id)
     if not targeting:
         return [build_spell_skip_event(state, attacker_id, "burning_hands", "has no legal cone from the current position.")]
-    if not attacker.resources.spend_pool("spell_slots_level_1", 1):
-        return [build_spell_skip_event(state, attacker_id, "burning_hands", "No level 1 spell slots remain.")]
+    if not spend_spell_slot(attacker, cast_level):
+        return [build_spell_skip_event(state, attacker_id, "burning_hands", f"No level {cast_level} spell slots remain.")]
 
     damage_rolls_override = list(overrides.damage_rolls if overrides else [])
     save_rolls_override = list(overrides.save_rolls if overrides else [])
     concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
-    damage_rolls = [pull_die(state, 6, damage_rolls_override.pop(0) if damage_rolls_override else None) for _ in range(3)]
+    damage_die_count = 3 + max(0, cast_level - spell.level)
+    damage_rolls = [
+        pull_die(state, 6, damage_rolls_override.pop(0) if damage_rolls_override else None)
+        for _ in range(damage_die_count)
+    ]
     full_damage = sum(damage_rolls)
     save_dc = get_spell_save_dc(attacker, "burning_hands")
 
@@ -1367,10 +1544,12 @@ def resolve_burning_hands(
             raw_rolls={},
             resolved_totals={
                 "spellId": "burning_hands",
-                "spellLevel": 1,
+                "spellLevel": cast_level,
                 "enemyTargetCount": len(targeting.enemy_target_ids),
                 "allyTargetCount": len(targeting.ally_target_ids),
                 "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+                "spellSlotsLevel2Remaining": attacker.resources.spell_slots_level_2,
+                f"spellSlotsLevel{cast_level}Remaining": get_remaining_spell_slots(attacker, cast_level),
             },
             movement_details=None,
             damage_details=None,
@@ -1414,12 +1593,15 @@ def resolve_burning_hands(
         raw_rolls = {"damageRolls": list(damage_rolls)}
         resolved_totals = {
             "spellId": "burning_hands",
-            "spellLevel": 1,
+            "spellLevel": cast_level,
             "saveAbility": spell.save_ability,
             "saveDc": save_dc,
             "saveSucceeded": save_success,
             "fullDamage": full_damage,
             "halfOnSuccess": spell.half_on_success,
+            "spellSlotsLevel1Remaining": attacker.resources.spell_slots_level_1,
+            "spellSlotsLevel2Remaining": attacker.resources.spell_slots_level_2,
+            f"spellSlotsLevel{cast_level}Remaining": get_remaining_spell_slots(attacker, cast_level),
         }
         attach_spell_target_outcome_fields(state, resolved_totals, resolved_target_id, target_was_alive_before_hit)
         attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)

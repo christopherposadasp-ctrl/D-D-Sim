@@ -26,6 +26,7 @@ class AttackRollOverrides:
         smite_damage_rolls: list[int] | None = None,
         divine_favor_damage_rolls: list[int] | None = None,
         concentration_rolls: list[int] | None = None,
+        counterspell_rolls: list[int] | None = None,
     ) -> None:
         self.attack_rolls = attack_rolls or []
         self.damage_rolls = damage_rolls or []
@@ -36,6 +37,7 @@ class AttackRollOverrides:
         self.smite_damage_rolls = smite_damage_rolls or []
         self.divine_favor_damage_rolls = divine_favor_damage_rolls or []
         self.concentration_rolls = concentration_rolls or []
+        self.counterspell_rolls = counterspell_rolls or []
 
 
 @dataclass

@@ -665,6 +665,7 @@ def test_smart_wizard_uses_fire_bolt_as_the_default_ranged_action() -> None:
         )
     )
     defeat_other_enemies(encounter, "G1")
+    encounter.units["G1"].current_hp = 20
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -681,6 +682,7 @@ def test_level2_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
         )
     )
     defeat_other_enemies(encounter, "G1")
+    encounter.units["G1"].current_hp = 20
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -698,7 +700,7 @@ def test_level3_evoker_wizard_does_not_select_mage_armor_in_normal_ai_turns() ->
     )
     keep_only_active_units(encounter, "F1", "G1")
     encounter.units["F1"].resources.spell_slots_level_2 = 0
-    encounter.units["G1"].current_hp = 7
+    encounter.units["G1"].current_hp = 20
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -1033,6 +1035,7 @@ def test_smart_wizard_uses_shocking_grasp_with_escape_when_pinned_by_one_enemy()
         )
     )
     defeat_other_enemies(encounter, "G1")
+    encounter.units["G1"].current_hp = 20
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -1050,6 +1053,7 @@ def test_dumb_wizard_uses_shocking_grasp_with_escape_when_pinned_by_one_enemy() 
         )
     )
     defeat_other_enemies(encounter, "G1")
+    encounter.units["G1"].current_hp = 20
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -1073,7 +1077,7 @@ def test_wizard_does_not_use_shocking_grasp_without_escape_value() -> None:
     assert decision.action["spell_id"] != "shocking_grasp"
 
 
-def test_smart_wizard_uses_baseline_fire_bolt_instead_of_magic_missile_for_bad_attack_rolls() -> None:
+def test_wizard_uses_later_magic_missile_for_average_kill_threshold() -> None:
     smart = create_encounter(
         EncounterConfig(
             seed="wizard-magic-missile-smart",
@@ -1105,8 +1109,10 @@ def test_smart_wizard_uses_baseline_fire_bolt_instead_of_magic_missile_for_bad_a
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert_spell_action_core(smart_decision.action, "fire_bolt", "G1")
-    assert_spell_action_core(dumb_decision.action, "fire_bolt", "G1")
+    assert_spell_action_core(smart_decision.action, "magic_missile", "G1")
+    assert smart_decision.action["spell_level"] == 1
+    assert_spell_action_core(dumb_decision.action, "magic_missile", "G1")
+    assert dumb_decision.action["spell_level"] == 1
 
 
 def test_wizard_magic_missile_split_is_smart_only_and_dumb_focus_fires() -> None:
@@ -1207,7 +1213,7 @@ def test_dumb_wizard_skips_magic_missile_multikill_openers() -> None:
     assert decision.action["target_ids"] == ["G1", "G1", "G1"]
 
 
-def test_level4_wizard_uses_level2_magic_missile_for_guaranteed_finisher() -> None:
+def test_level4_wizard_uses_level2_magic_missile_for_average_kill_threshold() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="wizard-magic-missile-level2-ai",
@@ -1217,13 +1223,65 @@ def test_level4_wizard_uses_level2_magic_missile_for_guaranteed_finisher() -> No
         )
     )
     keep_only_active_units(encounter, "F1", "G1")
-    encounter.units["G1"].current_hp = 8
+    encounter.units["G1"].current_hp = 14
+    encounter.units["F1"].prepared_combat_spell_ids = [
+        spell_id for spell_id in encounter.units["F1"].prepared_combat_spell_ids if spell_id != "scorching_ray"
+    ]
 
     decision = choose_turn_decision(encounter, "F1")
 
     assert_spell_action_core(decision.action, "magic_missile", "G1")
     assert decision.action["target_ids"] == ["G1", "G1", "G1", "G1"]
     assert decision.action["spell_level"] == 2
+
+
+def test_wizard_upcasts_burning_hands_when_cone_catches_three_enemies() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-burning-hands-upcast-three",
+            placements=build_trio_placements(
+                F1={"x": 5, "y": 5},
+                G1={"x": 6, "y": 5},
+                G2={"x": 7, "y": 5},
+                G3={"x": 7, "y": 6},
+            ),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3")
+    encounter.units["F1"].prepared_combat_spell_ids = [
+        spell_id
+        for spell_id in encounter.units["F1"].prepared_combat_spell_ids
+        if spell_id not in {"shatter", "scorching_ray"}
+    ]
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "burning_hands", "G1")
+    assert decision.action["spell_level"] == 2
+
+
+def test_wizard_keeps_burning_hands_level1_when_only_two_enemies_are_caught() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-burning-hands-level1-two",
+            placements=build_trio_placements(F1={"x": 5, "y": 5}, G1={"x": 6, "y": 5}, G2={"x": 7, "y": 5}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["F1"].prepared_combat_spell_ids = [
+        spell_id
+        for spell_id in encounter.units["F1"].prepared_combat_spell_ids
+        if spell_id not in {"shatter", "scorching_ray"}
+    ]
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "burning_hands", "G1")
+    assert decision.action["spell_level"] == 1
 
 
 def test_smart_wizard_uses_baseline_fire_bolt_instead_of_repositioning_for_burning_hands() -> None:
@@ -1241,6 +1299,8 @@ def test_smart_wizard_uses_baseline_fire_bolt_instead_of_repositioning_for_burni
         )
     )
     defeat_other_enemies(encounter, "G1", "G2")
+    encounter.units["G1"].current_hp = 11
+    encounter.units["G2"].current_hp = 11
 
     decision = choose_turn_decision(encounter, "F1")
 
@@ -1263,6 +1323,8 @@ def test_dumb_wizard_does_not_reposition_specifically_for_burning_hands() -> Non
         )
     )
     defeat_other_enemies(encounter, "G1", "G2")
+    encounter.units["G1"].current_hp = 11
+    encounter.units["G2"].current_hp = 11
 
     decision = choose_turn_decision(encounter, "F1")
 

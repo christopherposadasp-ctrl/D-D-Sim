@@ -895,7 +895,17 @@ def resolve_command(
     if not target_ids:
         return [create_skip_event(state, actor_id, "Command has no legal target.")]
 
+    counterspell_events = maybe_resolve_counterspell_for_monster_spell_action(
+        state,
+        actor_id,
+        command.action_id,
+        overrides=overrides,
+    )
+    if counterspell_events and bool(counterspell_events[-1].resolved_totals.get("countered")):
+        return counterspell_events
+
     events: list[CombatEvent] = []
+    events.extend(counterspell_events)
     if include_phase:
         events.append(
             add_unit_phase_event(
@@ -1089,6 +1099,16 @@ def resolve_monster_sphere_save_action(
         )
     if not targeting:
         return [create_skip_event(state, actor_id, f"{sphere.display_name} has no legal sphere.")]
+
+    counterspell_events = maybe_resolve_counterspell_for_monster_spell_action(
+        state,
+        actor_id,
+        sphere.action_id,
+        resource_pool_id=sphere.resource_pool_id,
+        overrides=overrides,
+    )
+    if counterspell_events and bool(counterspell_events[-1].resolved_totals.get("countered")):
+        return counterspell_events
 
     actor.resource_pools[sphere.resource_pool_id] = max(0, actor.resource_pools.get(sphere.resource_pool_id, 0) - 1)
     damage_rolls_override = list(overrides.damage_rolls if overrides else [])
@@ -1365,7 +1385,17 @@ def resolve_scorching_ray(
     if not preferred_target_ids:
         preferred_target_ids = [primary_target_id]
 
+    counterspell_events = maybe_resolve_counterspell_for_monster_spell_action(
+        state,
+        actor_id,
+        "scorching_ray",
+        overrides=overrides,
+    )
+    if counterspell_events and bool(counterspell_events[-1].resolved_totals.get("countered")):
+        return counterspell_events
+
     events: list[CombatEvent] = []
+    events.extend(counterspell_events)
     if include_phase:
         ray_count = get_spell_definition("scorching_ray").ray_count
         events.append(
@@ -3957,6 +3987,98 @@ def resolve_attack_action(
     return attack_events
 
 
+def get_cast_spell_action_level(action: dict[str, object], spell_id: str) -> int:
+    spell = get_spell_definition(spell_id)
+    return max(spell.level, int(action["spell_level"]) if "spell_level" in action else spell.level)
+
+
+def actor_can_trigger_counterspell_for_cast(state: EncounterState, actor_id: str, spell_id: str, spell_level: int) -> bool:
+    actor = state.units[actor_id]
+    if spell_level <= 0 or spell_id == "counterspell":
+        return False
+    if actor.current_hp <= 0 or actor.conditions.dead or actor.conditions.unconscious:
+        return False
+    if spell_id not in actor.prepared_combat_spell_ids:
+        return False
+    return actor.resources.get_pool(f"spell_slots_level_{spell_level}") > 0
+
+
+def maybe_resolve_counterspell_for_player_spell_cast(
+    state: EncounterState,
+    actor_id: str,
+    spell_id: str,
+    spell_level: int,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    if not actor_can_trigger_counterspell_for_cast(state, actor_id, spell_id, spell_level):
+        return []
+    counterspell_event = spell_resolvers.resolve_counterspell_reaction(
+        state,
+        actor_id,
+        spell_id,
+        spell_level,
+        overrides,
+    )
+    if counterspell_event is None:
+        return []
+    if not bool(counterspell_event.resolved_totals.get("counterspellSucceeded")):
+        return [counterspell_event]
+
+    state.units[actor_id].resources.spend_pool(f"spell_slots_level_{spell_level}", 1)
+    return [
+        counterspell_event,
+        spell_resolvers.build_countered_spell_event(state, actor_id, spell_id, spell_level, counterspell_event),
+    ]
+
+
+def maybe_resolve_counterspell_for_monster_spell_action(
+    state: EncounterState,
+    actor_id: str,
+    spell_id: str,
+    *,
+    resource_pool_id: str | None = None,
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    spell = get_spell_definition(spell_id)
+    spellcasting = get_monster_spellcasting_for_unit(state.units[actor_id])
+    if not spellcasting or spell.level <= 0 or spell_id == "counterspell":
+        return []
+    if spell_id not in spellcasting.at_will_spell_ids and spell_id not in spellcasting.limited_use_spell_resources:
+        return []
+    if resource_pool_id and state.units[actor_id].resource_pools.get(resource_pool_id, 0) <= 0:
+        return []
+
+    counterspell_event = spell_resolvers.resolve_counterspell_reaction(
+        state,
+        actor_id,
+        spell_id,
+        spell.level,
+        overrides,
+    )
+    if counterspell_event is None:
+        return []
+    if not bool(counterspell_event.resolved_totals.get("counterspellSucceeded")):
+        return [counterspell_event]
+
+    resource_remaining: int | None = None
+    if resource_pool_id:
+        actor = state.units[actor_id]
+        actor.resource_pools[resource_pool_id] = max(0, actor.resource_pools.get(resource_pool_id, 0) - 1)
+        resource_remaining = actor.resource_pools.get(resource_pool_id, 0)
+    return [
+        counterspell_event,
+        spell_resolvers.build_countered_spell_event(
+            state,
+            actor_id,
+            spell_id,
+            spell.level,
+            counterspell_event,
+            resource_pool_id=resource_pool_id,
+            resource_remaining=resource_remaining,
+        ),
+    ]
+
+
 def resolve_cast_spell_action(
     state: EncounterState,
     actor_id: str,
@@ -3965,8 +4087,25 @@ def resolve_cast_spell_action(
     overrides: AttackRollOverrides | None = None,
 ) -> list[CombatEvent]:
     spell = get_spell_definition(action["spell_id"])
+    cast_level = get_cast_spell_action_level(action, action["spell_id"])
+    counterspell_events = maybe_resolve_counterspell_for_player_spell_cast(
+        state,
+        actor_id,
+        action["spell_id"],
+        cast_level,
+        overrides,
+    )
+    if counterspell_events and bool(counterspell_events[-1].resolved_totals.get("countered")):
+        return counterspell_events
+
     if spell.targeting_mode == "self_cone_save":
-        spell_events = resolve_burning_hands(state, actor_id, action["target_id"], overrides)
+        spell_events = resolve_burning_hands(
+            state,
+            actor_id,
+            action["target_id"],
+            overrides,
+            spell_level=int(action["spell_level"]) if "spell_level" in action else None,
+        )
         follow_up_events: list[CombatEvent] = []
         for event in spell_events:
             if event.event_type != "attack":
@@ -3975,7 +4114,7 @@ def resolve_cast_spell_action(
                 if state.units[target_id].conditions.dead:
                     follow_up_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
                     follow_up_events.extend(release_swallowed_units_from_source(state, target_id))
-        return spell_events + follow_up_events
+        return counterspell_events + spell_events + follow_up_events
 
     if spell.targeting_mode == "multi_ray_spell_attack":
         target_ids = action.get("target_ids")
@@ -4001,7 +4140,7 @@ def resolve_cast_spell_action(
                     if state.units[target_id].conditions.dead:
                         spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
                         spell_events.extend(release_swallowed_units_from_source(state, target_id))
-        return spell_events
+        return counterspell_events + spell_events
 
     if spell.targeting_mode == "auto_hit_single_target" and action["spell_id"] == "magic_missile":
         target_ids = action.get("target_ids")
@@ -4027,13 +4166,13 @@ def resolve_cast_spell_action(
                 if state.units[target_id].conditions.dead:
                     spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
                     spell_events.extend(release_swallowed_units_from_source(state, target_id))
-        return spell_events
+        return counterspell_events + spell_events
 
     if spell.targeting_mode == "multi_ally_buff":
         target_ids = action.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [action["target_id"]]
-        return [
+        return counterspell_events + [
             resolve_bless(
                 state,
                 actor_id,
@@ -4046,10 +4185,10 @@ def resolve_cast_spell_action(
         target_ids = action.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [action["target_id"]]
-        return [resolve_aid(state, actor_id, [str(target_id) for target_id in target_ids])]
+        return counterspell_events + [resolve_aid(state, actor_id, [str(target_id) for target_id in target_ids])]
 
     if spell.targeting_mode == "single_target_save":
-        return resolve_single_target_save_spell(
+        return counterspell_events + resolve_single_target_save_spell(
             state,
             actor_id,
             action["target_id"],
@@ -4061,7 +4200,7 @@ def resolve_cast_spell_action(
         target_ids = action.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [action["target_id"]]
-        return resolve_multi_target_save_spell(
+        return counterspell_events + resolve_multi_target_save_spell(
             state,
             actor_id,
             [str(target_id) for target_id in target_ids],
@@ -4082,12 +4221,12 @@ def resolve_cast_spell_action(
             spell_events.extend(build_attack_reaction_phase_events(state, spell_event))
         spell_events.append(spell_event)
         if spell_event.event_type != "attack" or not bool(spell_event.resolved_totals.get("hit")):
-            return spell_events
+            return counterspell_events + spell_events
         poison_save_event = resolve_ray_of_sickness_poison_save(state, actor_id, spell_event, overrides)
         if poison_save_event:
             spell_events.append(poison_save_event)
         spell_events.extend(maybe_resolve_sentinel_guardian_follow_up(state, spell_event))
-        return spell_events
+        return counterspell_events + spell_events
 
     spell_event = resolve_cast_spell(
         state,
@@ -4108,7 +4247,7 @@ def resolve_cast_spell_action(
             spell_events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
             spell_events.extend(release_swallowed_units_from_source(state, target_id))
 
-    return spell_events
+    return counterspell_events + spell_events
 
 
 def create_movement_event(

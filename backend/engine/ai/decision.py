@@ -3219,10 +3219,16 @@ def build_burning_hands_decision(
             item[1].primary_target_id,
         ),
     )[0]
+    spell_level = 2 if len(best_targeting.enemy_target_ids) >= 3 and actor.resources.spell_slots_level_2 > 0 else 1
 
     return TurnDecision(
         pre_action_movement=MovementPlan(path=best_square.path, mode="move") if best_square.distance > 0 else None,
-        action={"kind": "cast_spell", "spell_id": "burning_hands", "target_id": best_targeting.primary_target_id},
+        action={
+            "kind": "cast_spell",
+            "spell_id": "burning_hands",
+            "target_id": best_targeting.primary_target_id,
+            "spell_level": spell_level,
+        },
     )
 
 
@@ -3597,9 +3603,9 @@ def sharpshooter_allows_adjacent_ranged_pressure(
 
 
 def choose_magic_missile_spell_level(actor: UnitState, target_hp: int) -> int | None:
-    if actor.resources.spell_slots_level_1 > 0 and target_hp <= 6:
+    if actor.resources.spell_slots_level_1 > 0 and target_hp <= 10:
         return 1
-    if actor.resources.spell_slots_level_2 > 0 and target_hp <= 8:
+    if actor.resources.spell_slots_level_2 > 0 and target_hp <= 14:
         return 2
     return None
 

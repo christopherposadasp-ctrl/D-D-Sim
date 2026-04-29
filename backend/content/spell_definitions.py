@@ -38,6 +38,7 @@ class SpellDefinition:
         "ranged_ally_haste_buff",
         "point_sphere_save",
         "multi_target_command",
+        "reaction_counterspell",
         "metadata_only",
     ]
     range_feet: int
@@ -434,9 +435,9 @@ SPELL_DEFINITIONS: dict[str, SpellDefinition] = {
         display_name="Counterspell",
         level=3,
         school="abjuration",
-        description="Reaction spell recorded as Wizard level 5 metadata only in combat.",
+        description="Reaction spell that interrupts a hostile leveled spell cast within 60 feet.",
         timing="reaction",
-        targeting_mode="metadata_only",
+        targeting_mode="reaction_counterspell",
         range_feet=60,
         damage_dice=(),
         damage_modifier=0,

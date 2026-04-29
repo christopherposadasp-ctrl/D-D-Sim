@@ -174,6 +174,7 @@ def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
         "magicMissileProjectiles": 0,
         "magicMissileSplitCasts": 0,
         "burningHandsCasts": 0,
+        "burningHandsCastsByLevel": Counter(),
         "burningHandsTargetDamageEvents": 0,
         "burningHandsDamage": 0,
         "burningHandsEnemyTargets": [],
@@ -526,6 +527,7 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
                 metrics["wizardSpellCasts"][spell_id_text] += 1
                 record_wizard_spell_slot_spend(metrics, spell_id_text, resolved_totals)
                 add_metric(metrics, "burningHandsCasts")
+                metrics["burningHandsCastsByLevel"][str(int(resolved_totals.get("spellLevel") or 1))] += 1
                 enemy_targets = int(resolved_totals.get("enemyTargetCount") or 0)
                 ally_targets = int(resolved_totals.get("allyTargetCount") or 0)
                 metrics["burningHandsEnemyTargets"].append(enemy_targets)
@@ -1081,6 +1083,7 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
             "magicMissileSplitCasts": metrics["magicMissileSplitCasts"],
             "magicMissileSplitCastRate": percent(metrics["magicMissileSplitCasts"], metrics["magicMissileCasts"]),
             "burningHandsCasts": burning_hands_casts,
+            "burningHandsCastsByLevel": dict(sorted(metrics["burningHandsCastsByLevel"].items())),
             "burningHandsTargetDamageEvents": metrics["burningHandsTargetDamageEvents"],
             "burningHandsDamage": metrics["burningHandsDamage"],
             "burningHandsAverageDamagePerCast": round(
@@ -1787,7 +1790,7 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"(levels {overall['magicMissileCastsByLevel']}), "
             f"Scorching splits {overall['scorchingRaySplitCasts']}/{overall['scorchingRayCasts']}, "
             f"Shatter avg targets {overall['shatterAverageTargets']}, "
-            f"Burning Hands avg enemies {overall['burningHandsAverageEnemyTargets']}, "
+            f"Burning Hands levels {overall['burningHandsCastsByLevel']} avg enemies {overall['burningHandsAverageEnemyTargets']}, "
             f"friendly-fire casts {overall['burningHandsFriendlyFireCasts']}, "
             f"Shield prevented {overall['shieldPreventedHits']} hit(s), "
             f"failed {overall['shieldFailedToStopHits']}"
@@ -2153,6 +2156,7 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
         f"| Shatter average targets | {overall['shatterAverageTargets']} |",
         f"| Shatter failed save rate | {overall['shatterFailedSaveRate']}% |",
         f"| Burning Hands casts | {overall['burningHandsCasts']} |",
+        f"| Burning Hands casts by level | {overall['burningHandsCastsByLevel']} |",
         f"| Burning Hands average enemy targets | {overall['burningHandsAverageEnemyTargets']} |",
         f"| Burning Hands average ally targets | {overall['burningHandsAverageAllyTargets']} |",
         f"| Burning Hands friendly-fire casts | {overall['burningHandsFriendlyFireCasts']} |",

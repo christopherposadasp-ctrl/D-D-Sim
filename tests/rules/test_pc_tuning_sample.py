@@ -218,6 +218,7 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     metrics["magicMissileProjectiles"] = 3
     metrics["magicMissileSplitCasts"] = 0
     metrics["burningHandsCasts"] = 1
+    metrics["burningHandsCastsByLevel"].update({"2": 1})
     metrics["burningHandsTargetDamageEvents"] = 3
     metrics["burningHandsDamage"] = 16
     metrics["burningHandsEnemyTargets"].append(3)
@@ -265,6 +266,7 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     assert summary["magicMissileProjectilesPerCast"] == 3
     assert summary["magicMissileSplitCastRate"] == 0.0
     assert summary["burningHandsAverageEnemyTargets"] == 3
+    assert summary["burningHandsCastsByLevel"] == {"2": 1}
     assert summary["burningHandsAverageAllyTargets"] == 0
     assert summary["burningHandsFriendlyFireRate"] == 0.0
     assert summary["burningHandsFailedSaveRate"] == 66.7

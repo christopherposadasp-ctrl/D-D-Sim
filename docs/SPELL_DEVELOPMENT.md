@@ -20,6 +20,8 @@ Spell work should stay:
 - Turn sequencing and action dispatch stay in `backend/engine/combat/engine.py`.
 
 Do not put new spell-specific mechanics in `combat_rules.py` unless they must become a generic combat primitive.
+Reaction spells can require a small dispatch hook in `engine.py`, but their eligibility checks, resource spend,
+and event payload construction should still live in `spell_resolvers.py`.
 
 ## Typical Spell Slice
 
