@@ -396,7 +396,7 @@ def test_test_signal_review_flags_low_signal_patterns_without_removing_tests() -
     assert by_name["test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout"][
         "assertionProfile"
     ]["helperAssertionCalls"] > 0
-    assert by_name["test_monster_benchmark_batches_report_health_metrics"]["candidateAction"] == "demote_to_checkpoint"
+    assert by_name["test_monster_benchmark_batches_report_health_metrics"]["candidateAction"] == "checkpoint_slow_coverage"
     assert by_name["test_python_run_cases_match_python_goldens"]["candidateAction"] == "keep"
     assert "Do not remove" in review["decisionRule"]
 
@@ -486,7 +486,7 @@ def test_test_coverage_ledger_can_include_measured_monster_benchmark_runtime(tmp
                 "label": "Benchmark batch health metrics",
                 "nodeId": "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_batches_report_health_metrics",
                 "signal": "aggregate sanity",
-                "candidateAction": "demote_to_checkpoint",
+                "candidateAction": "checkpoint_slow_coverage",
                 "status": "pass",
                 "elapsedSeconds": 12.5,
             }

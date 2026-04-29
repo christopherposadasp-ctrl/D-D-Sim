@@ -842,14 +842,14 @@ MONSTER_BENCHMARK_RUNTIME_SLICES: tuple[dict[str, str], ...] = (
         "label": "Benchmark batch health metrics",
         "nodeId": "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_batches_report_health_metrics",
         "signal": "aggregate per-DM-mode health summary sanity for generated benchmark presets",
-        "candidateAction": "demote_to_checkpoint",
+        "candidateAction": "checkpoint_slow_coverage",
     },
     {
         "sliceId": "benchmark_primary_behavior_slow",
         "label": "Benchmark primary behavior replays",
         "nodeId": "tests/rules/test_monster_benchmarks.py::test_monster_benchmark_replays_show_primary_behavior_across_dm_modes",
         "signal": "primary monster behavior and weapon ordering across DM modes",
-        "candidateAction": "checkpoint_or_release",
+        "candidateAction": "checkpoint_slow_coverage",
     },
 )
 
@@ -1271,12 +1271,12 @@ def classify_test_signal(
         category = "benchmark_health"
         if "batches_report_health_metrics" in lowered:
             signal_level = "medium"
-            candidate_action = "demote_to_checkpoint"
-            rationale = "This slow benchmark-health sanity check is useful but better suited to checkpoint/release evidence."
+            candidate_action = "checkpoint_slow_coverage"
+            rationale = "This slow benchmark-health sanity check is already checkpoint/release scoped."
         elif "replays_show_primary_behavior" in lowered:
             signal_level = "medium"
-            candidate_action = "demote_to_checkpoint"
-            rationale = "Slow primary-behavior benchmark replays are valuable but not default-gate material."
+            candidate_action = "checkpoint_slow_coverage"
+            rationale = "Slow primary-behavior benchmark replays are already checkpoint/release scoped."
         else:
             category = "content_shape"
             rationale = "Non-slow benchmark preset structure checks guard generated benchmark fixture validity."
@@ -1314,7 +1314,7 @@ def classify_test_signal(
         rationale = "Content shape tests catch registry and fixture drift before behavior gates consume the content."
 
     if not selected_by_not_slow and candidate_action == "keep":
-        candidate_action = "demote_to_checkpoint"
+        candidate_action = "checkpoint_slow_coverage"
         signal_level = "medium"
         rationale = f"{rationale} It is already outside the non-slow gate and should remain checkpoint/release scoped."
 
@@ -1351,7 +1351,7 @@ def build_test_signal_review(full_collection: PytestCollection, not_slow_collect
     candidate_rows = [
         row
         for row in rows
-        if row["candidateAction"] in {"rewrite_behavior_level", "demote_to_checkpoint", "merge_with_related_test", "candidate_remove_after_canary"}
+        if row["candidateAction"] in {"rewrite_behavior_level", "merge_with_related_test", "candidate_remove_after_canary"}
     ]
     candidate_rows.sort(key=lambda row: (row["candidateAction"], row["path"], row["testName"]))
     return {
