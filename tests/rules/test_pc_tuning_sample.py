@@ -163,6 +163,7 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     metrics["endingSpellSlots"].extend([0, 1])
     metrics["endingSpellSlotsLevel1"].extend([0, 1])
     metrics["endingSpellSlotsLevel2"].extend([0, 0])
+    metrics["endingSpellSlotsLevel3"].extend([0, 0])
     metrics["endingWizardHp"].extend([8, 0])
     metrics["wizardDownAtEnd"] = 1
     metrics["wizardIncomingAttackHits"] = 3
@@ -177,6 +178,8 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
             "fire_bolt": 2,
             "magic_missile": 1,
             "burning_hands": 1,
+            "scorching_ray": 2,
+            "shatter": 1,
             "shield": 1,
             "shocking_grasp": 1,
         }
@@ -186,13 +189,18 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
             "fire_bolt": 12,
             "magic_missile": 9,
             "burning_hands": 16,
+            "scorching_ray": 18,
+            "shatter": 11,
             "shocking_grasp": 5,
         }
     )
-    metrics["wizardSpellSlotsSpent"] = 3
-    metrics["wizardSpellSlotsSpentBySpell"].update({"magic_missile": 1, "burning_hands": 1, "shield": 1})
+    metrics["wizardSpellSlotsSpent"] = 7
+    metrics["wizardSpellSlotsSpentBySpell"].update(
+        {"magic_missile": 1, "burning_hands": 1, "scorching_ray": 2, "shatter": 1, "shield": 1}
+    )
+    metrics["wizardSpellSlotsSpentByLevel"].update({"1": 3, "2": 3, "3": 1})
     metrics["wizardCantripDamage"] = 17
-    metrics["wizardSlottedSpellDamage"] = 25
+    metrics["wizardSlottedSpellDamage"] = 54
     metrics["wizardAttackModeCounts"].update({"normal": 4, "disadvantage": 1})
     metrics["fireBoltCasts"] = 2
     metrics["fireBoltHits"] = 1
@@ -206,6 +214,9 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     metrics["magicMissileDamage"] = 9
     metrics["magicMissileKillSecures"] = 1
     metrics["magicMissileOverkillDamage"] = 2
+    metrics["magicMissileCastsByLevel"].update({"1": 1})
+    metrics["magicMissileProjectiles"] = 3
+    metrics["magicMissileSplitCasts"] = 0
     metrics["burningHandsCasts"] = 1
     metrics["burningHandsTargetDamageEvents"] = 3
     metrics["burningHandsDamage"] = 16
@@ -213,6 +224,19 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     metrics["burningHandsAllyTargets"].append(0)
     metrics["burningHandsSaveSuccesses"] = 1
     metrics["burningHandsSaveFailures"] = 2
+    metrics["scorchingRayCasts"] = 2
+    metrics["scorchingRayRayAttacks"] = 6
+    metrics["scorchingRayHits"] = 4
+    metrics["scorchingRayDamage"] = 18
+    metrics["scorchingRayKillSecures"] = 2
+    metrics["scorchingRaySplitCasts"] = 1
+    metrics["scorchingRayUniqueTargets"].extend([1, 2])
+    metrics["shatterCasts"] = 1
+    metrics["shatterTargetDamageEvents"] = 2
+    metrics["shatterDamage"] = 11
+    metrics["shatterTargetCounts"].append(2)
+    metrics["shatterSaveSuccesses"] = 1
+    metrics["shatterSaveFailures"] = 1
     metrics["shieldCasts"] = 1
     metrics["shieldPreventedHits"] = 1
     metrics["daggerFallbackAttacks"] = 1
@@ -230,15 +254,31 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     assert summary["wizardSpellCasts"]["fire_bolt"] == 2
     assert summary["wizardSpellCasts"]["magic_missile"] == 1
     assert summary["wizardSpellDamage"]["burning_hands"] == 16
-    assert summary["wizardSpellSlotsSpentPerRun"] == 1.5
-    assert summary["wizardDamagePerSlotSpent"] == 8.33
+    assert summary["wizardSpellSlotsSpentPerRun"] == 3.5
+    assert summary["wizardSpellSlotsSpentByLevel"] == {"1": 3, "2": 3, "3": 1}
+    assert summary["wizardDamagePerSlotSpent"] == 7.71
     assert summary["fireBoltHitRate"] == 50.0
     assert summary["shockingGraspRetreatRate"] == 100.0
     assert summary["magicMissileKillSecureRate"] == 100.0
+    assert summary["magicMissileCastsByLevel"] == {"1": 1}
+    assert summary["magicMissileProjectiles"] == 3
+    assert summary["magicMissileProjectilesPerCast"] == 3
+    assert summary["magicMissileSplitCastRate"] == 0.0
     assert summary["burningHandsAverageEnemyTargets"] == 3
     assert summary["burningHandsAverageAllyTargets"] == 0
     assert summary["burningHandsFriendlyFireRate"] == 0.0
     assert summary["burningHandsFailedSaveRate"] == 66.7
+    assert summary["scorchingRayCasts"] == 2
+    assert summary["scorchingRayRayAttacks"] == 6
+    assert summary["scorchingRayHitRate"] == 66.7
+    assert summary["scorchingRayAverageDamagePerCast"] == 9
+    assert summary["scorchingRayRayAttacksPerCast"] == 3
+    assert summary["scorchingRayKillSecureRate"] == 33.3
+    assert summary["scorchingRaySplitCastRate"] == 50.0
+    assert summary["scorchingRayUniqueTargetDistribution"] == {"1": 1, "2": 1}
+    assert summary["shatterCasts"] == 1
+    assert summary["shatterAverageTargets"] == 2
+    assert summary["shatterFailedSaveRate"] == 50.0
     assert summary["shieldPreventedHitRate"] == 100.0
     assert summary["daggerFallbackHitRate"] == 0.0
     assert summary["averageWizardMovementSquaresPerRun"] == 2.5
