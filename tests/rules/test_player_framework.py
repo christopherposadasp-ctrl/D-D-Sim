@@ -244,6 +244,7 @@ def test_wizard_sample_build_uses_spellcasting_registry_metadata() -> None:
             seed="wizard-registry-metadata",
             placements=build_trio_placements(),
             player_preset_id="wizard_sample_trio",
+            player_behavior="dumb",
         )
     )
     wizard = encounter.units["F1"]
@@ -273,6 +274,7 @@ def test_wizard_level2_sample_build_uses_expanded_spellcasting_metadata() -> Non
             seed="wizard-level2-registry-metadata",
             placements=build_trio_placements(),
             player_preset_id="wizard_level2_sample_trio",
+            player_behavior="dumb",
         )
     )
     wizard = encounter.units["F1"]
@@ -303,6 +305,7 @@ def test_wizard_level3_evoker_sample_build_uses_subclass_and_level2_slot_metadat
             seed="wizard-level3-evoker-registry-metadata",
             placements=build_trio_placements(),
             player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="dumb",
         )
     )
     wizard = encounter.units["F1"]
@@ -340,6 +343,7 @@ def test_wizard_level4_evoker_sample_build_uses_int_asi_and_extra_level2_slot() 
             seed="wizard-level4-evoker-registry-metadata",
             placements=build_trio_placements(),
             player_preset_id="wizard_level4_evoker_sample_trio",
+            player_behavior="dumb",
         )
     )
     wizard = encounter.units["F1"]
@@ -377,6 +381,7 @@ def test_wizard_level5_evoker_sample_build_adds_level3_slot_metadata() -> None:
             seed="wizard-level5-evoker-registry-metadata",
             placements=build_trio_placements(),
             player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="dumb",
         )
     )
     wizard = encounter.units["F1"]
@@ -813,7 +818,8 @@ def test_default_player_preset_loads_fighter_paladin_rogue_and_wizard() -> None:
     assert encounter.units["F4"].loadout_id == "wizard_level5_evoker_sample_build"
     assert encounter.units["F4"].level == 5
     assert encounter.units["F4"].class_id == "wizard"
-    assert encounter.units["F4"].resources.spell_slots_level_1 == 4
+    assert encounter.units["F4"].ac == 15
+    assert encounter.units["F4"].resources.spell_slots_level_1 == 3
     assert encounter.units["F4"].resources.spell_slots_level_2 == 3
     assert encounter.units["F4"].resources.spell_slots_level_3 == 2
     assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 10}

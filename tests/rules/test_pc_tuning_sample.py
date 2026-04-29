@@ -508,6 +508,12 @@ def test_pc_tuning_sample_party_sampler_records_current_party_profiles() -> None
     for profile in run_pc_tuning_sample.PARTY_PROFILE_ORDER:
         assert party_breakdown[profile]["missing"] is False
         assert party_breakdown[profile]["overall"]["runs"] == 1
+    compact_lines = run_pc_tuning_sample.format_compact_party_console_lines(
+        party_breakdown,
+        "wizard",
+        include_selected=True,
+    )
+    assert all("down " in line for line in compact_lines)
 
 
 def test_pc_tuning_sample_compact_party_console_lines_skip_selected_until_detail() -> None:

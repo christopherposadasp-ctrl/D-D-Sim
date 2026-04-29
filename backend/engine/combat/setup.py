@@ -177,6 +177,32 @@ def get_player_unit_ids(units: dict[str, UnitState]) -> list[str]:
     )
 
 
+def maybe_apply_smart_precombat_mage_armor(unit: UnitState, player_behavior: ResolvedPlayerBehavior) -> None:
+    if player_behavior != "smart":
+        return
+    if unit.class_id != "wizard":
+        return
+    if "mage_armor" not in unit.prepared_combat_spell_ids:
+        return
+    if unit.current_hp <= 0 or unit.conditions.dead or unit.conditions.unconscious:
+        return
+
+    mage_armor_ac = 13 + unit.ability_mods.dex
+    if mage_armor_ac <= unit.ac:
+        return
+    if unit.resources.spend_pool("spell_slots_level_1", 1):
+        unit.ac = mage_armor_ac
+
+
+def apply_smart_precombat_buffs(
+    units: dict[str, UnitState],
+    player_unit_ids: list[str],
+    player_behavior: ResolvedPlayerBehavior,
+) -> None:
+    for player_unit_id in player_unit_ids:
+        maybe_apply_smart_precombat_mage_armor(units[player_unit_id], player_behavior)
+
+
 def sort_initiative_entries(entries: list[dict[str, object]]) -> list[dict[str, object]]:
     return sorted(
         entries,
@@ -197,6 +223,7 @@ def create_encounter(config: EncounterConfig) -> EncounterState:
     terrain_features = resolve_terrain_features(config)
     player_unit_ids = get_player_unit_ids(units)
     enemy_unit_ids = get_enemy_unit_ids(units)
+    apply_smart_precombat_buffs(units, player_unit_ids, player_behavior)
     rng_state = normalize_seed(seed)
     initiative_entries: list[dict[str, object]] = []
     initiative_scores: dict[str, int] = {}

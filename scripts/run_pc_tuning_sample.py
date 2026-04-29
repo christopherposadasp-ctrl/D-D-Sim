@@ -389,6 +389,14 @@ def record_wizard_spell_slot_spend(metrics: dict[str, Any], spell_id: str, resol
     metrics["wizardSpellSlotsSpentByLevel"][str(spell_level)] += 1
 
 
+def has_precombat_mage_armor(wizard: Any) -> bool:
+    if "mage_armor" not in wizard.prepared_combat_spell_ids:
+        return False
+    level_1_slot_pool = int(wizard.resource_pools.get("spell_slots_level_1", wizard.resources.spell_slots_level_1))
+    mage_armor_ac = 13 + wizard.ability_mods.dex
+    return wizard.ac >= mage_armor_ac and wizard.resources.spell_slots_level_1 < level_1_slot_pool
+
+
 def record_wizard_attack(metrics: dict[str, Any], event: Any) -> None:
     resolved_totals = event.resolved_totals or {}
     raw_rolls = event.raw_rolls or {}
@@ -474,6 +482,8 @@ def record_wizard_attack(metrics: dict[str, Any], event: Any) -> None:
 def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_id: str) -> None:
     final_state = result.final_state
     wizard = final_state.units[unit_id]
+    initial_state = result.replay_frames[0].state if result.replay_frames else final_state
+    initial_wizard = initial_state.units[unit_id]
     metrics["runs"] += 1
     metrics["wins"][final_state.winner] += 1
     metrics["rounds"].append(final_state.round)
@@ -487,6 +497,9 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
     metrics["endingWizardHp"].append(max(0, wizard.current_hp))
     if wizard.current_hp <= 0 or wizard.conditions.dead or wizard.conditions.unconscious:
         add_metric(metrics, "wizardDownAtEnd")
+    if has_precombat_mage_armor(initial_wizard):
+        add_metric(metrics, "mageArmorCasts")
+        add_metric(metrics, "mageArmorAcChanged")
 
     pending_shocking_grasp_retreat = False
 
@@ -1788,6 +1801,7 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"Shatter {overall['shatterCasts']} cast(s), "
             f"Burning Hands {overall['burningHandsCasts']} cast(s), "
             f"Shocking Grasp {overall['shockingGraspCasts']} cast(s), "
+            f"Mage Armor {overall['mageArmorCasts']} cast(s), "
             f"Shield {overall['shieldCasts']} cast(s)"
         ),
         (
@@ -1900,6 +1914,7 @@ def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
     if profile == "fighter":
         return (
             f"- fighter ({unit_id}): dmg/run {overall['averageFighterDamagePerRun']}, "
+            f"down {overall['fighterDownAtEndRate']}%, "
             f"attacks/run {overall['fighterAttacksPerRun']}, hit {overall['fighterHitRate']}%, "
             f"SD spent/run {overall['superiorityDiceSpentPerRun']}, "
             f"ending SD {overall['averageEndingSuperiorityDice']}, "
@@ -1908,6 +1923,7 @@ def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
     if profile == "paladin":
         return (
             f"- paladin ({unit_id}): Bless {overall['blessCasts']}, "
+            f"down {overall['paladinDownAtEndRate']}%, "
             f"LoH {overall['layOnHandsUses']} ({overall['layOnHandsDownedPickups']} pickups), "
             f"Cure {overall['cureWoundsUses']}, Smite {overall['divineSmites']}, "
             f"Nature {overall['naturesWrathUses']}, Sentinel {overall['sentinelGuardianTriggers']}, "
@@ -1916,6 +1932,7 @@ def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
     if profile == "rogue":
         return (
             f"- rogue ({unit_id}): dmg/run {overall['averageRogueDamagePerRun']}, "
+            f"down {overall['rogueDownAtEndRate']}%, "
             f"attacks {overall['rogueAttacks']}, hit {overall['rogueHitRate']}%, "
             f"Sneak {overall['sneakAttackApplications']}, Steady {overall['steadyAimUses']}, "
             f"Hide {overall['hideSuccesses']}/{overall['hideAttempts']}, "

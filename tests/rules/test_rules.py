@@ -197,7 +197,7 @@ def build_level5_paladin_config(seed: str, *, player_behavior: str = "smart") ->
     )
 
 
-def build_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+def build_wizard_config(seed: str, *, player_behavior: str = "dumb") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
         enemy_preset_id="goblin_screen",
@@ -206,7 +206,7 @@ def build_wizard_config(seed: str, *, player_behavior: str = "smart") -> Encount
     )
 
 
-def build_level3_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+def build_level3_wizard_config(seed: str, *, player_behavior: str = "dumb") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
         enemy_preset_id="goblin_screen",
@@ -215,7 +215,7 @@ def build_level3_wizard_config(seed: str, *, player_behavior: str = "smart") -> 
     )
 
 
-def build_level4_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+def build_level4_wizard_config(seed: str, *, player_behavior: str = "dumb") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
         enemy_preset_id="goblin_screen",
@@ -224,7 +224,7 @@ def build_level4_wizard_config(seed: str, *, player_behavior: str = "smart") -> 
     )
 
 
-def build_level5_wizard_config(seed: str, *, player_behavior: str = "smart") -> EncounterConfig:
+def build_level5_wizard_config(seed: str, *, player_behavior: str = "dumb") -> EncounterConfig:
     return EncounterConfig(
         seed=seed,
         enemy_preset_id="goblin_screen",
@@ -1776,7 +1776,7 @@ def test_level2_wizard_has_third_level1_slot_for_leveled_spells() -> None:
             seed="wizard-level2-third-slot",
             enemy_preset_id="goblin_screen",
             player_preset_id="wizard_level2_sample_trio",
-            player_behavior="smart",
+            player_behavior="dumb",
         )
     )
     defeat_other_enemies(encounter, "E1")
@@ -2125,6 +2125,36 @@ def test_mage_armor_raises_ac_spends_slot_and_logs_event() -> None:
     assert "Mage Armor" in mage_armor_event.text_summary
     assert encounter.units["F1"].ac == 15
     assert encounter.units["F1"].resources.spell_slots_level_1 == 1
+
+
+def test_smart_default_party_wizard_starts_with_precombat_mage_armor() -> None:
+    smart = create_encounter(
+        EncounterConfig(
+            seed="wizard-precombat-mage-armor-smart",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="martial_mixed_party",
+            player_behavior="smart",
+        )
+    )
+    dumb = create_encounter(
+        EncounterConfig(
+            seed="wizard-precombat-mage-armor-smart",
+            enemy_preset_id="goblin_screen",
+            player_preset_id="martial_mixed_party",
+            player_behavior="dumb",
+        )
+    )
+
+    smart_wizard = smart.units["F4"]
+    dumb_wizard = dumb.units["F4"]
+
+    assert smart_wizard.class_id == "wizard"
+    assert smart_wizard.ac == 15
+    assert smart_wizard.resources.spell_slots_level_1 == 3
+    assert dumb_wizard.ac == 12
+    assert dumb_wizard.resources.spell_slots_level_1 == 4
+    assert smart_wizard.initiative_score == dumb_wizard.initiative_score
+    assert smart.combat_log == []
 
 
 def test_mage_armor_does_not_lower_existing_ac() -> None:
@@ -3759,7 +3789,7 @@ def test_smart_shield_skips_unstoppable_hits_but_dumb_still_overuses() -> None:
             target_id="F1",
             weapon_id="scimitar",
             savage_attacker_available=False,
-            overrides=AttackRollOverrides(attack_rolls=[15], damage_rolls=[4]),
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[4]),
         ),
     )
     dumb_attack, _ = resolve_attack(
@@ -3774,7 +3804,7 @@ def test_smart_shield_skips_unstoppable_hits_but_dumb_still_overuses() -> None:
     )
 
     assert "defenseReaction" not in smart_attack.resolved_totals
-    assert smart.units["F1"].resources.spell_slots_level_1 == 2
+    assert smart.units["F1"].resources.spell_slots_level_1 == 1
     assert all(effect.kind != "shield" for effect in smart.units["F1"].temporary_effects)
 
     assert dumb_attack.resolved_totals["defenseReaction"] == "shield"
@@ -3801,7 +3831,7 @@ def test_smart_shield_does_not_fire_on_natural_twenty() -> None:
 
     assert attack_event.resolved_totals["critical"] is True
     assert "defenseReaction" not in attack_event.resolved_totals
-    assert encounter.units["F1"].resources.spell_slots_level_1 == 2
+    assert encounter.units["F1"].resources.spell_slots_level_1 == 1
 
 
 def test_magic_missile_triggers_shield_and_is_fully_blocked() -> None:
