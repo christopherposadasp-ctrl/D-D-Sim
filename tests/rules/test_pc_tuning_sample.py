@@ -258,6 +258,9 @@ def test_pc_tuning_sample_summary_tracks_wizard_spell_quality_and_survival() -> 
     assert summary["wizardSpellSlotsSpentPerRun"] == 3.5
     assert summary["wizardSpellSlotsSpentByLevel"] == {"1": 3, "2": 3, "3": 1}
     assert summary["wizardDamagePerSlotSpent"] == 7.71
+    assert summary["runsWithUnusedSpellSlotsLevel1"] == 1
+    assert summary["runsWithUnusedSpellSlotsLevel2"] == 0
+    assert summary["runsWithUnusedSpellSlotsLevel3"] == 0
     assert summary["fireBoltHitRate"] == 50.0
     assert summary["shockingGraspRetreatRate"] == 100.0
     assert summary["magicMissileKillSecureRate"] == 100.0

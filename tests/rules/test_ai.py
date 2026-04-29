@@ -4,6 +4,7 @@ from backend.content.enemies import create_enemy, get_monster_definition_for_uni
 from backend.engine import create_encounter, run_encounter
 from backend.engine.ai.decision import (
     TurnDecision,
+    build_scorching_ray_target_ids,
     can_intentionally_provoke_opportunity_attack,
     choose_turn_decision,
     finalize_player_turn_decision,
@@ -956,6 +957,35 @@ def test_smart_evoker_wizard_can_start_scorching_ray_on_low_hp_target_when_rays_
 
     assert_spell_action_core(decision.action, "scorching_ray", "G1")
     assert decision.action["target_ids"] == ["G1", "G2", "G2"]
+
+
+def test_smart_scorching_ray_split_uses_seventy_five_percent_kill_threshold() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-scorching-ray-seventy-five-percent-split",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 8, "y": 5}),
+            player_preset_id="wizard_level3_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2")
+    encounter.units["G1"].current_hp = 11
+    encounter.units["G1"].max_hp = 11
+    encounter.units["G1"].ac = 5
+    encounter.units["G2"].current_hp = 2
+    encounter.units["G2"].max_hp = 2
+    encounter.units["G2"].ac = 5
+
+    target_ids = build_scorching_ray_target_ids(
+        encounter,
+        encounter.units["F1"],
+        encounter.units["G1"],
+        [encounter.units["G1"], encounter.units["G2"]],
+        encounter.units["F1"].position,
+        None,
+    )
+
+    assert target_ids == ["G1", "G1", "G2"]
 
 
 def test_smart_evoker_wizard_skips_scorching_ray_when_low_hp_target_would_absorb_all_rays() -> None:

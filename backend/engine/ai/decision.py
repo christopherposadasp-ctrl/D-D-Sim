@@ -3444,7 +3444,7 @@ def build_scorching_ray_target_ids(
         if remaining_rays <= 0:
             break
         for rays_needed in range(1, remaining_rays + 1):
-            if get_scorching_ray_kill_probability(hit_probability, target.current_hp, rays_needed) >= 0.8:
+            if get_scorching_ray_kill_probability(hit_probability, target.current_hp, rays_needed) >= 0.75:
                 target_ids.extend([target.id for _ in range(rays_needed)])
                 remaining_rays -= rays_needed
                 committed_target_ids.add(target.id)

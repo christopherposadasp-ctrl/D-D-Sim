@@ -975,6 +975,12 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         "endingSpellSlotsLevel3Distribution": distribution(ending_level_3_slots),
         "runsWithUnusedSpellSlots": sum(value > 0 for value in ending_slots),
         "runsWithUnusedSpellSlotsRate": percent(sum(value > 0 for value in ending_slots), runs),
+        "runsWithUnusedSpellSlotsLevel1": sum(value > 0 for value in ending_level_1_slots),
+        "runsWithUnusedSpellSlotsLevel1Rate": percent(sum(value > 0 for value in ending_level_1_slots), runs),
+        "runsWithUnusedSpellSlotsLevel2": sum(value > 0 for value in ending_level_2_slots),
+        "runsWithUnusedSpellSlotsLevel2Rate": percent(sum(value > 0 for value in ending_level_2_slots), runs),
+        "runsWithUnusedSpellSlotsLevel3": sum(value > 0 for value in ending_level_3_slots),
+        "runsWithUnusedSpellSlotsLevel3Rate": percent(sum(value > 0 for value in ending_level_3_slots), runs),
         "averageEndingSpellSlots": average(ending_slots),
         "averageEndingSpellSlotsLevel1": average(ending_level_1_slots),
         "averageEndingSpellSlotsLevel2": average(ending_level_2_slots),
@@ -1785,7 +1791,14 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"Shield {overall['shieldCasts']} cast(s)"
         ),
         (
-            f"- quality: unused slots {overall['runsWithUnusedSpellSlots']}/{overall['runs']}, "
+            f"- quality: unused slots {overall['runsWithUnusedSpellSlots']}/{overall['runs']} "
+            f"(L1 {overall['runsWithUnusedSpellSlotsLevel1']}, "
+            f"L2 {overall['runsWithUnusedSpellSlotsLevel2']}, "
+            f"L3 {overall['runsWithUnusedSpellSlotsLevel3']}), "
+            f"avg ending L1/L2/L3 "
+            f"{overall['averageEndingSpellSlotsLevel1']}/"
+            f"{overall['averageEndingSpellSlotsLevel2']}/"
+            f"{overall['averageEndingSpellSlotsLevel3']}, "
             f"Magic Missile kills {overall['magicMissileKillSecures']} "
             f"(levels {overall['magicMissileCastsByLevel']}), "
             f"Scorching splits {overall['scorchingRaySplitCasts']}/{overall['scorchingRayCasts']}, "
@@ -2140,6 +2153,12 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
         f"| Spell slots spent | {overall['wizardSpellSlotsSpent']} |",
         f"| Damage per slot spent | {overall['wizardDamagePerSlotSpent']} |",
         f"| Runs with unused spell slots | {overall['runsWithUnusedSpellSlots']} |",
+        f"| Runs with unused 1st-level slots | {overall['runsWithUnusedSpellSlotsLevel1']} |",
+        f"| Runs with unused 2nd-level slots | {overall['runsWithUnusedSpellSlotsLevel2']} |",
+        f"| Runs with unused 3rd-level slots | {overall['runsWithUnusedSpellSlotsLevel3']} |",
+        f"| Average ending 1st-level slots | {overall['averageEndingSpellSlotsLevel1']} |",
+        f"| Average ending 2nd-level slots | {overall['averageEndingSpellSlotsLevel2']} |",
+        f"| Average ending 3rd-level slots | {overall['averageEndingSpellSlotsLevel3']} |",
         f"| Fire Bolt hits/casts | {overall['fireBoltHits']} / {overall['fireBoltCasts']} |",
         f"| Magic Missile casts | {overall['magicMissileCasts']} |",
         f"| Magic Missile casts by level | {overall['magicMissileCastsByLevel']} |",
@@ -2190,15 +2209,16 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
             "",
             "## Scenarios",
             "",
-            "| Scenario | Win Rate | Avg Rounds | Damage/Run | Slots Spent | Unused Slots | Shield | Magic Missile | Scorching | SR Split | Shatter | Shatter Targets | Burning Hands | BH Enemies | BH Allies | Down Rate |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Scenario | Win Rate | Avg Rounds | Damage/Run | Slots Spent | Unused Slots | Unused L1 | Unused L2 | Shield | Magic Missile | Scorching | SR Split | Shatter | Shatter Targets | Burning Hands | BH Enemies | BH Allies | Down Rate |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in payload["scenarios"]:
         lines.append(
             f"| `{row['scenarioId']}` | {row['playerWinRate']}% | {row['averageRounds']} | "
             f"{row['averageWizardDamagePerRun']} | {row['wizardSpellSlotsSpent']} | "
-            f"{row['runsWithUnusedSpellSlots']} | {row['shieldCasts']} | {row['magicMissileCasts']} | "
+            f"{row['runsWithUnusedSpellSlots']} | {row['runsWithUnusedSpellSlotsLevel1']} | "
+            f"{row['runsWithUnusedSpellSlotsLevel2']} | {row['shieldCasts']} | {row['magicMissileCasts']} | "
             f"{row['scorchingRayCasts']} | {row['scorchingRaySplitCasts']} | "
             f"{row['shatterCasts']} | {row['shatterAverageTargets']} | "
             f"{row['burningHandsCasts']} | {row['burningHandsAverageEnemyTargets']} | "
