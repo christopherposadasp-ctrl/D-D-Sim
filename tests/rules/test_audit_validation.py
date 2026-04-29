@@ -168,6 +168,60 @@ def test_heavy_smoke_measurement_is_skipped_without_include_heavy() -> None:
     assert "Heavy command skipped" in rows[0]["smokeMeasurement"]["reason"]
 
 
+def test_coverage_review_assigns_risk_areas_to_every_known_mechanism() -> None:
+    rows = [
+        {
+            "task": mechanism.task,
+            "recommendedGateLevel": mechanism.recommended_gate_level,
+            "inferredRuntimeClass": "unknown",
+            "overlapCandidates": list(mechanism.overlap_candidates),
+        }
+        for mechanism in audit_validation.MECHANISMS
+    ]
+
+    review = audit_validation.build_coverage_review(rows)
+
+    assert {entry["task"] for entry in review["mechanisms"]} == {mechanism.task for mechanism in audit_validation.MECHANISMS}
+    assert all(entry["riskAreas"] for entry in review["mechanisms"])
+    assert any(entry["id"] == "nightly.scenario_quick" for entry in review["trimCandidates"])
+    assert any(entry["id"] == "nightly.code_health" for entry in review["trimCandidates"])
+
+
+def test_coverage_review_classifies_nightly_steps_individually() -> None:
+    review = audit_validation.build_coverage_review([])
+    nightly_by_id = {entry["stepId"]: entry for entry in review["nightlySteps"]}
+
+    assert set(nightly_by_id) == {
+        "branch_gate",
+        "check_fast",
+        "npm_test",
+        "npm_build",
+        "scenario_quick",
+        "code_health",
+        "rotating_slice",
+    }
+    assert nightly_by_id["scenario_quick"]["candidateAction"] == "trim_candidate"
+    assert nightly_by_id["check_fast"]["candidateAction"] == "measure_more"
+
+
+def test_coverage_review_keeps_legacy_class_audits_forensic_and_non_required() -> None:
+    rows = [
+        {
+            "task": "fighter-audit-quick",
+            "recommendedGateLevel": "forensic",
+            "inferredRuntimeClass": "fast",
+            "overlapCandidates": ["class-audit-slices"],
+        }
+    ]
+
+    review = audit_validation.build_coverage_review(rows)
+    entry = review["mechanisms"][0]
+
+    assert entry["recommendedPlacement"] == "forensic"
+    assert entry["overlapClassification"] == "duplicative"
+    assert entry["candidateAction"] == "demote_candidate"
+
+
 def test_report_payload_and_markdown_include_recommendations(tmp_path: Path) -> None:
     rows = [
         {
@@ -219,3 +273,46 @@ def test_report_payload_and_markdown_include_recommendations(tmp_path: Path) -> 
     assert "Audit Validation Report" in markdown
     assert "Needs later validation" in markdown
     assert "Canonical Class Evidence" in markdown
+
+
+def test_explain_coverage_adds_advisory_review_without_changing_status(tmp_path: Path) -> None:
+    rows = [
+        {
+            "task": "check-fast",
+            "status": "pass",
+            "recommendedGateLevel": "inner_loop",
+            "validationConfidence": "high",
+            "latestStatus": "unreported",
+            "inferredRuntimeClass": "unmeasured",
+            "reportArtifacts": [],
+            "overlapCandidates": ["nightly-audit"],
+        }
+    ]
+    coverage = {
+        "wrapperTasks": ["check-fast"],
+        "runbookDirectEquivalentTasks": ["check-fast"],
+        "missingFromWrapper": [],
+        "missingRunbookDirectEquivalent": [],
+        "undocumentedWrapperTasks": [],
+        "unknownWrapperTasks": [],
+    }
+
+    payload = audit_validation.build_report_payload(
+        context={"generatedAt": "2026-04-28T00:00:00+00:00", "branch": "integration", "commit": "abc123", "gitStatusShort": []},
+        rows=rows,
+        command_coverage=coverage,
+        measure_smoke=False,
+        include_heavy=False,
+        timeout_seconds=300,
+        stale_days=14,
+        json_path=tmp_path / "audit_validation.json",
+        markdown_path=tmp_path / "audit_validation.md",
+        explain_coverage=True,
+    )
+    markdown = audit_validation.format_report_markdown(payload)
+
+    assert payload["overallStatus"] == "pass"
+    assert "coverageReview" in payload
+    assert payload["coverageReview"]["mechanisms"][0]["riskAreas"]
+    assert "Coverage Redundancy Review" in markdown
+    assert "| command | risks | overlap | placement | action | reason |" in markdown

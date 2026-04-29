@@ -26,6 +26,9 @@ from scripts.audit_common import (
 Status = Literal["pass", "warn", "fail", "skipped"]
 GateLevel = Literal["inner_loop", "checkpoint", "release", "forensic", "unknown"]
 Confidence = Literal["high", "medium", "low"]
+OverlapClassification = Literal["unique", "overlapping", "duplicative", "unclear"]
+RecommendedPlacement = Literal["default", "nightly", "checkpoint", "release", "forensic"]
+CandidateAction = Literal["keep", "measure_more", "trim_candidate", "demote_candidate"]
 
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "audit_validation"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "audit_validation_latest.json"
@@ -340,11 +343,207 @@ MECHANISMS: tuple[AuditMechanism, ...] = (
     ),
 )
 
+COVERAGE_RULES: dict[str, dict[str, Any]] = {
+    "check-fast": {
+        "riskAreas": ("lint", "backend behavior", "frontend contract"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "default",
+        "candidateAction": "keep",
+        "reason": "This remains the fastest broad backend gate and is intentionally duplicated by heavier release checks.",
+    },
+    "daily-housekeeping": {
+        "riskAreas": ("docs/runbook consistency", "report freshness"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "default",
+        "candidateAction": "keep",
+        "reason": "It catches lightweight repo hygiene issues before broader clarity checks.",
+    },
+    "party-validation": {
+        "riskAreas": ("backend behavior", "class behavior"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "default",
+        "candidateAction": "keep",
+        "reason": "It is the focused current-party gate and is cheaper than scenario or class matrix audits.",
+    },
+    "pc-tuning-sample": {
+        "riskAreas": ("class behavior", "forensic traces"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "forensic",
+        "candidateAction": "keep",
+        "reason": "It provides event-level tuning evidence, not release-gate coverage.",
+    },
+    "audit-quick": {
+        "riskAreas": ("scenario behavior",),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "keep",
+        "reason": "It remains the canonical checkpoint path for broad scenario behavior.",
+    },
+    "audit-full": {
+        "riskAreas": ("scenario behavior",),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "release",
+        "candidateAction": "keep",
+        "reason": "It is a release-scale scenario pass and should stay outside nightly/default gates.",
+    },
+    "audit-health": {
+        "riskAreas": ("code health", "benchmark diagnostics"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "keep",
+        "reason": "It is the source of truth for code-health and diagnostic benchmark evidence.",
+    },
+    "audit-validation": {
+        "riskAreas": ("report freshness", "docs/runbook consistency"),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "keep",
+        "reason": "It uniquely validates the audit system itself.",
+    },
+    "fighter-audit-quick": {
+        "riskAreas": ("class behavior", "forensic traces"),
+        "overlapClassification": "duplicative",
+        "recommendedPlacement": "forensic",
+        "candidateAction": "demote_candidate",
+        "reason": "Segmented class slices are the canonical Fighter evidence route.",
+    },
+    "fighter-audit-full": {
+        "riskAreas": ("class behavior", "forensic traces"),
+        "overlapClassification": "duplicative",
+        "recommendedPlacement": "forensic",
+        "candidateAction": "demote_candidate",
+        "reason": "Full monolithic Fighter audit is superseded by timeout-safe segmented evidence.",
+    },
+    "barbarian-audit-quick": {
+        "riskAreas": ("class behavior", "forensic traces"),
+        "overlapClassification": "duplicative",
+        "recommendedPlacement": "forensic",
+        "candidateAction": "demote_candidate",
+        "reason": "Segmented class slices are the canonical Barbarian evidence route.",
+    },
+    "barbarian-audit-full": {
+        "riskAreas": ("class behavior", "forensic traces"),
+        "overlapClassification": "duplicative",
+        "recommendedPlacement": "forensic",
+        "candidateAction": "demote_candidate",
+        "reason": "Full monolithic Barbarian audit is superseded by timeout-safe segmented evidence.",
+    },
+    "rogue-audit-quick": {
+        "riskAreas": ("Rogue behavior",),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "keep",
+        "reason": "It uniquely covers the dedicated ranged level-2 Rogue audit surface.",
+    },
+    "rogue-audit-full": {
+        "riskAreas": ("Rogue behavior",),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "release",
+        "candidateAction": "keep",
+        "reason": "It is the release-scale extension of the dedicated Rogue audit.",
+    },
+    "class-audit-slices": {
+        "riskAreas": ("class behavior",),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "keep",
+        "reason": "It is the canonical timeout-safe Fighter/Barbarian matrix route.",
+    },
+    "behavior-diagnostics": {
+        "riskAreas": ("forensic traces",),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "forensic",
+        "candidateAction": "keep",
+        "reason": "It captures paired smart-vs-dumb evidence that gate audits do not preserve.",
+    },
+    "nightly-audit": {
+        "riskAreas": ("lint", "backend behavior", "frontend contract", "scenario behavior", "class behavior", "code health"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "nightly",
+        "candidateAction": "measure_more",
+        "reason": "It is intentionally layered, but its internal step costs need timing evidence before trimming.",
+    },
+    "pass2-stability": {
+        "riskAreas": ("determinism", "async reliability"),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "release",
+        "candidateAction": "keep",
+        "reason": "It uniquely gates replay, batch, and async stability.",
+    },
+    "pass3-clarity": {
+        "riskAreas": ("docs/runbook consistency", "report freshness"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "keep",
+        "reason": "It is the canonical clarity gate even though it overlaps lightweight housekeeping.",
+    },
+}
+
+NIGHTLY_STEP_COVERAGE: tuple[dict[str, Any], ...] = (
+    {
+        "stepId": "branch_gate",
+        "riskAreas": ("report freshness",),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "nightly",
+        "candidateAction": "keep",
+        "reason": "Branch validation is cheap and prevents auditing the wrong integration target.",
+    },
+    {
+        "stepId": "check_fast",
+        "riskAreas": ("lint", "backend behavior", "frontend contract"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "nightly",
+        "candidateAction": "measure_more",
+        "reason": "It duplicates the default gate; trim only if step timing proves it dominates nightly runtime.",
+    },
+    {
+        "stepId": "npm_test",
+        "riskAreas": ("frontend contract",),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "nightly",
+        "candidateAction": "keep",
+        "reason": "Frontend test execution is not covered by backend-only gates.",
+    },
+    {
+        "stepId": "npm_build",
+        "riskAreas": ("frontend contract",),
+        "overlapClassification": "unique",
+        "recommendedPlacement": "nightly",
+        "candidateAction": "keep",
+        "reason": "The production build catches TypeScript/Vite failures that test-only checks can miss.",
+    },
+    {
+        "stepId": "scenario_quick",
+        "riskAreas": ("scenario behavior",),
+        "overlapClassification": "duplicative",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "trim_candidate",
+        "reason": "Nightly currently duplicates checkpoint audit-quick breadth and is a candidate for a narrower smoke.",
+    },
+    {
+        "stepId": "code_health",
+        "riskAreas": ("code health", "benchmark diagnostics"),
+        "overlapClassification": "duplicative",
+        "recommendedPlacement": "checkpoint",
+        "candidateAction": "trim_candidate",
+        "reason": "Benchmark-heavy code-health evidence belongs in checkpoint audit-health unless nightly needs fresh diagnostics.",
+    },
+    {
+        "stepId": "rotating_slice",
+        "riskAreas": ("class behavior", "scenario behavior"),
+        "overlapClassification": "overlapping",
+        "recommendedPlacement": "nightly",
+        "candidateAction": "keep",
+        "reason": "A bounded rotating slice gives nightly targeted drift coverage without running a full release matrix.",
+    },
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate the current audit and testing mechanisms without trimming them.")
     parser.add_argument("--measure-smoke", action="store_true", help="Run bounded smoke measurements for cheap/scoped commands.")
     parser.add_argument("--include-heavy", action="store_true", help="Allow heavy release commands to run in smoke measurement mode.")
+    parser.add_argument("--explain-coverage", action="store_true", help="Add an advisory redundancy map without changing audit behavior.")
     parser.add_argument("--timeout-seconds", type=int, default=300, help="Per-command timeout for smoke measurements.")
     parser.add_argument("--stale-days", type=int, default=DEFAULT_STALE_DAYS, help="Report age that lowers confidence.")
     parser.add_argument("--json-path", type=Path, default=DEFAULT_JSON_PATH)
@@ -756,6 +955,62 @@ def build_command_coverage(wrapper_tasks: list[str], runbook_mappings: dict[str,
     }
 
 
+def build_coverage_mechanism_review(row: dict[str, Any]) -> dict[str, Any]:
+    rule = COVERAGE_RULES.get(
+        row["task"],
+        {
+            "riskAreas": ("unknown",),
+            "overlapClassification": "unclear",
+            "recommendedPlacement": "checkpoint",
+            "candidateAction": "measure_more",
+            "reason": "No explicit coverage rule is defined for this mechanism.",
+        },
+    )
+    return {
+        "task": row["task"],
+        "riskAreas": list(rule["riskAreas"]),
+        "overlapClassification": rule["overlapClassification"],
+        "recommendedPlacement": rule["recommendedPlacement"],
+        "candidateAction": rule["candidateAction"],
+        "reason": rule["reason"],
+        "overlapCandidates": list(row.get("overlapCandidates", [])),
+        "currentGateLevel": row.get("recommendedGateLevel", "unknown"),
+        "runtimeClass": row.get("inferredRuntimeClass", "unknown"),
+    }
+
+
+def build_coverage_review(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    mechanism_reviews = [build_coverage_mechanism_review(row) for row in rows]
+    nightly_steps = [dict(step) for step in NIGHTLY_STEP_COVERAGE]
+    candidates = [
+        {
+            "id": f"mechanism.{entry['task']}",
+            "candidateAction": entry["candidateAction"],
+            "reason": entry["reason"],
+        }
+        for entry in mechanism_reviews
+        if entry["candidateAction"] in {"trim_candidate", "demote_candidate", "measure_more"}
+    ]
+    candidates.extend(
+        {
+            "id": f"nightly.{entry['stepId']}",
+            "candidateAction": entry["candidateAction"],
+            "reason": entry["reason"],
+        }
+        for entry in nightly_steps
+        if entry["candidateAction"] in {"trim_candidate", "demote_candidate", "measure_more"}
+    )
+    return {
+        "mechanisms": mechanism_reviews,
+        "nightlySteps": nightly_steps,
+        "trimCandidates": candidates,
+        "decisionSummary": (
+            "Do not trim yet; first low-risk candidates are nightly.code_health and nightly.scenario_quick, "
+            "while nightly.check_fast needs step timing before any change."
+        ),
+    }
+
+
 def determine_overall_status(rows: list[dict[str, Any]], command_coverage: dict[str, Any]) -> Status:
     if command_coverage["missingFromWrapper"]:
         return "fail"
@@ -777,6 +1032,7 @@ def build_report_payload(
     stale_days: int,
     json_path: Path,
     markdown_path: Path,
+    explain_coverage: bool = False,
 ) -> dict[str, Any]:
     recommendations = build_recommendations(rows)
     status_counts = {
@@ -791,6 +1047,7 @@ def build_report_payload(
         "config": {
             "measureSmoke": measure_smoke,
             "includeHeavy": include_heavy,
+            "explainCoverage": explain_coverage,
             "timeoutSeconds": timeout_seconds,
             "staleDays": stale_days,
         },
@@ -805,6 +1062,8 @@ def build_report_payload(
         "recommendations": recommendations,
         "rows": rows,
     }
+    if explain_coverage:
+        payload["coverageReview"] = build_coverage_review(rows)
     return payload
 
 
@@ -854,6 +1113,46 @@ def format_report_markdown(payload: dict[str, Any]) -> str:
             f"`{row['validationConfidence']}` | `{row['latestStatus']}` | "
             f"`{row['inferredRuntimeClass']}` | {report_paths or '`none`'} |"
         )
+
+    coverage_review = payload.get("coverageReview")
+    if isinstance(coverage_review, dict):
+        lines.extend(
+            [
+                "",
+                "## Coverage Redundancy Review",
+                "",
+                f"- Decision summary: {coverage_review['decisionSummary']}",
+                "",
+                "| command | risks | overlap | placement | action | reason |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for entry in coverage_review["mechanisms"]:
+            risks = ", ".join(entry["riskAreas"])
+            lines.append(
+                f"| `{entry['task']}` | {risks} | `{entry['overlapClassification']}` | "
+                f"`{entry['recommendedPlacement']}` | `{entry['candidateAction']}` | {entry['reason']} |"
+            )
+
+        lines.extend(
+            [
+                "",
+                "## Nightly Step Review",
+                "",
+                "| step | risks | overlap | placement | action | reason |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for entry in coverage_review["nightlySteps"]:
+            risks = ", ".join(entry["riskAreas"])
+            lines.append(
+                f"| `{entry['stepId']}` | {risks} | `{entry['overlapClassification']}` | "
+                f"`{entry['recommendedPlacement']}` | `{entry['candidateAction']}` | {entry['reason']} |"
+            )
+
+        lines.extend(["", "## Candidate Trims", ""])
+        for entry in coverage_review["trimCandidates"]:
+            lines.append(f"- `{entry['id']}`: `{entry['candidateAction']}` - {entry['reason']}")
 
     coverage = payload["commandCoverage"]
     lines.extend(
@@ -905,6 +1204,7 @@ def main() -> None:
         stale_days=args.stale_days,
         json_path=args.json_path,
         markdown_path=args.markdown_path,
+        explain_coverage=args.explain_coverage,
     )
     write_json_report(args.json_path, payload)
     write_text_report(args.markdown_path, format_report_markdown(payload))
