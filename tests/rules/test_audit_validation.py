@@ -333,6 +333,35 @@ def test_coverage_map_distinguishes_intentional_overlap_from_duplicates_and_cana
     assert by_group["monster_benchmarks_vs_audit_health"]["overlapPolicy"] == "needs_canary"
     assert decisions["segmented_vs_monolithic_class_audits"]["recommendedAction"] == "demote_candidate"
     assert decisions["monster_benchmarks_vs_audit_health"]["recommendedAction"] == "canary_validate"
+    assert "different failure modes" in decisions["monster_benchmarks_vs_audit_health"]["rationale"]
+
+
+def test_monster_benchmark_canary_validation_maps_expected_capabilities() -> None:
+    validation = audit_validation.build_monster_benchmark_canary_validation()
+    canaries = {entry["canaryId"]: entry for entry in validation["canaries"]}
+    mechanisms = {entry["mechanismId"]: entry for entry in validation["mechanisms"]}
+
+    assert validation["target"] == "monster_benchmarks_vs_audit_health"
+    assert validation["preliminaryDecision"]["status"] == "do_not_trim_yet"
+    assert set(canaries) == {
+        "benchmark_preset_layout_broken",
+        "monster_primary_behavior_drift",
+        "benchmark_batch_health_invalid",
+        "code_health_benchmark_runtime_regression",
+        "root_artifact_or_large_module_regression",
+    }
+    assert set(mechanisms) == {
+        "pytest_non_slow",
+        "pytest_slow_monster_benchmarks",
+        "audit_health",
+        "nightly_code_health",
+    }
+    assert canaries["benchmark_preset_layout_broken"]["expectedCatchers"] == ["pytest_non_slow"]
+    assert "audit_health" in canaries["benchmark_preset_layout_broken"]["expectedNonCatchers"]
+    assert canaries["code_health_benchmark_runtime_regression"]["expectedCatchers"] == [
+        "audit_health",
+        "nightly_code_health",
+    ]
 
 
 def test_parse_pytest_collection_extracts_selected_and_deselected_counts() -> None:
@@ -440,10 +469,13 @@ def test_test_coverage_ledger_records_inventory_and_canary_specs(tmp_path: Path)
     assert payload["auditMechanisms"][0]["riskAreas"] == ["determinism", "async reliability"]
     assert payload["coverageMapSummary"]["riskAreaCount"] == 17
     assert payload["coverageMapSummary"]["needsCanary"] == ["monster_benchmarks_vs_audit_health"]
+    assert payload["canaryValidation"]["preliminaryDecision"]["status"] == "do_not_trim_yet"
     assert "Test Coverage Ledger" in markdown
     assert "Audit Mechanisms" in markdown
     assert "Risk Ownership" in markdown
     assert "Overlap Groups" in markdown
+    assert "Canary Validation: Monster Benchmarks vs Audit Health" in markdown
+    assert "Capability Table" in markdown
     assert "Canary Specs" in markdown
 
 

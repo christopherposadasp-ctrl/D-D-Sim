@@ -767,6 +767,67 @@ OVERLAP_GROUPS: tuple[dict[str, Any], ...] = (
     },
 )
 
+MONSTER_BENCHMARK_CANARY_MECHANISMS: tuple[dict[str, str], ...] = (
+    {
+        "mechanismId": "pytest_non_slow",
+        "label": "pytest non-slow",
+        "scope": "Non-slow benchmark preset layout and first-step smoke coverage in test_monster_benchmarks.py.",
+    },
+    {
+        "mechanismId": "pytest_slow_monster_benchmarks",
+        "label": "pytest slow monster benchmarks",
+        "scope": "Slow benchmark batch health summaries and primary behavior replay coverage.",
+    },
+    {
+        "mechanismId": "audit_health",
+        "label": "audit-health",
+        "scope": "Code-health report, root artifacts, large modules, and live-scenario throughput benchmarks.",
+    },
+    {
+        "mechanismId": "nightly_code_health",
+        "label": "nightly code_health",
+        "scope": "Nightly execution of audit-health while the full nightly remains under budget.",
+    },
+)
+
+MONSTER_BENCHMARK_CANARIES: tuple[dict[str, Any], ...] = (
+    {
+        "canaryId": "benchmark_preset_layout_broken",
+        "description": "Break generated benchmark preset placement, ids, terrain assumptions, or first-step validity.",
+        "expectedCatchers": ("pytest_non_slow",),
+        "expectedNonCatchers": ("audit_health", "nightly_code_health"),
+        "rationale": "The non-slow benchmark test directly builds every generated benchmark preset; audit-health never touches them.",
+    },
+    {
+        "canaryId": "monster_primary_behavior_drift",
+        "description": "Change benchmark replay behavior so a monster no longer uses its expected primary opening or fallback pattern.",
+        "expectedCatchers": ("pytest_slow_monster_benchmarks",),
+        "expectedNonCatchers": ("audit_health", "nightly_code_health"),
+        "rationale": "Primary behavior expectations live in slow monster benchmark replays, not in throughput-only code-health benchmarks.",
+    },
+    {
+        "canaryId": "benchmark_batch_health_invalid",
+        "description": "Break combined monster benchmark batch summaries or behavior-mode health metrics.",
+        "expectedCatchers": ("pytest_slow_monster_benchmarks",),
+        "expectedNonCatchers": ("audit_health", "nightly_code_health"),
+        "rationale": "Slow benchmark batch tests validate per-behavior summary shape for generated benchmark presets.",
+    },
+    {
+        "canaryId": "code_health_benchmark_runtime_regression",
+        "description": "Regress live-scenario throughput enough to show up in the code-health benchmark report.",
+        "expectedCatchers": ("audit_health", "nightly_code_health"),
+        "expectedNonCatchers": ("pytest_non_slow", "pytest_slow_monster_benchmarks"),
+        "rationale": "Runtime diagnostics are owned by audit-health; monster benchmark tests assert validity, not throughput budgets.",
+    },
+    {
+        "canaryId": "root_artifact_or_large_module_regression",
+        "description": "Introduce root report artifacts or large-module/code-health drift.",
+        "expectedCatchers": ("audit_health", "nightly_code_health"),
+        "expectedNonCatchers": ("pytest_non_slow", "pytest_slow_monster_benchmarks"),
+        "rationale": "Repository hygiene and module-size checks are code-health concerns, not monster benchmark behavior checks.",
+    },
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate the current audit and testing mechanisms without trimming them.")
@@ -1086,15 +1147,52 @@ def build_candidate_decisions(overlap_groups: list[dict[str, Any]]) -> list[dict
                 }
             )
         elif group["overlapPolicy"] == "needs_canary":
+            rationale = group["rationale"]
+            if group["groupId"] == "monster_benchmarks_vs_audit_health":
+                rationale = (
+                    "Static canary mapping indicates monster benchmark tests and audit-health cover different "
+                    "failure modes; validate with runtime evidence before trimming."
+                )
             decisions.append(
                 {
                     "id": group["groupId"],
                     "recommendedAction": "canary_validate",
                     "source": "overlapGroups",
-                    "rationale": group["rationale"],
+                    "rationale": rationale,
                 }
             )
     return decisions
+
+
+def build_monster_benchmark_canary_validation() -> dict[str, Any]:
+    return {
+        "target": "monster_benchmarks_vs_audit_health",
+        "mechanisms": [
+            {
+                "mechanismId": mechanism["mechanismId"],
+                "label": mechanism["label"],
+                "scope": mechanism["scope"],
+            }
+            for mechanism in MONSTER_BENCHMARK_CANARY_MECHANISMS
+        ],
+        "canaries": [
+            {
+                "canaryId": canary["canaryId"],
+                "description": canary["description"],
+                "expectedCatchers": list(canary["expectedCatchers"]),
+                "expectedNonCatchers": list(canary["expectedNonCatchers"]),
+                "rationale": canary["rationale"],
+            }
+            for canary in MONSTER_BENCHMARK_CANARIES
+        ],
+        "preliminaryDecision": {
+            "status": "do_not_trim_yet",
+            "rationale": (
+                "monster benchmark tests and audit-health cover different failure modes; "
+                "next step is runtime measurement, not deletion"
+            ),
+        },
+    }
 
 
 def build_coverage_map() -> dict[str, Any]:
@@ -1206,6 +1304,7 @@ def build_test_coverage_ledger(
         "overlapGroups": coverage_map["overlapGroups"],
         "candidateDecisions": coverage_map["candidateDecisions"],
         "coverageMapSummary": coverage_map["summary"],
+        "canaryValidation": build_monster_benchmark_canary_validation(),
         "canarySpecs": build_canary_specs(),
     }
 
@@ -1281,6 +1380,30 @@ def format_test_coverage_ledger_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             f"- `{decision['id']}`: `{decision['recommendedAction']}` - {decision['rationale']}"
         )
+    validation = payload["canaryValidation"]
+    lines.extend(
+        [
+            "",
+            "## Canary Validation: Monster Benchmarks vs Audit Health",
+            "",
+            f"- Target: `{validation['target']}`",
+            f"- Preliminary decision: `{validation['preliminaryDecision']['status']}`",
+            f"- Rationale: {validation['preliminaryDecision']['rationale']}",
+            "",
+            "### Capability Table",
+            "",
+            "| canary | expected catchers | expected non-catchers | rationale |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for canary in validation["canaries"]:
+        lines.append(
+            f"| `{canary['canaryId']}` | {', '.join(canary['expectedCatchers'])} | "
+            f"{', '.join(canary['expectedNonCatchers'])} | {canary['rationale']} |"
+        )
+    lines.extend(["", "### Mechanisms", ""])
+    for mechanism in validation["mechanisms"]:
+        lines.append(f"- `{mechanism['mechanismId']}` ({mechanism['label']}): {mechanism['scope']}")
     lines.extend(["", "## Canary Specs", ""])
     for spec in payload["canarySpecs"]:
         lines.append(
