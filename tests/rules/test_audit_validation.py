@@ -291,6 +291,114 @@ def test_coverage_review_keeps_legacy_class_audits_forensic_and_non_required() -
     assert entry["candidateAction"] == "demote_candidate"
 
 
+def test_parse_pytest_collection_extracts_selected_and_deselected_counts() -> None:
+    collection = audit_validation.parse_pytest_collection(
+        "\n".join(
+            [
+                "tests/rules/test_rules.py::test_one",
+                "tests/rules/test_ai.py::test_two",
+                "2/4 tests collected (2 deselected) in 0.10s",
+            ]
+        ),
+        ["py", "-m", "pytest", "--collect-only"],
+        0.1,
+    )
+
+    assert collection.total_count == 4
+    assert collection.selected_count == 2
+    assert collection.deselected_count == 2
+    assert collection.node_ids == ("tests/rules/test_rules.py::test_one", "tests/rules/test_ai.py::test_two")
+
+
+def make_collection(node_ids: list[str], total_count: int | None = None, deselected_count: int = 0) -> audit_validation.PytestCollection:
+    return audit_validation.PytestCollection(
+        command=["py", "-m", "pytest", "--collect-only"],
+        status="pass",
+        total_count=total_count if total_count is not None else len(node_ids),
+        selected_count=len(node_ids),
+        deselected_count=deselected_count,
+        node_ids=tuple(node_ids),
+        elapsed_seconds=0.1,
+        output_tail=(),
+    )
+
+
+def test_pytest_file_rows_group_counts_risks_and_overlap() -> None:
+    full = make_collection(
+        [
+            "tests/rules/test_rules.py::test_core_rule",
+            "tests/rules/test_monster_benchmarks.py::test_variant[wolf]",
+            "tests/rules/test_monster_benchmarks.py::test_variant[goblin]",
+            "tests/golden/test_python_goldens.py::test_python_run_cases_match_python_goldens",
+            "tests/integration/test_api.py::test_health_endpoint_returns_ok",
+        ]
+    )
+    not_slow = make_collection(
+        [
+            "tests/rules/test_rules.py::test_core_rule",
+            "tests/rules/test_monster_benchmarks.py::test_variant[wolf]",
+            "tests/golden/test_python_goldens.py::test_python_run_cases_match_python_goldens",
+            "tests/integration/test_api.py::test_health_endpoint_returns_ok",
+        ],
+        total_count=5,
+        deselected_count=1,
+    )
+
+    rows = audit_validation.build_pytest_file_rows(full, not_slow)
+    by_path = {row["path"]: row for row in rows}
+
+    assert by_path["tests/rules/test_monster_benchmarks.py"]["totalCount"] == 2
+    assert by_path["tests/rules/test_monster_benchmarks.py"]["slowDeselectedCount"] == 1
+    assert by_path["tests/rules/test_monster_benchmarks.py"]["parametrizedItemCount"] == 2
+    assert by_path["tests/rules/test_monster_benchmarks.py"]["candidateAction"] == "measure_more"
+    assert by_path["tests/golden/test_python_goldens.py"]["overlapWith"] == ["pass2-stability"]
+    assert "API contract" in by_path["tests/integration/test_api.py"]["riskAreas"]
+
+
+def test_test_coverage_ledger_records_inventory_and_canary_specs(tmp_path: Path) -> None:
+    full = make_collection(
+        [
+            "tests/rules/test_rules.py::test_core_rule",
+            "tests/golden/test_python_goldens.py::test_python_run_cases_match_python_goldens",
+        ]
+    )
+    not_slow = make_collection(["tests/rules/test_rules.py::test_core_rule"], total_count=2, deselected_count=1)
+
+    payload = audit_validation.build_test_coverage_ledger(
+        context={"branch": "integration", "commit": "abc123", "generatedAt": "now", "gitStatusShort": []},
+        full_collection=full,
+        not_slow_collection=not_slow,
+        mechanism_rows=[
+            {
+                "task": "pass2-stability",
+                "recommendedGateLevel": "release",
+                "inferredRuntimeClass": "slow",
+                "overlapCandidates": ["check-fast"],
+            }
+        ],
+        json_path=tmp_path / "ledger.json",
+        markdown_path=tmp_path / "ledger.md",
+    )
+    markdown = audit_validation.format_test_coverage_ledger_markdown(payload)
+
+    assert payload["overallStatus"] == "pass"
+    assert payload["summary"]["totalCollected"] == 2
+    assert payload["summary"]["notSlowSelected"] == 1
+    assert payload["summary"]["notSlowDeselected"] == 1
+    assert {spec["mechanism"] for spec in payload["canarySpecs"]} == {
+        "unit/rules tests",
+        "golden tests",
+        "scenario audits",
+        "class audits",
+        "Pass 2 stability",
+    }
+    assert payload["auditMechanisms"][0]["task"] == "pass2-stability"
+    assert payload["auditMechanisms"][0]["riskAreas"] == ["determinism", "async reliability"]
+    assert "Test Coverage Ledger" in markdown
+    assert "Audit Mechanisms" in markdown
+    assert "Canary Specs" in markdown
+
+
 def test_report_payload_and_markdown_include_recommendations(tmp_path: Path) -> None:
     rows = [
         {
@@ -342,6 +450,41 @@ def test_report_payload_and_markdown_include_recommendations(tmp_path: Path) -> 
     assert "Audit Validation Report" in markdown
     assert "Needs later validation" in markdown
     assert "Canonical Class Evidence" in markdown
+
+
+def test_report_payload_links_test_coverage_ledger_when_supplied(tmp_path: Path) -> None:
+    ledger = {
+        "overallStatus": "pass",
+        "artifactPaths": {"json": "reports/audit_validation/test_coverage_ledger_latest.json", "markdown": "reports/audit_validation/test_coverage_ledger_latest.md"},
+        "summary": {"totalCollected": 1329, "notSlowSelected": 1187, "notSlowDeselected": 142, "fileCount": 28},
+    }
+    coverage = {
+        "wrapperTasks": ["check-fast"],
+        "runbookDirectEquivalentTasks": ["check-fast"],
+        "missingFromWrapper": [],
+        "missingRunbookDirectEquivalent": [],
+        "undocumentedWrapperTasks": [],
+        "unknownWrapperTasks": [],
+    }
+
+    payload = audit_validation.build_report_payload(
+        context={"generatedAt": "2026-04-28T00:00:00+00:00", "branch": "integration", "commit": "abc123", "gitStatusShort": []},
+        rows=[],
+        command_coverage=coverage,
+        measure_smoke=False,
+        include_heavy=False,
+        timeout_seconds=300,
+        stale_days=14,
+        json_path=tmp_path / "audit_validation.json",
+        markdown_path=tmp_path / "audit_validation.md",
+        explain_coverage=True,
+        test_coverage_ledger=ledger,
+    )
+    markdown = audit_validation.format_report_markdown(payload)
+
+    assert payload["testCoverageLedger"]["totalCollected"] == 1329
+    assert "Test Coverage Ledger" in markdown
+    assert "Not-slow deselected: `142`" in markdown
 
 
 def test_explain_coverage_adds_advisory_review_without_changing_status(tmp_path: Path) -> None:

@@ -33,11 +33,21 @@ CandidateAction = Literal["keep", "measure_more", "trim_candidate", "demote_cand
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "audit_validation"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "audit_validation_latest.json"
 DEFAULT_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "audit_validation_latest.md"
+DEFAULT_TEST_LEDGER_JSON_PATH = DEFAULT_REPORT_DIR / "test_coverage_ledger_latest.json"
+DEFAULT_TEST_LEDGER_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "test_coverage_ledger_latest.md"
 DEFAULT_STALE_DAYS = 14
 NIGHTLY_RUNTIME_WARNING_SECONDS = 3000.0
 NIGHTLY_RUNTIME_BUDGET_SECONDS = 3600.0
 STATUS_FIELD_NAMES = {"status", "overallStatus", "reportStatus"}
 BLOCKING_REPORT_STATUSES = {"fail", "timeout"}
+PYTEST_LEDGER_TARGETS = ("tests/rules", "tests/golden", "tests/integration")
+PYTEST_RUNTIME_BASELINE_FILES = (
+    "tests/rules/test_monster_behavior.py",
+    "tests/rules/test_rules.py",
+    "tests/rules/test_monster_benchmarks.py",
+    "tests/rules/test_ai.py",
+    "tests/rules/test_monster_content.py",
+)
 CANONICAL_CLASS_EVIDENCE_PATHS = (
     "reports/class_audit/fighter_barbarian_quick_latest.json",
     "reports/class_audit/fighter_barbarian_quick_latest.md",
@@ -79,6 +89,18 @@ class SmokeMeasurement:
             "timeoutSeconds": self.timeout_seconds,
             "outputTail": self.output_tail,
         }
+
+
+@dataclass(frozen=True)
+class PytestCollection:
+    command: list[str]
+    status: Status
+    total_count: int
+    selected_count: int
+    deselected_count: int
+    node_ids: tuple[str, ...]
+    elapsed_seconds: float
+    output_tail: tuple[str, ...]
 
 
 MECHANISMS: tuple[AuditMechanism, ...] = (
@@ -570,6 +592,357 @@ def extract_runbook_direct_equivalents(runbook_text: str) -> dict[str, str]:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def parse_pytest_collection(stdout: str, command: list[str], elapsed_seconds: float, status: Status = "pass") -> PytestCollection:
+    node_ids = tuple(line.strip() for line in stdout.splitlines() if line.startswith(("tests/", "tests\\")) and "::" in line)
+    summary_lines = [line.strip() for line in stdout.splitlines() if "tests collected" in line or "test collected" in line]
+    summary = summary_lines[-1] if summary_lines else ""
+    selected_count = len(node_ids)
+    total_count = selected_count
+    deselected_count = 0
+    filtered_match = re.search(r"(\d+)/(\d+) tests? collected \((\d+) deselected\)", summary)
+    total_match = re.search(r"(\d+) tests? collected", summary)
+    if filtered_match:
+        selected_count = int(filtered_match.group(1))
+        total_count = int(filtered_match.group(2))
+        deselected_count = int(filtered_match.group(3))
+    elif total_match:
+        total_count = int(total_match.group(1))
+        selected_count = total_count
+    return PytestCollection(
+        command=command,
+        status=status,
+        total_count=total_count,
+        selected_count=selected_count,
+        deselected_count=deselected_count,
+        node_ids=node_ids,
+        elapsed_seconds=round(elapsed_seconds, 3),
+        output_tail=tuple(output_tail(stdout, None, limit=8)),
+    )
+
+
+def collect_pytest_inventory(mark_expression: str | None = None, targets: tuple[str, ...] = PYTEST_LEDGER_TARGETS) -> PytestCollection:
+    command = [sys.executable, "-m", "pytest", "--collect-only", "-q", *targets]
+    if mark_expression:
+        command.extend(["-m", mark_expression])
+    started = time.perf_counter()
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    elapsed_seconds = time.perf_counter() - started
+    status: Status = "pass" if completed.returncode == 0 else "fail"
+    return parse_pytest_collection(
+        "\n".join(part for part in (completed.stdout, completed.stderr) if part),
+        command,
+        elapsed_seconds,
+        status,
+    )
+
+
+def normalize_node_path(node_id: str) -> str:
+    return node_id.split("::", 1)[0].replace("\\", "/")
+
+
+def infer_test_file_risk_areas(path: str) -> list[str]:
+    name = Path(path).name
+    if path.startswith("tests/golden/"):
+        return ["determinism", "golden drift"]
+    if path.startswith("tests/integration/"):
+        return ["API contract", "frontend contract"]
+    if name == "test_pass2_stability.py":
+        return ["determinism", "async reliability", "audit tooling"]
+    if name == "test_pass3_clarity.py":
+        return ["docs/runbook consistency", "report freshness", "audit tooling"]
+    if name in {"test_rules.py", "test_grapple_rules.py", "test_spatial.py", "test_crocodile.py", "test_giant_toad.py"}:
+        return ["rule correctness", "backend behavior"]
+    if name == "test_ai.py":
+        return ["focused AI decisions", "class behavior"]
+    if name in {"test_monster_behavior.py", "test_monster_content.py"}:
+        return ["monster behavior", "content integrity"]
+    if name == "test_monster_benchmarks.py":
+        return ["benchmark diagnostics", "monster behavior"]
+    if "audit" in name or name in {"test_party_validation.py", "test_pc_tuning_sample.py", "test_daily_housekeeping.py"}:
+        return ["audit tooling", "report freshness"]
+    if name in {"test_smart_logic_matrix.py", "test_smart_vs_dumb_diagnostics.py"}:
+        return ["focused AI decisions", "forensic traces"]
+    if name == "test_spell_import_boundaries.py":
+        return ["import boundaries", "spell workflow"]
+    if name in {"test_player_framework.py", "test_presets.py"}:
+        return ["content integrity", "player preset behavior"]
+    return ["backend behavior"]
+
+
+def infer_test_file_overlap(path: str) -> tuple[str, list[str], str, str, str]:
+    name = Path(path).name
+    if path.startswith("tests/golden/"):
+        return (
+            "overlapping",
+            ["pass2-stability"],
+            "inner_loop",
+            "keep",
+            "Exact goldens overlap Pass 2 determinism, but they are cheap fixed-fixture drift locks.",
+        )
+    if path.startswith("tests/integration/"):
+        return (
+            "unique",
+            ["nightly.npm_build", "pass2-stability async checks"],
+            "inner_loop",
+            "keep",
+            "API route and catalog contract checks catch interface regressions before browser/frontend gates.",
+        )
+    if name == "test_monster_benchmarks.py":
+        return (
+            "overlapping",
+            ["audit-health", "monster benchmark fixtures"],
+            "checkpoint",
+            "measure_more",
+            "Benchmark-heavy monster checks need runtime and canary evidence before staying in the default gate.",
+        )
+    if name in {"test_scenario_audit.py", "test_fighter_audit.py", "test_barbarian_audit.py", "test_rogue_audit.py"}:
+        return (
+            "overlapping",
+            ["audit-quick", "class-audit-slices", "rogue-audit-quick"],
+            "inner_loop",
+            "keep",
+            "Runner unit tests protect audit report logic; broad behavior remains owned by the audit commands.",
+        )
+    if name in {"test_pass2_stability.py", "test_nightly_audit.py", "test_audit_validation.py"}:
+        return (
+            "unique",
+            ["audit-validation"],
+            "inner_loop",
+            "keep",
+            "Audit-runner tests protect orchestration behavior that gameplay tests do not cover.",
+        )
+    if name in {"test_pass3_clarity.py", "test_daily_housekeeping.py"}:
+        return (
+            "overlapping",
+            ["pass3-clarity", "daily-housekeeping"],
+            "inner_loop",
+            "keep",
+            "These checks overlap on docs/report hygiene but guard different runner contracts.",
+        )
+    if name in {"test_party_validation.py", "test_pc_tuning_sample.py", "test_class_audit_slices.py"}:
+        return (
+            "overlapping",
+            ["party-validation", "class-audit-slices", "pc-tuning-sample"],
+            "inner_loop",
+            "keep",
+            "Runner tests protect scoped gate behavior while the commands own live behavior evidence.",
+        )
+    if name in {"test_smart_logic_matrix.py", "test_smart_vs_dumb_diagnostics.py"}:
+        return (
+            "unique",
+            ["behavior-diagnostics"],
+            "forensic",
+            "keep",
+            "These files protect diagnostic-only AI comparison tooling and should not gate normal gameplay changes.",
+        )
+    if name in {"test_rules.py", "test_ai.py", "test_monster_behavior.py", "test_monster_content.py"}:
+        return (
+            "overlapping",
+            ["scenario audits", "class audits", "golden tests"],
+            "inner_loop",
+            "keep",
+            "Focused tests overlap broad audits intentionally because they isolate exact rule or AI failures.",
+        )
+    if name in {
+        "test_player_framework.py",
+        "test_presets.py",
+        "test_spatial.py",
+        "test_grapple_rules.py",
+        "test_crocodile.py",
+        "test_giant_toad.py",
+        "test_review_python_goldens.py",
+        "test_spell_import_boundaries.py",
+    }:
+        return (
+            "unique",
+            ["check-fast"],
+            "inner_loop",
+            "keep",
+            "Focused low-cost tests document specific invariants that broader audits only observe indirectly.",
+        )
+    return (
+        "unknown",
+        [],
+        "inner_loop",
+        "measure_more",
+        "This file needs a canary expectation before any trim decision.",
+    )
+
+
+def build_pytest_file_rows(full_collection: PytestCollection, not_slow_collection: PytestCollection) -> list[dict[str, Any]]:
+    full_by_file: dict[str, list[str]] = {}
+    not_slow_by_file: dict[str, list[str]] = {}
+    for node_id in full_collection.node_ids:
+        full_by_file.setdefault(normalize_node_path(node_id), []).append(node_id)
+    for node_id in not_slow_collection.node_ids:
+        not_slow_by_file.setdefault(normalize_node_path(node_id), []).append(node_id)
+
+    rows: list[dict[str, Any]] = []
+    for path in sorted(full_by_file):
+        full_nodes = full_by_file[path]
+        selected_nodes = not_slow_by_file.get(path, [])
+        parametrized_count = sum(1 for node_id in full_nodes if "[" in node_id.rsplit("::", 1)[-1])
+        overlap, overlaps_with, placement, action, reason = infer_test_file_overlap(path)
+        rows.append(
+            {
+                "path": path,
+                "totalCount": len(full_nodes),
+                "notSlowSelectedCount": len(selected_nodes),
+                "slowDeselectedCount": len(full_nodes) - len(selected_nodes),
+                "parametrizedItemCount": parametrized_count,
+                "riskAreas": infer_test_file_risk_areas(path),
+                "overlapClassification": overlap,
+                "overlapWith": overlaps_with,
+                "recommendedPlacement": placement,
+                "candidateAction": action,
+                "uniqueFailureValue": reason,
+                "runtimeSeconds": None,
+                "runtimeSource": "not_measured",
+            }
+        )
+    rows.sort(key=lambda row: (-int(row["totalCount"]), row["path"]))
+    return rows
+
+
+def build_canary_specs() -> list[dict[str, str]]:
+    return [
+        {
+            "mechanism": "unit/rules tests",
+            "defectToCatch": "Break a focused rule invariant such as resource spending, damage resistance, or action legality.",
+            "expectedFailureSignal": "A small deterministic pytest subset fails with an exact node id.",
+        },
+        {
+            "mechanism": "golden tests",
+            "defectToCatch": "Change replay/result serialization or deterministic batch summary output.",
+            "expectedFailureSignal": "The golden fixture comparison fails before scenario/class audits are needed.",
+        },
+        {
+            "mechanism": "scenario audits",
+            "defectToCatch": "Remove or disconnect a required live scenario signature mechanic.",
+            "expectedFailureSignal": "Scenario audit reports a structural/signature failure for the affected scenario.",
+        },
+        {
+            "mechanism": "class audits",
+            "defectToCatch": "Regress class-specific behavior such as Fighter Action Surge, Barbarian Rage, or Rogue Sneak Attack.",
+            "expectedFailureSignal": "The relevant segmented class or Rogue audit row fails or warns with a behavior-specific message.",
+        },
+        {
+            "mechanism": "Pass 2 stability",
+            "defectToCatch": "Introduce nondeterministic replay state, batch drift, async desync, crash, hang, or timeout.",
+            "expectedFailureSignal": "Pass 2 reports deterministic mismatch, async failure, command timeout, or malformed artifact.",
+        },
+    ]
+
+
+def build_test_coverage_ledger(
+    *,
+    context: dict[str, Any],
+    full_collection: PytestCollection,
+    not_slow_collection: PytestCollection,
+    mechanism_rows: list[dict[str, Any]] | None = None,
+    json_path: Path = DEFAULT_TEST_LEDGER_JSON_PATH,
+    markdown_path: Path = DEFAULT_TEST_LEDGER_MARKDOWN_PATH,
+) -> dict[str, Any]:
+    file_rows = build_pytest_file_rows(full_collection, not_slow_collection)
+    dominant_files = [row for row in file_rows if row["path"] in PYTEST_RUNTIME_BASELINE_FILES]
+    summary = {
+        "totalCollected": full_collection.total_count,
+        "notSlowSelected": not_slow_collection.selected_count,
+        "notSlowDeselected": not_slow_collection.deselected_count,
+        "fileCount": len(file_rows),
+        "largestFiles": [row["path"] for row in file_rows[:5]],
+        "dominantRuntimeBaselineFiles": [row["path"] for row in dominant_files],
+    }
+    status: Status = "fail" if full_collection.status == "fail" or not_slow_collection.status == "fail" else "pass"
+    return {
+        "overallStatus": status,
+        "context": context,
+        "artifactPaths": {
+            "json": relative_path(json_path),
+            "markdown": relative_path(markdown_path),
+        },
+        "pytestInventory": {
+            "targets": list(PYTEST_LEDGER_TARGETS),
+            "fullCollection": {
+                "status": full_collection.status,
+                "command": full_collection.command,
+                "totalCount": full_collection.total_count,
+                "selectedCount": full_collection.selected_count,
+                "deselectedCount": full_collection.deselected_count,
+                "elapsedSeconds": full_collection.elapsed_seconds,
+                "outputTail": list(full_collection.output_tail),
+            },
+            "notSlowCollection": {
+                "status": not_slow_collection.status,
+                "command": not_slow_collection.command,
+                "totalCount": not_slow_collection.total_count,
+                "selectedCount": not_slow_collection.selected_count,
+                "deselectedCount": not_slow_collection.deselected_count,
+                "elapsedSeconds": not_slow_collection.elapsed_seconds,
+                "outputTail": list(not_slow_collection.output_tail),
+            },
+        },
+        "summary": summary,
+        "testFiles": file_rows,
+        "auditMechanisms": [build_coverage_mechanism_review(row) for row in mechanism_rows] if mechanism_rows else [],
+        "canarySpecs": build_canary_specs(),
+    }
+
+
+def format_test_coverage_ledger_markdown(payload: dict[str, Any]) -> str:
+    summary = payload["summary"]
+    lines = [
+        "# Test Coverage Ledger",
+        "",
+        f"- Overall status: `{payload['overallStatus']}`",
+        f"- Total collected: `{summary['totalCollected']}`",
+        f"- Not-slow selected: `{summary['notSlowSelected']}`",
+        f"- Not-slow deselected: `{summary['notSlowDeselected']}`",
+        f"- Test files: `{summary['fileCount']}`",
+        "",
+        "## Test Files",
+        "",
+        "| file | total | not slow | slow | parametrized | risks | overlap | placement | action |",
+        "| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
+    ]
+    for row in payload["testFiles"]:
+        lines.append(
+            f"| `{row['path']}` | {row['totalCount']} | {row['notSlowSelectedCount']} | "
+            f"{row['slowDeselectedCount']} | {row['parametrizedItemCount']} | "
+            f"{', '.join(row['riskAreas'])} | `{row['overlapClassification']}` | "
+            f"`{row['recommendedPlacement']}` | `{row['candidateAction']}` |"
+        )
+    if payload["auditMechanisms"]:
+        lines.extend(
+            [
+                "",
+                "## Audit Mechanisms",
+                "",
+                "| command | risks | overlap | placement | action |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in payload["auditMechanisms"]:
+            lines.append(
+                f"| `{row['task']}` | {', '.join(row['riskAreas'])} | `{row['overlapClassification']}` | "
+                f"`{row['recommendedPlacement']}` | `{row['candidateAction']}` |"
+            )
+    lines.extend(["", "## Canary Specs", ""])
+    for spec in payload["canarySpecs"]:
+        lines.append(
+            f"- `{spec['mechanism']}`: {spec['defectToCatch']} Expected signal: {spec['expectedFailureSignal']}"
+        )
+    return "\n".join(lines)
 
 
 def iter_status_values(value: Any) -> list[str]:
@@ -1135,6 +1508,7 @@ def build_report_payload(
     json_path: Path,
     markdown_path: Path,
     explain_coverage: bool = False,
+    test_coverage_ledger: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     recommendations = build_recommendations(rows)
     status_counts = {
@@ -1166,6 +1540,20 @@ def build_report_payload(
     }
     if explain_coverage:
         payload["coverageReview"] = build_coverage_review(rows)
+    if test_coverage_ledger is not None:
+        payload["testCoverageLedger"] = {
+            "overallStatus": test_coverage_ledger["overallStatus"],
+            "json": test_coverage_ledger["artifactPaths"]["json"],
+            "markdown": test_coverage_ledger["artifactPaths"]["markdown"],
+            "totalCollected": test_coverage_ledger["summary"]["totalCollected"],
+            "notSlowSelected": test_coverage_ledger["summary"]["notSlowSelected"],
+            "notSlowDeselected": test_coverage_ledger["summary"]["notSlowDeselected"],
+            "fileCount": test_coverage_ledger["summary"]["fileCount"],
+        }
+        if test_coverage_ledger["overallStatus"] == "fail":
+            payload["overallStatus"] = "fail"
+        elif payload["overallStatus"] == "pass" and test_coverage_ledger["overallStatus"] == "warn":
+            payload["overallStatus"] = "warn"
     return payload
 
 
@@ -1261,6 +1649,23 @@ def format_report_markdown(payload: dict[str, Any]) -> str:
         for entry in coverage_review["trimCandidates"]:
             lines.append(f"- `{entry['id']}`: `{entry['candidateAction']}` - {entry['reason']}")
 
+    test_ledger = payload.get("testCoverageLedger")
+    if isinstance(test_ledger, dict):
+        lines.extend(
+            [
+                "",
+                "## Test Coverage Ledger",
+                "",
+                f"- Status: `{test_ledger['overallStatus']}`",
+                f"- JSON: `{test_ledger['json']}`",
+                f"- Markdown: `{test_ledger['markdown']}`",
+                f"- Total collected: `{test_ledger['totalCollected']}`",
+                f"- Not-slow selected: `{test_ledger['notSlowSelected']}`",
+                f"- Not-slow deselected: `{test_ledger['notSlowDeselected']}`",
+                f"- Test files: `{test_ledger['fileCount']}`",
+            ]
+        )
+
     coverage = payload["commandCoverage"]
     lines.extend(
         [
@@ -1301,8 +1706,21 @@ def main() -> None:
         include_heavy=args.include_heavy,
         timeout_seconds=args.timeout_seconds,
     )
+    context = collect_git_context()
+    test_coverage_ledger: dict[str, Any] | None = None
+    if args.explain_coverage:
+        full_collection = collect_pytest_inventory()
+        not_slow_collection = collect_pytest_inventory('not slow')
+        test_coverage_ledger = build_test_coverage_ledger(
+            context=context,
+            full_collection=full_collection,
+            not_slow_collection=not_slow_collection,
+            mechanism_rows=rows,
+        )
+        write_json_report(DEFAULT_TEST_LEDGER_JSON_PATH, test_coverage_ledger)
+        write_text_report(DEFAULT_TEST_LEDGER_MARKDOWN_PATH, format_test_coverage_ledger_markdown(test_coverage_ledger))
     payload = build_report_payload(
-        context=collect_git_context(),
+        context=context,
         rows=rows,
         command_coverage=command_coverage,
         measure_smoke=args.measure_smoke,
@@ -1312,6 +1730,7 @@ def main() -> None:
         json_path=args.json_path,
         markdown_path=args.markdown_path,
         explain_coverage=args.explain_coverage,
+        test_coverage_ledger=test_coverage_ledger,
     )
     write_json_report(args.json_path, payload)
     write_text_report(args.markdown_path, format_report_markdown(payload))
