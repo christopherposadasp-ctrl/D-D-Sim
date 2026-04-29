@@ -2450,7 +2450,7 @@ def test_extra_attack_targeting_uses_action_level_kill_band_before_the_first_swi
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G1", "greatsword")
 
 
 def test_extra_attack_keeps_the_same_target_if_it_survives_the_first_hit() -> None:

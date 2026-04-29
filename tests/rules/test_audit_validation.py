@@ -425,6 +425,29 @@ def test_test_signal_review_uses_assertion_shape_to_flag_exact_action_payloads()
     assert cleaned["candidateAction"] == "keep"
 
 
+def test_test_signal_review_keeps_explicit_terminal_smoke_coverage() -> None:
+    smoke = audit_validation.classify_test_signal(
+        "tests/rules/test_rules.py::test_sample_smoke_run_completes",
+        True,
+        audit_validation.build_assertion_profile(
+            "def test_sample_smoke_run_completes():\n"
+            "    assert result.final_state.terminal_state == \"complete\"\n"
+            "    assert result.final_state.winner in {\"fighters\", \"goblins\"}\n"
+        ),
+    )
+    weak_smoke = audit_validation.classify_test_signal(
+        "tests/rules/test_rules.py::test_sample_smoke_run_completes",
+        True,
+        audit_validation.build_assertion_profile("def test_sample_smoke_run_completes():\n    assert result\n"),
+    )
+
+    assert smoke["assertionProfile"]["terminalCompletionAssertions"] == 1
+    assert smoke["assertionProfile"]["winnerEnvelopeAssertions"] == 1
+    assert smoke["candidateAction"] == "keep"
+    assert "terminal completion" in smoke["rationale"]
+    assert weak_smoke["candidateAction"] == "rewrite_behavior_level"
+
+
 def test_test_coverage_ledger_includes_unmeasured_monster_benchmark_runtime_by_default(tmp_path: Path) -> None:
     full = make_collection(["tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]"])
     not_slow = make_collection(["tests/rules/test_monster_benchmarks.py::test_benchmark_presets_build_valid_layout_and_emit_first_step[wolf]"])

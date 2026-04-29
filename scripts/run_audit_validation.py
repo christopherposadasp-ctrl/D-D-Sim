@@ -1196,7 +1196,7 @@ def build_assertion_profile(source: str | None = None) -> dict[str, Any]:
         "exactPathListAssertions": len(re.findall(r"assert\s+\[point\.model_dump\(\)[^\n]*\.path\]\s*==\s*\[", source)),
         "helperAssertionCalls": len(
             re.findall(
-                r"\bassert_(?:action_core|attack_action_core|bonus_action_core|battle_master_auto|movement_ends_at)\(",
+                r"\bassert_(?:action_core|attack_action_core|spell_action_core|bonus_action_core|battle_master_auto|movement_ends_at)\(",
                 source,
             )
         ),
@@ -1206,6 +1206,8 @@ def build_assertion_profile(source: str | None = None) -> dict[str, Any]:
                 source,
             )
         ),
+        "terminalCompletionAssertions": len(re.findall(r"\.final_state\.terminal_state\s*==\s*[\"']complete[\"']", source)),
+        "winnerEnvelopeAssertions": len(re.findall(r"\.final_state\.winner\s+in\s+\{", source)),
     }
 
 
@@ -1299,8 +1301,14 @@ def classify_test_signal(
     elif any(marker in lowered for marker in ("smoke", "completes", "first_step")):
         category = "smoke_completion"
         signal_level = "medium"
-        candidate_action = "rewrite_behavior_level"
-        rationale = "Smoke-only completion checks should be reviewed for a more specific behavioral assertion."
+        if assertion_profile["sourceAvailable"] and assertion_profile["terminalCompletionAssertions"] > 0:
+            candidate_action = "keep"
+            rationale = "Retained as cheap smoke coverage because it asserts terminal completion."
+            if assertion_profile["winnerEnvelopeAssertions"] > 0:
+                rationale = "Retained as cheap smoke coverage because it asserts terminal completion and a bounded winner envelope."
+        else:
+            candidate_action = "rewrite_behavior_level"
+            rationale = "Smoke-only completion checks should be reviewed for a more specific behavioral assertion."
     elif any(marker in lowered for marker in ("preset", "catalog", "registry", "definition", "surface", "ids", "layout")):
         category = "content_shape"
         rationale = "Content shape tests catch registry and fixture drift before behavior gates consume the content."
