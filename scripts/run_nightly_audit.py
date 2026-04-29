@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +58,7 @@ class StepResult:
     warnings: list[str] = field(default_factory=list)
     output_tail: list[str] = field(default_factory=list)
     report_paths: list[str] = field(default_factory=list)
+    elapsed_seconds: float | None = None
 
     def to_report_dict(self) -> dict[str, object]:
         return {
@@ -69,6 +71,7 @@ class StepResult:
             "warnings": list(self.warnings),
             "outputTail": list(self.output_tail),
             "reportPaths": list(self.report_paths),
+            "elapsedSeconds": round(self.elapsed_seconds, 3) if self.elapsed_seconds is not None else None,
         }
 
 
@@ -317,6 +320,7 @@ def make_class_slice_spec(
 
 
 def run_sequential_step(step_id: str, label: str, commands: list[CommandSpec], timeout_seconds: int) -> StepResult:
+    started = time.perf_counter()
     output_tail: list[str] = []
     for command in commands:
         result = run_command(command)
@@ -332,6 +336,7 @@ def run_sequential_step(step_id: str, label: str, commands: list[CommandSpec], t
                 detail=f"{command.label} failed. {result.detail or ''}".strip(),
                 output_tail=result.output_tail,
                 report_paths=[],
+                elapsed_seconds=time.perf_counter() - started,
             )
 
     return StepResult(
@@ -341,6 +346,7 @@ def run_sequential_step(step_id: str, label: str, commands: list[CommandSpec], t
         command=" && ".join(spec.display_command for spec in commands),
         timeout_seconds=timeout_seconds,
         output_tail=output_tail,
+        elapsed_seconds=time.perf_counter() - started,
     )
 
 
@@ -583,6 +589,7 @@ def build_backend_gate_commands(backend_gate_timeout: int) -> list[CommandSpec]:
 
 def run_command(spec: CommandSpec) -> StepResult:
     report_paths = make_report_paths(spec.report_paths)
+    started = time.perf_counter()
     try:
         completed = subprocess.run(
             spec.argv,
@@ -595,6 +602,7 @@ def run_command(spec: CommandSpec) -> StepResult:
             timeout=spec.timeout_seconds,
         )
     except subprocess.TimeoutExpired as error:
+        elapsed = time.perf_counter() - started
         return StepResult(
             step_id=spec.step_id,
             label=spec.label,
@@ -607,8 +615,10 @@ def run_command(spec: CommandSpec) -> StepResult:
                 error.stderr if isinstance(error.stderr, str) else None,
             ),
             report_paths=report_paths,
+            elapsed_seconds=elapsed,
         )
 
+    elapsed = time.perf_counter() - started
     output_tail = build_output_tail(completed.stdout, completed.stderr)
     result = StepResult(
         step_id=spec.step_id,
@@ -619,6 +629,7 @@ def run_command(spec: CommandSpec) -> StepResult:
         detail=None if completed.returncode == 0 else f"Command exited with code {completed.returncode}.",
         output_tail=output_tail,
         report_paths=report_paths,
+        elapsed_seconds=elapsed,
     )
     if result.status == "fail":
         return result
@@ -660,6 +671,35 @@ def build_notable_warnings(step_results: dict[str, StepResult]) -> list[str]:
             if len(notable) >= 10:
                 return notable
     return notable
+
+
+def build_runtime_summary(step_results: dict[str, StepResult]) -> dict[str, object]:
+    step_order = ("branch_gate", "check_fast", "npm_test", "npm_build", "scenario_quick", "code_health", "rotating_slice")
+    steps: list[dict[str, object]] = []
+    timed_steps = [
+        result
+        for step_id in step_order
+        if (result := step_results.get(step_id)) is not None and result.elapsed_seconds is not None
+    ]
+    for step_id in step_order:
+        result = step_results.get(step_id)
+        if result is None:
+            continue
+        steps.append(
+            {
+                "stepId": step_id,
+                "label": result.label,
+                "status": result.status,
+                "elapsedSeconds": round(result.elapsed_seconds, 3) if result.elapsed_seconds is not None else None,
+            }
+        )
+    slowest = max(timed_steps, key=lambda result: result.elapsed_seconds or 0.0, default=None)
+    return {
+        "totalMeasuredSeconds": round(sum(result.elapsed_seconds or 0.0 for result in timed_steps), 3),
+        "slowestStepId": slowest.step_id if slowest else None,
+        "slowestStepSeconds": round(slowest.elapsed_seconds, 3) if slowest and slowest.elapsed_seconds is not None else None,
+        "steps": steps,
+    }
 
 
 def build_recommended_next_action(overall_status: Status, blocker_step: str | None) -> str:
@@ -704,6 +744,16 @@ def build_markdown_report(
 
     if blocker_step:
         lines.append(f"- Blocking step: {blocker_step}")
+
+    lines.append("")
+    runtime_summary = build_runtime_summary(step_results)
+    lines.append("## Runtime")
+    lines.append(f"- Total measured seconds: {runtime_summary['totalMeasuredSeconds']}")
+    lines.append(f"- Slowest step: {runtime_summary['slowestStepId']} ({runtime_summary['slowestStepSeconds']}s)")
+    for entry in runtime_summary["steps"]:
+        elapsed = entry["elapsedSeconds"]
+        elapsed_label = "unmeasured" if elapsed is None else f"{elapsed}s"
+        lines.append(f"- {entry['label']}: {elapsed_label}")
 
     lines.append("")
     lines.append("## Details")
@@ -896,6 +946,7 @@ def main() -> None:
             "command": rotating_slice.command.display_command,
         },
         "notableWarnings": build_notable_warnings(step_results),
+        "runtimeSummary": build_runtime_summary(step_results),
         "steps": {step_id: result.to_report_dict() for step_id, result in step_results.items()},
         "reportPaths": report_paths,
     }

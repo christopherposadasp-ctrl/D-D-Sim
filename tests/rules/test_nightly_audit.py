@@ -160,6 +160,34 @@ def test_rotating_class_slices_use_segmented_runner_instead_of_legacy_quick() ->
     assert any(entry.slice_id == "barbarian_martial_mixed_party_wolf_harriers" for entry in class_slices)
 
 
+def test_step_result_report_includes_elapsed_seconds() -> None:
+    result = nightly_audit.StepResult(
+        step_id="check_fast",
+        label="Backend gate",
+        status="pass",
+        command="cmd",
+        elapsed_seconds=12.34567,
+    )
+
+    assert result.to_report_dict()["elapsedSeconds"] == 12.346
+
+
+def test_runtime_summary_identifies_slowest_timed_step() -> None:
+    results = {
+        "branch_gate": nightly_audit.StepResult("branch_gate", "Branch gate", "pass", "git"),
+        "check_fast": nightly_audit.StepResult("check_fast", "Backend gate", "pass", "cmd", elapsed_seconds=10.0),
+        "scenario_quick": nightly_audit.StepResult("scenario_quick", "Scenario quick audit", "warn", "cmd", elapsed_seconds=25.25),
+        "code_health": nightly_audit.StepResult("code_health", "Code health audit", "pass", "cmd", elapsed_seconds=5.0),
+    }
+
+    summary = nightly_audit.build_runtime_summary(results)
+
+    assert summary["totalMeasuredSeconds"] == 40.25
+    assert summary["slowestStepId"] == "scenario_quick"
+    assert summary["slowestStepSeconds"] == 25.25
+    assert [entry["stepId"] for entry in summary["steps"]] == ["branch_gate", "check_fast", "scenario_quick", "code_health"]
+
+
 def test_markdown_report_includes_blocker_and_reports() -> None:
     context = {
         "generatedAt": "2026-04-21T23:30:00",
@@ -186,11 +214,11 @@ def test_markdown_report_includes_blocker_and_reports() -> None:
             command="git rev-parse --abbrev-ref HEAD",
             detail="Expected branch `integration` but found `main`.",
         ),
-        "check_fast": nightly_audit.StepResult("check_fast", "Backend gate", "skipped", "cmd"),
+        "check_fast": nightly_audit.StepResult("check_fast", "Backend gate", "skipped", "cmd", elapsed_seconds=1.0),
         "npm_test": nightly_audit.StepResult("npm_test", "Frontend tests", "skipped", "cmd"),
         "npm_build": nightly_audit.StepResult("npm_build", "Frontend build", "skipped", "cmd"),
         "scenario_quick": nightly_audit.StepResult("scenario_quick", "Scenario quick audit", "skipped", "cmd"),
-        "code_health": nightly_audit.StepResult("code_health", "Code health audit", "pass", "cmd"),
+        "code_health": nightly_audit.StepResult("code_health", "Code health audit", "pass", "cmd", elapsed_seconds=2.0),
         "rotating_slice": nightly_audit.StepResult("rotating_slice", "Rotating slice", "skipped", "cmd"),
     }
 
@@ -206,4 +234,6 @@ def test_markdown_report_includes_blocker_and_reports() -> None:
 
     assert "- Blocking step: branch_gate" in markdown
     assert "- Audited branch: main" in markdown
+    assert "## Runtime" in markdown
+    assert "- Slowest step: code_health (2.0s)" in markdown
     assert "- reports/nightly/nightly_audit_latest.json" in markdown
