@@ -34,6 +34,8 @@ DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "audit_validation"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "audit_validation_latest.json"
 DEFAULT_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "audit_validation_latest.md"
 DEFAULT_STALE_DAYS = 14
+NIGHTLY_RUNTIME_WARNING_SECONDS = 3000.0
+NIGHTLY_RUNTIME_BUDGET_SECONDS = 3600.0
 STATUS_FIELD_NAMES = {"status", "overallStatus", "reportStatus"}
 BLOCKING_REPORT_STATUSES = {"fail", "timeout"}
 CANONICAL_CLASS_EVIDENCE_PATHS = (
@@ -517,16 +519,16 @@ NIGHTLY_STEP_COVERAGE: tuple[dict[str, Any], ...] = (
         "riskAreas": ("scenario behavior",),
         "overlapClassification": "duplicative",
         "recommendedPlacement": "checkpoint",
-        "candidateAction": "trim_candidate",
-        "reason": "Nightly currently duplicates checkpoint audit-quick breadth and is a candidate for a narrower smoke.",
+        "candidateAction": "measure_more",
+        "reason": "Broad scenario coverage should be preserved while nightly remains under the runtime budget.",
     },
     {
         "stepId": "code_health",
         "riskAreas": ("code health", "benchmark diagnostics"),
         "overlapClassification": "duplicative",
         "recommendedPlacement": "checkpoint",
-        "candidateAction": "trim_candidate",
-        "reason": "Benchmark-heavy code-health evidence belongs in checkpoint audit-health unless nightly needs fresh diagnostics.",
+        "candidateAction": "measure_more",
+        "reason": "Benchmark-heavy code-health is the first trim candidate only if more nightly runtime needs to be recovered.",
     },
     {
         "stepId": "rotating_slice",
@@ -979,9 +981,107 @@ def build_coverage_mechanism_review(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def extract_latest_nightly_runtime(rows: list[dict[str, Any]]) -> tuple[float | None, str | None]:
+    nightly_row = next((row for row in rows if row["task"] == "nightly-audit"), None)
+    if nightly_row is None:
+        return None, None
+    nightly_json = next(
+        (
+            artifact
+            for artifact in nightly_row.get("reportArtifacts", [])
+            if artifact.get("path") == "reports/nightly/nightly_audit_latest.json" and artifact.get("exists")
+        ),
+        None,
+    )
+    if nightly_json is None:
+        return None, None
+
+    report_path = REPO_ROOT / "reports/nightly/nightly_audit_latest.json"
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    runtime_summary = payload.get("runtimeSummary")
+    if not isinstance(runtime_summary, dict):
+        return None, None
+    total_seconds = runtime_summary.get("totalMeasuredSeconds")
+    slowest_step = runtime_summary.get("slowestStepId")
+    return (
+        float(total_seconds) if isinstance(total_seconds, int | float) else None,
+        slowest_step if isinstance(slowest_step, str) else None,
+    )
+
+
+def runtime_budget_status(latest_runtime_seconds: float | None) -> str:
+    if latest_runtime_seconds is None:
+        return "unknown"
+    if latest_runtime_seconds > NIGHTLY_RUNTIME_BUDGET_SECONDS:
+        return "over_budget"
+    if latest_runtime_seconds >= NIGHTLY_RUNTIME_WARNING_SECONDS:
+        return "warn"
+    return "pass"
+
+
+def budget_adjust_nightly_step(step: dict[str, Any], budget_status: str, slowest_step_id: str | None) -> dict[str, Any]:
+    adjusted = dict(step)
+    step_id = str(adjusted["stepId"])
+    if budget_status == "pass":
+        if step_id == "scenario_quick":
+            adjusted["candidateAction"] = "keep"
+            adjusted["reason"] = "Broad scenario coverage is intentionally preserved while nightly remains under 1 hour."
+        elif step_id == "code_health":
+            adjusted["candidateAction"] = "measure_more"
+            adjusted["reason"] = "Keep for now; code-health is the first trim candidate only if runtime approaches the 1-hour budget."
+    elif budget_status == "warn":
+        if step_id == "scenario_quick":
+            adjusted["candidateAction"] = "measure_more"
+            adjusted["reason"] = "Nightly is nearing the 1-hour budget; keep scenario breadth but watch this dominant step."
+        elif step_id == "code_health":
+            adjusted["candidateAction"] = "measure_more"
+            adjusted["reason"] = "Nightly is nearing the 1-hour budget; benchmark-heavy code-health may be trimmed first if needed."
+    elif budget_status == "over_budget":
+        if step_id in {"scenario_quick", "code_health"}:
+            adjusted["candidateAction"] = "trim_candidate"
+            adjusted["reason"] = "Nightly is over the 1-hour budget, so this duplicative checkpoint-style work should be reduced."
+        elif step_id == "check_fast" and slowest_step_id == "check_fast":
+            adjusted["candidateAction"] = "trim_candidate"
+            adjusted["reason"] = "Nightly is over budget and check-fast is the slowest step, so a smaller backend nightly gate should be considered."
+    else:
+        if step_id in {"scenario_quick", "code_health"}:
+            adjusted["candidateAction"] = "measure_more"
+            adjusted["reason"] = "Latest nightly runtime is unavailable, so keep measuring before trimming coverage."
+    return adjusted
+
+
+def build_coverage_decision_summary(runtime_status: str, latest_runtime_seconds: float | None) -> str:
+    if runtime_status == "pass":
+        return (
+            f"Latest nightly runtime is {latest_runtime_seconds:.1f}s, under the 1-hour budget; "
+            "preserve broad scenario coverage and only revisit code-health if runtime needs to be recovered."
+        )
+    if runtime_status == "warn":
+        return (
+            f"Latest nightly runtime is {latest_runtime_seconds:.1f}s, approaching the 1-hour budget; "
+            "measure another run before trimming broad scenario coverage."
+        )
+    if runtime_status == "over_budget":
+        return (
+            f"Latest nightly runtime is {latest_runtime_seconds:.1f}s, over the 1-hour budget; "
+            "reduce duplicative nightly scenario/code-health work before changing unique gates."
+        )
+    return "Latest nightly runtime is unavailable; keep broad coverage and gather another timed nightly before trimming."
+
+
 def build_coverage_review(rows: list[dict[str, Any]]) -> dict[str, Any]:
     mechanism_reviews = [build_coverage_mechanism_review(row) for row in rows]
-    nightly_steps = [dict(step) for step in NIGHTLY_STEP_COVERAGE]
+    latest_runtime_seconds, slowest_step_id = extract_latest_nightly_runtime(rows)
+    budget_status = runtime_budget_status(latest_runtime_seconds)
+    nightly_steps = [
+        budget_adjust_nightly_step(dict(step), budget_status, slowest_step_id)
+        for step in NIGHTLY_STEP_COVERAGE
+    ]
     candidates = [
         {
             "id": f"mechanism.{entry['task']}",
@@ -1004,10 +1104,12 @@ def build_coverage_review(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "mechanisms": mechanism_reviews,
         "nightlySteps": nightly_steps,
         "trimCandidates": candidates,
-        "decisionSummary": (
-            "Do not trim yet; first low-risk candidates are nightly.code_health and nightly.scenario_quick, "
-            "while nightly.check_fast needs step timing before any change."
-        ),
+        "nightlyRuntimeBudgetSeconds": NIGHTLY_RUNTIME_BUDGET_SECONDS,
+        "nightlyRuntimeWarningSeconds": NIGHTLY_RUNTIME_WARNING_SECONDS,
+        "latestNightlyRuntimeSeconds": latest_runtime_seconds,
+        "latestNightlySlowestStepId": slowest_step_id,
+        "runtimeBudgetStatus": budget_status,
+        "decisionSummary": build_coverage_decision_summary(budget_status, latest_runtime_seconds),
     }
 
 
@@ -1122,6 +1224,11 @@ def format_report_markdown(payload: dict[str, Any]) -> str:
                 "## Coverage Redundancy Review",
                 "",
                 f"- Decision summary: {coverage_review['decisionSummary']}",
+                f"- Nightly runtime budget seconds: `{coverage_review['nightlyRuntimeBudgetSeconds']}`",
+                f"- Nightly runtime warning seconds: `{coverage_review['nightlyRuntimeWarningSeconds']}`",
+                f"- Latest nightly runtime seconds: `{coverage_review['latestNightlyRuntimeSeconds']}`",
+                f"- Latest nightly slowest step: `{coverage_review['latestNightlySlowestStepId']}`",
+                f"- Runtime budget status: `{coverage_review['runtimeBudgetStatus']}`",
                 "",
                 "| command | risks | overlap | placement | action | reason |",
                 "| --- | --- | --- | --- | --- | --- |",

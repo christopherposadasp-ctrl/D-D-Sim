@@ -200,8 +200,77 @@ def test_coverage_review_classifies_nightly_steps_individually() -> None:
         "code_health",
         "rotating_slice",
     }
-    assert nightly_by_id["scenario_quick"]["candidateAction"] == "trim_candidate"
+    assert nightly_by_id["scenario_quick"]["candidateAction"] == "measure_more"
     assert nightly_by_id["check_fast"]["candidateAction"] == "measure_more"
+
+
+def write_nightly_runtime_report(tmp_path: Path, total_seconds: float, slowest_step_id: str = "scenario_quick") -> None:
+    report_path = tmp_path / "reports/nightly/nightly_audit_latest.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps({"runtimeSummary": {"totalMeasuredSeconds": total_seconds, "slowestStepId": slowest_step_id}}),
+        encoding="utf-8",
+    )
+
+
+def build_nightly_row() -> dict[str, object]:
+    return {
+        "task": "nightly-audit",
+        "recommendedGateLevel": "release",
+        "inferredRuntimeClass": "medium",
+        "overlapCandidates": ["check-fast", "audit-quick", "audit-health"],
+        "reportArtifacts": [{"path": "reports/nightly/nightly_audit_latest.json", "exists": True}],
+    }
+
+
+def test_under_budget_nightly_keeps_scenario_quick(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(audit_validation, "REPO_ROOT", tmp_path)
+    write_nightly_runtime_report(tmp_path, 2256.0)
+
+    review = audit_validation.build_coverage_review([build_nightly_row()])
+    nightly_by_id = {entry["stepId"]: entry for entry in review["nightlySteps"]}
+
+    assert review["runtimeBudgetStatus"] == "pass"
+    assert review["latestNightlyRuntimeSeconds"] == 2256.0
+    assert nightly_by_id["scenario_quick"]["candidateAction"] == "keep"
+    assert not any(entry["id"] == "nightly.scenario_quick" for entry in review["trimCandidates"])
+    assert "under the 1-hour budget" in review["decisionSummary"]
+
+
+def test_warning_zone_nightly_measures_scenario_quick(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(audit_validation, "REPO_ROOT", tmp_path)
+    write_nightly_runtime_report(tmp_path, 3200.0)
+
+    review = audit_validation.build_coverage_review([build_nightly_row()])
+    nightly_by_id = {entry["stepId"]: entry for entry in review["nightlySteps"]}
+
+    assert review["runtimeBudgetStatus"] == "warn"
+    assert nightly_by_id["scenario_quick"]["candidateAction"] == "measure_more"
+    assert nightly_by_id["code_health"]["candidateAction"] == "measure_more"
+
+
+def test_over_budget_nightly_flags_scenario_and_code_health_trim_candidates(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(audit_validation, "REPO_ROOT", tmp_path)
+    write_nightly_runtime_report(tmp_path, 3700.0)
+
+    review = audit_validation.build_coverage_review([build_nightly_row()])
+    nightly_by_id = {entry["stepId"]: entry for entry in review["nightlySteps"]}
+    trim_ids = {entry["id"] for entry in review["trimCandidates"]}
+
+    assert review["runtimeBudgetStatus"] == "over_budget"
+    assert nightly_by_id["scenario_quick"]["candidateAction"] == "trim_candidate"
+    assert nightly_by_id["code_health"]["candidateAction"] == "trim_candidate"
+    assert "nightly.scenario_quick" in trim_ids
+    assert "nightly.code_health" in trim_ids
+
+
+def test_missing_nightly_runtime_keeps_conservative_measure_more() -> None:
+    review = audit_validation.build_coverage_review([])
+    nightly_by_id = {entry["stepId"]: entry for entry in review["nightlySteps"]}
+
+    assert review["runtimeBudgetStatus"] == "unknown"
+    assert nightly_by_id["scenario_quick"]["candidateAction"] == "measure_more"
+    assert "runtime is unavailable" in review["decisionSummary"]
 
 
 def test_coverage_review_keeps_legacy_class_audits_forensic_and_non_required() -> None:
@@ -316,3 +385,47 @@ def test_explain_coverage_adds_advisory_review_without_changing_status(tmp_path:
     assert payload["coverageReview"]["mechanisms"][0]["riskAreas"]
     assert "Coverage Redundancy Review" in markdown
     assert "| command | risks | overlap | placement | action | reason |" in markdown
+
+
+def test_coverage_markdown_includes_nightly_budget_fields(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(audit_validation, "REPO_ROOT", tmp_path)
+    write_nightly_runtime_report(tmp_path, 2256.0)
+    rows = [
+        {
+            "task": "nightly-audit",
+            "status": "pass",
+            "recommendedGateLevel": "release",
+            "validationConfidence": "high",
+            "latestStatus": "warn",
+            "inferredRuntimeClass": "medium",
+            "reportArtifacts": [{"path": "reports/nightly/nightly_audit_latest.json", "exists": True}],
+            "overlapCandidates": ["check-fast", "audit-quick", "audit-health"],
+        }
+    ]
+    coverage = {
+        "wrapperTasks": ["nightly-audit"],
+        "runbookDirectEquivalentTasks": ["nightly-audit"],
+        "missingFromWrapper": [],
+        "missingRunbookDirectEquivalent": [],
+        "undocumentedWrapperTasks": [],
+        "unknownWrapperTasks": [],
+    }
+
+    payload = audit_validation.build_report_payload(
+        context={"generatedAt": "2026-04-28T00:00:00+00:00", "branch": "integration", "commit": "abc123", "gitStatusShort": []},
+        rows=rows,
+        command_coverage=coverage,
+        measure_smoke=False,
+        include_heavy=False,
+        timeout_seconds=300,
+        stale_days=14,
+        json_path=tmp_path / "audit_validation.json",
+        markdown_path=tmp_path / "audit_validation.md",
+        explain_coverage=True,
+    )
+    markdown = audit_validation.format_report_markdown(payload)
+
+    assert payload["coverageReview"]["runtimeBudgetStatus"] == "pass"
+    assert "Nightly runtime budget seconds" in markdown
+    assert "Runtime budget status: `pass`" in markdown
+    assert "Latest nightly runtime seconds: `2256.0`" in markdown
