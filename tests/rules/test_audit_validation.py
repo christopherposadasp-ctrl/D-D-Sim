@@ -392,10 +392,37 @@ def test_test_signal_review_flags_low_signal_patterns_without_removing_tests() -
     assert "candidate_remove_after_canary" not in review["summary"]["candidateActionCounts"]
     assert by_name["test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout"][
         "candidateAction"
-    ] == "rewrite_behavior_level"
+    ] == "keep"
+    assert by_name["test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout"][
+        "assertionProfile"
+    ]["helperAssertionCalls"] > 0
     assert by_name["test_monster_benchmark_batches_report_health_metrics"]["candidateAction"] == "demote_to_checkpoint"
     assert by_name["test_python_run_cases_match_python_goldens"]["candidateAction"] == "keep"
     assert "Do not remove" in review["decisionRule"]
+
+
+def test_test_signal_review_uses_assertion_shape_to_flag_exact_action_payloads() -> None:
+    exact = audit_validation.classify_test_signal(
+        "tests/rules/test_ai.py::test_smart_fighter_prefers_example",
+        True,
+        audit_validation.build_assertion_profile(
+            'def test_smart_fighter_prefers_example():\n'
+            '    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}\n'
+        ),
+    )
+    cleaned = audit_validation.classify_test_signal(
+        "tests/rules/test_ai.py::test_smart_fighter_prefers_example",
+        True,
+        audit_validation.build_assertion_profile(
+            'def test_smart_fighter_prefers_example():\n'
+            '    assert_attack_action_core(decision.action, "G1", "greatsword")\n'
+        ),
+    )
+
+    assert exact["assertionProfile"]["exactActionDictAssertions"] == 1
+    assert exact["candidateAction"] == "rewrite_behavior_level"
+    assert cleaned["assertionProfile"]["helperAssertionCalls"] == 1
+    assert cleaned["candidateAction"] == "keep"
 
 
 def test_test_coverage_ledger_includes_unmeasured_monster_benchmark_runtime_by_default(tmp_path: Path) -> None:

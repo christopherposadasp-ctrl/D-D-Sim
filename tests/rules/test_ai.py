@@ -78,6 +78,13 @@ def assert_attack_action_core(action, target_id: str, weapon_id: str) -> None:
     assert_action_core(action, kind="attack", target_id=target_id, weapon_id=weapon_id)
 
 
+def assert_spell_action_core(action, spell_id: str, target_id: str | None = None) -> None:
+    expected = {"kind": "cast_spell", "spell_id": spell_id}
+    if target_id is not None:
+        expected["target_id"] = target_id
+    assert_action_core(action, **expected)
+
+
 def assert_bonus_action_core(action, kind: str, timing: str, target_id: str | None = None) -> None:
     expected = {"kind": kind, "timing": timing}
     if target_id is not None:
@@ -661,7 +668,7 @@ def test_smart_wizard_uses_fire_bolt_as_the_default_ranged_action() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "fire_bolt", "G1")
 
 
 def test_level2_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
@@ -677,7 +684,7 @@ def test_level2_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "fire_bolt", "G1")
 
 
 def test_level3_evoker_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
@@ -695,7 +702,7 @@ def test_level3_evoker_wizard_does_not_select_mage_armor_in_normal_ai_turns() ->
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "fire_bolt", "G1")
 
 
 def test_level4_evoker_wizard_keeps_existing_spell_priority_and_ignores_mage_armor() -> None:
@@ -732,7 +739,7 @@ def test_level5_evoker_wizard_does_not_select_metadata_only_level3_spells() -> N
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "fire_bolt", "G1")
 
 
 def test_evoker_wizard_shatter_plans_only_mutually_legal_cluster_targets() -> None:
@@ -881,7 +888,7 @@ def test_level3_evoker_wizard_rejects_ally_unsafe_shatter_and_uses_single_target
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
 
 
 def test_level3_evoker_wizard_uses_scorching_ray_for_healthy_single_target() -> None:
@@ -899,7 +906,7 @@ def test_level3_evoker_wizard_uses_scorching_ray_for_healthy_single_target() -> 
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "scorching_ray", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
 
 
 def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_by_one_enemy() -> None:
@@ -915,7 +922,7 @@ def test_smart_wizard_uses_baseline_shocking_grasp_without_retreat_when_pinned_b
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "shocking_grasp", "G1")
     assert decision.post_action_movement is None
 
 
@@ -932,7 +939,7 @@ def test_dumb_wizard_uses_shocking_grasp_opportunistically_without_retreat_plan(
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "cast_spell", "spell_id": "shocking_grasp", "target_id": "G1"}
+    assert_spell_action_core(decision.action, "shocking_grasp", "G1")
     assert decision.post_action_movement is None
 
 
@@ -968,8 +975,8 @@ def test_smart_wizard_uses_baseline_fire_bolt_instead_of_magic_missile_for_bad_a
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
-    assert dumb_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G1"}
+    assert_spell_action_core(smart_decision.action, "fire_bolt", "G1")
+    assert_spell_action_core(dumb_decision.action, "fire_bolt", "G1")
 
 
 def test_wizard_magic_missile_split_is_smart_only_and_dumb_focus_fires() -> None:
@@ -997,20 +1004,12 @@ def test_wizard_magic_missile_split_is_smart_only_and_dumb_focus_fires() -> None
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.action == {
-        "kind": "cast_spell",
-        "spell_id": "magic_missile",
-        "target_id": "G1",
-        "target_ids": ["G1", "G2", "G2"],
-        "spell_level": 1,
-    }
-    assert dumb_decision.action == {
-        "kind": "cast_spell",
-        "spell_id": "magic_missile",
-        "target_id": "G1",
-        "target_ids": ["G1", "G1", "G1"],
-        "spell_level": 1,
-    }
+    assert_spell_action_core(smart_decision.action, "magic_missile", "G1")
+    assert smart_decision.action["target_ids"] == ["G1", "G2", "G2"]
+    assert smart_decision.action["spell_level"] == 1
+    assert_spell_action_core(dumb_decision.action, "magic_missile", "G1")
+    assert dumb_decision.action["target_ids"] == ["G1", "G1", "G1"]
+    assert dumb_decision.action["spell_level"] == 1
 
 
 def test_level4_wizard_uses_level2_magic_missile_for_guaranteed_finisher() -> None:
@@ -1027,13 +1026,9 @@ def test_level4_wizard_uses_level2_magic_missile_for_guaranteed_finisher() -> No
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {
-        "kind": "cast_spell",
-        "spell_id": "magic_missile",
-        "target_id": "G1",
-        "target_ids": ["G1", "G1", "G1", "G1"],
-        "spell_level": 2,
-    }
+    assert_spell_action_core(decision.action, "magic_missile", "G1")
+    assert decision.action["target_ids"] == ["G1", "G1", "G1", "G1"]
+    assert decision.action["spell_level"] == 2
 
 
 def test_smart_wizard_uses_baseline_fire_bolt_instead_of_repositioning_for_burning_hands() -> None:
@@ -1187,8 +1182,8 @@ def test_paladin_uses_lay_on_hands_for_downed_adjacent_ally() -> None:
 
     decision = choose_turn_decision(encounter, "F2")
 
-    assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "before_action", "target_id": "F1"}
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "longsword"}
+    assert_bonus_action_core(decision.bonus_action, "lay_on_hands", "before_action", "F1")
+    assert_attack_action_core(decision.action, "G1", "longsword")
 
 
 def test_paladin_moves_to_rescue_downed_ally_and_still_acts_from_rescue_square() -> None:
@@ -1214,8 +1209,8 @@ def test_paladin_moves_to_rescue_downed_ally_and_still_acts_from_rescue_square()
 
     assert decision.pre_action_movement is not None
     assert decision.pre_action_movement.path[-1] == GridPosition(x=3, y=3)
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "longsword"}
-    assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "after_action", "target_id": "F1"}
+    assert_attack_action_core(decision.action, "G1", "longsword")
+    assert_bonus_action_core(decision.bonus_action, "lay_on_hands", "after_action", "F1")
 
 
 def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
@@ -1227,7 +1222,7 @@ def test_paladin_uses_longsword_in_melee_and_javelin_as_fallback() -> None:
 
     melee_decision = choose_turn_decision(melee, "F2")
 
-    assert melee_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "longsword"}
+    assert_attack_action_core(melee_decision.action, "G1", "longsword")
 
     ranged = create_encounter(EncounterConfig(seed="paladin-ranged-fallback", placements=DEFAULT_POSITIONS))
     ranged.units["F2"].resources.spell_slots_level_1 = 0
@@ -1256,7 +1251,7 @@ def test_smart_paladin_uses_clean_normal_range_javelin_when_melee_is_unreachable
 
     decision = choose_turn_decision(encounter, "F2")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "javelin"}
+    assert_attack_action_core(decision.action, "G1", "javelin")
 
 
 def test_smart_paladin_advances_instead_of_throwing_long_range_javelin() -> None:
@@ -1296,7 +1291,7 @@ def test_paladin_rescue_followup_does_not_throw_disadvantage_javelin() -> None:
     decision = choose_turn_decision(encounter, "F2")
 
     assert decision.pre_action_movement is not None
-    assert decision.bonus_action == {"kind": "lay_on_hands", "timing": "after_action", "target_id": "F1"}
+    assert_bonus_action_core(decision.bonus_action, "lay_on_hands", "after_action", "F1")
     assert decision.action["kind"] == "skip"
     assert decision.action.get("weapon_id") != "javelin"
 
@@ -1425,8 +1420,8 @@ def test_barbarian_prefers_greataxe_when_melee_is_reachable() -> None:
 
     decision = choose_turn_decision(encounter, "F2")
 
-    assert decision.bonus_action == {"kind": "rage", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert_bonus_action_core(decision.bonus_action, "rage", "before_action")
+    assert_attack_action_core(decision.action, "G1", "greataxe")
 
 
 def test_barbarian_throws_handaxe_only_after_close_and_dash_fail() -> None:
@@ -1443,7 +1438,7 @@ def test_barbarian_throws_handaxe_only_after_close_and_dash_fail() -> None:
 
     decision = choose_turn_decision(encounter, "F2")
 
-    assert decision.bonus_action == {"kind": "rage", "timing": "before_action"}
+    assert_bonus_action_core(decision.bonus_action, "rage", "before_action")
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "handaxe"
     assert decision.pre_action_movement is None
@@ -1471,7 +1466,7 @@ def test_smart_barbarian_uses_baseline_no_reckless_attack_on_an_eligible_greatax
         step_overrides=[AttackRollOverrides(attack_rolls=[4, 16], damage_rolls=[7])],
     )
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert_attack_action_core(decision.action, "G1", "greataxe")
     assert attack_events[0].event_type == "attack"
     assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
     assert attack_events[0].resolved_totals["attackMode"] == "normal"
@@ -1499,7 +1494,7 @@ def test_dumb_barbarian_does_not_use_reckless_attack() -> None:
         step_overrides=[AttackRollOverrides(attack_rolls=[16], damage_rolls=[7])],
     )
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert_attack_action_core(decision.action, "G1", "greataxe")
     assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
     assert any(effect.kind == "reckless_attack" for effect in encounter.units["F2"].temporary_effects) is False
 
@@ -1555,7 +1550,7 @@ def test_smart_barbarian_skips_reckless_attack_when_first_melee_attack_already_h
 
     attack_event = next(event for event in attack_events if event.event_type == "attack")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
+    assert_attack_action_core(decision.action, "G1", "greataxe")
     assert all(event.resolved_totals.get("recklessAttack") is not True for event in attack_events)
     assert attack_event.resolved_totals["attackMode"] == "advantage"
     assert "target_prone" in attack_event.raw_rolls["advantageSources"]
@@ -2083,7 +2078,7 @@ def test_raging_barbarian_uses_bonus_action_upkeep_when_no_attack_is_available()
 
     decision = choose_turn_decision(encounter, "F2")
 
-    assert decision.bonus_action == {"kind": "rage", "timing": "after_action"}
+    assert_bonus_action_core(decision.bonus_action, "rage", "after_action")
     assert decision.action["kind"] == "skip"
 
 
@@ -2389,7 +2384,7 @@ def test_smart_rogue_and_wizard_prioritize_aura_of_authority_leader() -> None:
 
     assert unit_has_trait(rogue.units["G2"], "aura_of_authority")
     assert_attack_action_core(rogue_decision.action, "G2", "shortbow")
-    assert wizard_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G2"}
+    assert_spell_action_core(wizard_decision.action, "fire_bolt", "G2")
 
 
 def test_smart_rogue_ignores_backline_priority_without_a_legal_attack_line() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -1178,11 +1179,70 @@ def get_test_name_from_node_id(node_id: str) -> str:
     return node_id.rsplit("::", 1)[-1].split("[", 1)[0]
 
 
-def classify_test_signal(node_id: str, selected_by_not_slow: bool) -> dict[str, Any]:
+def build_assertion_profile(source: str | None = None) -> dict[str, Any]:
+    if source is None:
+        return {
+            "sourceAvailable": False,
+            "exactActionDictAssertions": 0,
+            "exactPathListAssertions": 0,
+            "helperAssertionCalls": 0,
+            "subsetActionAssertions": 0,
+        }
+    return {
+        "sourceAvailable": True,
+        "exactActionDictAssertions": len(
+            re.findall(r"assert\s+[^\n]*(?:\.action|\.bonus_action|\.surged_action)\s*==\s*\{", source)
+        ),
+        "exactPathListAssertions": len(re.findall(r"assert\s+\[point\.model_dump\(\)[^\n]*\.path\]\s*==\s*\[", source)),
+        "helperAssertionCalls": len(
+            re.findall(
+                r"\bassert_(?:action_core|attack_action_core|bonus_action_core|battle_master_auto|movement_ends_at)\(",
+                source,
+            )
+        ),
+        "subsetActionAssertions": len(
+            re.findall(
+                r"\.(?:action|bonus_action|surged_action)\[[\"'](?:kind|weapon_id|target_id|spell_id|target_ids)[\"']\]\s*==",
+                source,
+            )
+        ),
+    }
+
+
+def build_test_assertion_profiles(node_ids: tuple[str, ...]) -> dict[tuple[str, str], dict[str, Any]]:
+    paths = sorted({normalize_node_path(node_id) for node_id in node_ids})
+    profiles: dict[tuple[str, str], dict[str, Any]] = {}
+    for path in paths:
+        file_path = REPO_ROOT / path
+        if not file_path.exists():
+            continue
+        try:
+            source = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        lines = source.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
+                continue
+            if node.end_lineno is None:
+                profiles[(path, node.name)] = build_assertion_profile(None)
+                continue
+            function_source = "\n".join(lines[node.lineno - 1 : node.end_lineno])
+            profiles[(path, node.name)] = build_assertion_profile(function_source)
+    return profiles
+
+
+def classify_test_signal(
+    node_id: str,
+    selected_by_not_slow: bool,
+    assertion_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     path = normalize_node_path(node_id)
     test_name = get_test_name_from_node_id(node_id)
     path_name = Path(path).name
     lowered = test_name.lower()
+    assertion_profile = assertion_profile or build_assertion_profile(None)
 
     category = "mechanic_rule"
     signal_level = "high"
@@ -1221,9 +1281,19 @@ def classify_test_signal(node_id: str, selected_by_not_slow: bool) -> dict[str, 
     elif path_name == "test_ai.py" or "smart" in lowered or "dumb" in lowered:
         category = "ai_decision"
         if any(marker in lowered for marker in ("opens_with", "prefers", "uses_", "does_not", "keeps_existing")):
-            signal_level = "medium"
-            candidate_action = "rewrite_behavior_level"
-            rationale = "Exact AI choice tests may be high-value, but should be reviewed for behavior-level intent."
+            if assertion_profile["sourceAvailable"] and (
+                assertion_profile["exactActionDictAssertions"] > 0
+                or assertion_profile["exactPathListAssertions"] > 0
+            ):
+                signal_level = "medium"
+                candidate_action = "rewrite_behavior_level"
+                rationale = "Source still contains exact action/path assertions; review for behavior-level intent."
+            elif assertion_profile["sourceAvailable"]:
+                rationale = "Source uses behavior-level or subset assertions rather than exact action payloads."
+            else:
+                signal_level = "medium"
+                candidate_action = "rewrite_behavior_level"
+                rationale = "Source was unavailable, so name-based AI-choice review remains conservative."
         else:
             rationale = "AI decision tests isolate behavior that broad audits only observe indirectly."
     elif any(marker in lowered for marker in ("smoke", "completes", "first_step")):
@@ -1248,13 +1318,22 @@ def classify_test_signal(node_id: str, selected_by_not_slow: bool) -> dict[str, 
         "signalLevel": signal_level,
         "candidateAction": candidate_action,
         "selectedByNotSlow": selected_by_not_slow,
+        "assertionProfile": assertion_profile,
         "rationale": rationale,
     }
 
 
 def build_test_signal_review(full_collection: PytestCollection, not_slow_collection: PytestCollection) -> dict[str, Any]:
     not_slow_nodes = set(not_slow_collection.node_ids)
-    rows = [classify_test_signal(node_id, node_id in not_slow_nodes) for node_id in full_collection.node_ids]
+    assertion_profiles = build_test_assertion_profiles(full_collection.node_ids)
+    rows = [
+        classify_test_signal(
+            node_id,
+            node_id in not_slow_nodes,
+            assertion_profiles.get((normalize_node_path(node_id), get_test_name_from_node_id(node_id))),
+        )
+        for node_id in full_collection.node_ids
+    ]
     category_counts: dict[str, int] = {}
     action_counts: dict[str, int] = {}
     for row in rows:
