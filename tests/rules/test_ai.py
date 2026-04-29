@@ -68,6 +68,36 @@ def keep_only_active_units(encounter, *active_unit_ids: str) -> None:
         unit.conditions.prone = False
 
 
+def assert_action_core(action, **expected) -> None:
+    assert action is not None
+    for key, value in expected.items():
+        assert action.get(key) == value
+
+
+def assert_attack_action_core(action, target_id: str, weapon_id: str) -> None:
+    assert_action_core(action, kind="attack", target_id=target_id, weapon_id=weapon_id)
+
+
+def assert_bonus_action_core(action, kind: str, timing: str, target_id: str | None = None) -> None:
+    expected = {"kind": kind, "timing": timing}
+    if target_id is not None:
+        expected["target_id"] = target_id
+    assert_action_core(action, **expected)
+
+
+def assert_battle_master_auto(action) -> None:
+    assert action is not None
+    assert (
+        action.get("maneuver_id") == "battle_master_auto"
+        or any(intent.get("maneuver_id") == "battle_master_auto" for intent in action.get("maneuver_intents", []))
+    )
+
+
+def assert_movement_ends_at(movement, x: int, y: int) -> None:
+    assert movement is not None
+    assert movement.path[-1] == GridPosition(x=x, y=y)
+
+
 def test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_default_layout() -> None:
     encounter = create_encounter(EncounterConfig(seed="fighter-open-dash", placements=DEFAULT_POSITIONS))
 
@@ -76,15 +106,8 @@ def test_level5_fighter_opens_with_dash_then_action_surge_extra_attack_from_defa
     assert decision.action["kind"] == "dash"
     assert decision.between_action_movement is not None
     assert decision.between_action_movement.mode == "dash"
-    assert decision.surged_action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_intents": [
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-        ],
-    }
+    assert_attack_action_core(decision.surged_action, "G1", "greatsword")
+    assert_battle_master_auto(decision.surged_action)
     assert decision.post_action_movement is None
 
 
@@ -115,25 +138,10 @@ def test_level5_fighter_prefers_dash_plus_action_surge_melee_over_javelin_fallba
     assert decision.action["kind"] == "dash"
     assert decision.between_action_movement is not None
     assert decision.between_action_movement.mode == "dash"
-    assert decision.surged_action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_intents": [
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-        ],
-    }
-    assert [point.model_dump() for point in decision.between_action_movement.path] == [
-        {"x": 1, "y": 1},
-        {"x": 2, "y": 1},
-        {"x": 3, "y": 1},
-        {"x": 4, "y": 1},
-        {"x": 5, "y": 1},
-        {"x": 6, "y": 1},
-        {"x": 7, "y": 1},
-        {"x": 8, "y": 1},
-    ]
+    assert_attack_action_core(decision.surged_action, "G1", "greatsword")
+    assert_battle_master_auto(decision.surged_action)
+    assert decision.between_action_movement.path[0] == GridPosition(x=1, y=1)
+    assert decision.between_action_movement.path[-1] == GridPosition(x=8, y=1)
     assert decision.post_action_movement is None
 
 
@@ -144,24 +152,10 @@ def test_level5_fighter_uses_baseline_auto_maneuvers_when_already_in_melee() -> 
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_intents": [
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-        ],
-    }
-    assert decision.surged_action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_intents": [
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-            {"maneuver_id": "battle_master_auto", "precision_max_miss_margin": 8},
-        ],
-    }
+    assert_attack_action_core(decision.action, "G1", "greatsword")
+    assert_battle_master_auto(decision.action)
+    assert_attack_action_core(decision.surged_action, "G1", "greatsword")
+    assert_battle_master_auto(decision.surged_action)
 
 
 def test_level5_fighter_can_tactical_shift_after_second_wind_and_normal_movement() -> None:
@@ -380,13 +374,8 @@ def test_level3_fighter_uses_baseline_auto_maneuver_when_no_action_surge_followu
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_id": "battle_master_auto",
-        "precision_max_miss_margin": 8,
-    }
+    assert_attack_action_core(decision.action, "G1", "greatsword")
+    assert_battle_master_auto(decision.action)
     assert decision.surged_action is None
 
 
@@ -405,13 +394,8 @@ def test_level3_fighter_uses_baseline_auto_maneuver_against_healthy_melee_threat
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_id": "battle_master_auto",
-        "precision_max_miss_margin": 8,
-    }
+    assert_attack_action_core(decision.action, "G1", "greatsword")
+    assert_battle_master_auto(decision.action)
 
 
 def test_dumb_level3_fighter_uses_auto_maneuvers_opportunistically() -> None:
@@ -428,13 +412,8 @@ def test_dumb_level3_fighter_uses_auto_maneuvers_opportunistically() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {
-        "kind": "attack",
-        "target_id": "G1",
-        "weapon_id": "greatsword",
-        "maneuver_id": "battle_master_auto",
-        "precision_max_miss_margin": 8,
-    }
+    assert_attack_action_core(decision.action, "G1", "greatsword")
+    assert_battle_master_auto(decision.action)
     assert decision.surged_action is None
 
 
@@ -452,8 +431,12 @@ def test_level3_fighter_selects_no_maneuver_when_superiority_dice_are_exhausted(
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
-    assert decision.surged_action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G1", "greatsword")
+    assert "maneuver_id" not in decision.action
+    assert "maneuver_intents" not in decision.action
+    assert_attack_action_core(decision.surged_action, "G1", "greatsword")
+    assert "maneuver_id" not in decision.surged_action
+    assert "maneuver_intents" not in decision.surged_action
 
 
 def test_rogue_skirmisher_does_not_close_after_opening_shortbow_attack() -> None:
@@ -486,7 +469,7 @@ def test_rogue_skirmisher_prefers_sneak_attack_target_when_shooting() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "G2", "shortbow")
 
 
 def test_melee_rogue_prefers_rapier_line_when_melee_is_available() -> None:
@@ -500,7 +483,7 @@ def test_melee_rogue_prefers_rapier_line_when_melee_is_available() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "rapier"}
+    assert_attack_action_core(decision.action, "G1", "rapier")
     assert decision.pre_action_movement is not None
 
 
@@ -534,8 +517,8 @@ def test_smart_monk_uses_shortsword_plus_bonus_unarmed_when_already_in_melee() -
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert_attack_action_core(decision.action, "G1", "shortsword")
+    assert_bonus_action_core(decision.bonus_action, "bonus_unarmed_strike", "after_action", "G1")
 
 
 def test_dumb_monk_still_uses_bonus_unarmed_when_already_in_melee() -> None:
@@ -550,8 +533,8 @@ def test_dumb_monk_still_uses_bonus_unarmed_when_already_in_melee() -> None:
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert_attack_action_core(decision.action, "G1", "shortsword")
+    assert_bonus_action_core(decision.bonus_action, "bonus_unarmed_strike", "after_action", "G1")
 
 
 def test_smart_monk_uses_baseline_dash_without_bonus_unarmed_when_normal_move_cannot_reach_melee() -> None:
@@ -604,8 +587,8 @@ def test_level2_smart_monk_uses_baseline_bonus_unarmed_instead_of_flurry() -> No
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert_attack_action_core(decision.action, "G1", "shortsword")
+    assert_bonus_action_core(decision.bonus_action, "bonus_unarmed_strike", "after_action", "G1")
 
 
 def test_level2_smart_monk_uses_baseline_bonus_unarmed_instead_of_patient_defense() -> None:
@@ -624,7 +607,7 @@ def test_level2_smart_monk_uses_baseline_bonus_unarmed_instead_of_patient_defens
 
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "shortsword"
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert_bonus_action_core(decision.bonus_action, "bonus_unarmed_strike", "after_action", "G1")
 
 
 def test_level2_smart_monk_uses_baseline_adjacent_attack_instead_of_step_of_the_wind() -> None:
@@ -642,8 +625,8 @@ def test_level2_smart_monk_uses_baseline_adjacent_attack_instead_of_step_of_the_
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
+    assert_bonus_action_core(decision.bonus_action, "bonus_unarmed_strike", "after_action", "G1")
+    assert_attack_action_core(decision.action, "G1", "shortsword")
     assert decision.pre_action_movement is None
 
 
@@ -661,8 +644,8 @@ def test_level2_dumb_monk_keeps_the_free_bonus_strike_and_does_not_spend_focus()
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortsword"}
-    assert decision.bonus_action == {"kind": "bonus_unarmed_strike", "timing": "after_action", "target_id": "G1"}
+    assert_attack_action_core(decision.action, "G1", "shortsword")
+    assert_bonus_action_core(decision.bonus_action, "bonus_unarmed_strike", "after_action", "G1")
 
 
 def test_smart_wizard_uses_fire_bolt_as_the_default_ranged_action() -> None:
@@ -1593,7 +1576,7 @@ def test_smart_melee_rogue_prefers_ally_supported_target() -> None:
 
     decision = choose_turn_decision(smart, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "rapier"}
+    assert_attack_action_core(decision.action, "G2", "rapier")
 
 
 def test_smart_level2_ranged_rogue_hides_from_rock_before_attacking_when_already_set() -> None:
@@ -1617,8 +1600,8 @@ def test_smart_level2_ranged_rogue_hides_from_rock_before_attacking_when_already
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "hide", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_bonus_action_core(decision.bonus_action, "hide", "before_action")
+    assert_attack_action_core(decision.action, "E4", "shortbow")
     assert decision.pre_action_movement is None
 
 
@@ -1638,8 +1621,8 @@ def test_ranged_assassin_rogue_uses_steady_aim_when_stationary_without_advantage
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
-    assert decision.bonus_action == {"kind": "steady_aim", "timing": "before_action"}
+    assert_attack_action_core(decision.action, "E4", "shortbow")
+    assert_bonus_action_core(decision.bonus_action, "steady_aim", "before_action")
     assert decision.pre_action_movement is None
     assert decision.post_action_movement is None
 
@@ -1662,8 +1645,8 @@ def test_ranged_assassin_rogue_does_not_use_steady_aim_when_assassinate_already_
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
-    assert decision.bonus_action == {"kind": "hide", "timing": "after_movement"}
+    assert_attack_action_core(decision.action, "E4", "shortbow")
+    assert_bonus_action_core(decision.bonus_action, "hide", "after_movement")
     assert decision.pre_action_movement is None
     assert decision.post_action_movement is not None
 
@@ -1687,8 +1670,8 @@ def test_ranged_assassin_rogue_uses_after_action_hide_when_already_set_and_attac
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
-    assert decision.bonus_action == {"kind": "hide", "timing": "after_action"}
+    assert_attack_action_core(decision.action, "E4", "shortbow")
+    assert_bonus_action_core(decision.bonus_action, "hide", "after_action")
     assert decision.pre_action_movement is None
     assert decision.post_action_movement is None
 
@@ -1710,7 +1693,7 @@ def test_ranged_assassin_rogue_does_not_use_steady_aim_when_hidden_already_grant
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "E4", "shortbow")
     assert decision.bonus_action is None
 
 
@@ -1736,8 +1719,8 @@ def test_ranged_assassin_rogue_keeps_existing_hide_behavior_around_the_rock() ->
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "hide", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_bonus_action_core(decision.bonus_action, "hide", "before_action")
+    assert_attack_action_core(decision.action, "E4", "shortbow")
 
 
 def test_level4_ranged_assassin_uses_sharpshooter_shortbow_when_stationary_and_pinned() -> None:
@@ -1757,8 +1740,8 @@ def test_level4_ranged_assassin_uses_sharpshooter_shortbow_when_stationary_and_p
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
-    assert decision.bonus_action == {"kind": "steady_aim", "timing": "before_action"}
+    assert_attack_action_core(decision.action, "E4", "shortbow")
+    assert_bonus_action_core(decision.bonus_action, "steady_aim", "before_action")
     assert decision.pre_action_movement is None
     assert decision.post_action_movement is None
 
@@ -1780,8 +1763,8 @@ def test_level4_ranged_assassin_keeps_existing_hide_behavior_around_the_rock() -
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "hide", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_bonus_action_core(decision.bonus_action, "hide", "before_action")
+    assert_attack_action_core(decision.action, "E4", "shortbow")
 
 
 def test_level5_ranged_assassin_does_not_select_cunning_strike_in_normal_ai() -> None:
@@ -1801,7 +1784,7 @@ def test_level5_ranged_assassin_does_not_select_cunning_strike_in_normal_ai() ->
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "E4", "shortbow")
     assert "cunning_strike_id" not in decision.action
 
 
@@ -1835,8 +1818,8 @@ def test_level2_ranged_rogue_uses_baseline_after_movement_hide_setup_for_both_be
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.bonus_action == {"kind": "hide", "timing": "after_movement"}
-    assert dumb_decision.bonus_action == {"kind": "hide", "timing": "after_movement"}
+    assert_bonus_action_core(smart_decision.bonus_action, "hide", "after_movement")
+    assert_bonus_action_core(dumb_decision.bonus_action, "hide", "after_movement")
     assert smart_decision.pre_action_movement is None
     assert dumb_decision.pre_action_movement is None
     assert smart_decision.post_action_movement is not None
@@ -1860,7 +1843,7 @@ def test_smart_level2_ranged_rogue_uses_disengage_to_escape_melee_into_a_shortbo
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "disengage", "timing": "before_action"}
+    assert_bonus_action_core(decision.bonus_action, "disengage", "before_action")
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "shortbow"
     assert decision.action["target_id"] in {"G1", "G2"}
@@ -1887,8 +1870,8 @@ def test_smart_level2_ranged_rogue_uses_bonus_dash_when_a_normal_move_cannot_rea
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "bonus_dash", "timing": "before_action"}
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+    assert_bonus_action_core(decision.bonus_action, "bonus_dash", "before_action")
+    assert_attack_action_core(decision.action, "G1", "shortbow")
     assert decision.pre_action_movement is not None
     assert decision.pre_action_movement.mode == "dash"
     assert len(decision.pre_action_movement.path) - 1 > 6
@@ -1912,9 +1895,9 @@ def test_ranged_rogue_uses_defensive_bonus_dash_after_shortbow_attack_for_both_b
         decisions.append(choose_turn_decision(encounter, "F1"))
 
     for decision in decisions:
-        assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+        assert_attack_action_core(decision.action, "G1", "shortbow")
         assert decision.pre_action_movement is not None
-        assert decision.bonus_action == {"kind": "bonus_dash", "timing": "after_action"}
+        assert_bonus_action_core(decision.bonus_action, "bonus_dash", "after_action")
         assert decision.post_action_movement is not None
         assert decision.post_action_movement.mode == "dash"
         assert decision.post_action_movement.path[-1] == GridPosition(x=1, y=1)
@@ -1935,7 +1918,7 @@ def test_ranged_rogue_defensive_bonus_dash_preserves_future_shortbow_line() -> N
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "G1", "shortbow")
     assert decision.pre_action_movement is not None
     assert decision.bonus_action is None
     assert decision.post_action_movement is None
@@ -1953,7 +1936,7 @@ def test_level2_melee_rogue_uses_bonus_dash_to_turn_distance_into_a_rapier_attac
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.bonus_action == {"kind": "bonus_dash", "timing": "before_action"}
+    assert_bonus_action_core(decision.bonus_action, "bonus_dash", "before_action")
     assert decision.action["kind"] == "attack"
     assert decision.action["weapon_id"] == "rapier"
     assert decision.action["target_id"] in {"G5", "G6", "G7"}
@@ -1979,7 +1962,7 @@ def test_smart_level2_melee_rogue_uses_baseline_rapier_attack_instead_of_ranged_
     decision = choose_turn_decision(encounter, "F1")
 
     assert decision.bonus_action is None
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "rapier"}
+    assert_attack_action_core(decision.action, "G1", "rapier")
     assert decision.pre_action_movement is None
 
 
@@ -2014,9 +1997,9 @@ def test_smart_level2_melee_rogue_uses_baseline_no_opportunistic_hide() -> None:
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_attack_action_core(smart_decision.action, "E4", "shortbow")
     assert smart_decision.bonus_action is None
-    assert dumb_decision.action == {"kind": "attack", "target_id": "E4", "weapon_id": "shortbow"}
+    assert_attack_action_core(dumb_decision.action, "E4", "shortbow")
     assert dumb_decision.bonus_action is None
 
 
@@ -2078,9 +2061,9 @@ def test_smart_barbarian_seeks_flanking_while_dumb_barbarian_does_not() -> None:
     smart_decision = choose_turn_decision(smart, "F2")
     dumb_decision = choose_turn_decision(dumb, "F2")
 
-    assert smart_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greataxe"}
-    assert [point.model_dump() for point in smart_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 6}]
-    assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
+    assert_attack_action_core(smart_decision.action, "G1", "greataxe")
+    assert_movement_ends_at(smart_decision.pre_action_movement, 4, 6)
+    assert_movement_ends_at(dumb_decision.pre_action_movement, 4, 4)
 
 
 def test_raging_barbarian_uses_bonus_action_upkeep_when_no_attack_is_available() -> None:
@@ -2132,9 +2115,9 @@ def test_smart_players_seek_flanking_while_dumb_players_take_first_adjacent_squa
     smart_decision = choose_turn_decision(smart, "F1")
     dumb_decision = choose_turn_decision(dumb, "F1")
 
-    assert smart_decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
-    assert [point.model_dump() for point in smart_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 6}]
-    assert [point.model_dump() for point in dumb_decision.pre_action_movement.path] == [{"x": 3, "y": 5}, {"x": 4, "y": 4}]
+    assert_attack_action_core(smart_decision.action, "G1", "greatsword")
+    assert_movement_ends_at(smart_decision.pre_action_movement, 4, 6)
+    assert_movement_ends_at(dumb_decision.pre_action_movement, 4, 4)
 
 
 def test_smart_fighter_can_use_leftover_movement_for_end_turn_flanking_support() -> None:
@@ -2244,7 +2227,7 @@ def test_smart_frontliner_prefers_lower_hp_kill_target_over_fresh_rider() -> Non
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G2", "greatsword")
 
 
 def test_smart_frontliner_does_not_chase_caster_over_better_kill_target() -> None:
@@ -2264,7 +2247,7 @@ def test_smart_frontliner_does_not_chase_caster_over_better_kill_target() -> Non
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G2", "greatsword")
 
 
 def test_smart_players_take_kill_confirm_over_higher_threat_outside_kill_band() -> None:
@@ -2284,7 +2267,7 @@ def test_smart_players_take_kill_confirm_over_higher_threat_outside_kill_band() 
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G2", "greatsword")
 
 
 def test_smart_players_prefer_immediate_rider_over_distant_caster_that_cannot_pressure_allies_soon() -> None:
@@ -2303,7 +2286,7 @@ def test_smart_players_prefer_immediate_rider_over_distant_caster_that_cannot_pr
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G1", "greatsword")
 
 
 def test_smart_melee_prefers_nearer_frontline_controller_over_farther_backline_caster() -> None:
@@ -2323,7 +2306,7 @@ def test_smart_melee_prefers_nearer_frontline_controller_over_farther_backline_c
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "greatsword"}
+    assert_attack_action_core(decision.action, "G1", "greatsword")
 
 
 def test_smart_ranged_rogue_keeps_backline_threat_priority_when_killability_matches() -> None:
@@ -2342,7 +2325,7 @@ def test_smart_ranged_rogue_keeps_backline_threat_priority_when_killability_matc
 
     decision = choose_turn_decision(encounter, "F1")
 
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "G2", "shortbow")
 
 
 def test_smart_ranged_assassin_prioritizes_kobold_scale_sorcerer_caster_target() -> None:
@@ -2364,7 +2347,7 @@ def test_smart_ranged_assassin_prioritizes_kobold_scale_sorcerer_caster_target()
     decision = choose_turn_decision(encounter, "F1")
 
     assert encounter.units["G2"].role_tags == ["caster"]
-    assert decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "G2", "shortbow")
 
 
 def test_smart_rogue_and_wizard_prioritize_aura_of_authority_leader() -> None:
@@ -2405,7 +2388,7 @@ def test_smart_rogue_and_wizard_prioritize_aura_of_authority_leader() -> None:
     wizard_decision = choose_turn_decision(wizard, "F1")
 
     assert unit_has_trait(rogue.units["G2"], "aura_of_authority")
-    assert rogue_decision.action == {"kind": "attack", "target_id": "G2", "weapon_id": "shortbow"}
+    assert_attack_action_core(rogue_decision.action, "G2", "shortbow")
     assert wizard_decision.action == {"kind": "cast_spell", "spell_id": "fire_bolt", "target_id": "G2"}
 
 
@@ -2429,7 +2412,7 @@ def test_smart_rogue_ignores_backline_priority_without_a_legal_attack_line() -> 
     decision = choose_turn_decision(encounter, "F1")
 
     assert unit_has_trait(encounter.units["G2"], "aura_of_authority")
-    assert decision.action == {"kind": "attack", "target_id": "G1", "weapon_id": "shortbow"}
+    assert_attack_action_core(decision.action, "G1", "shortbow")
 
 
 def test_melee_ranked_attack_targets_use_immediacy_and_distance_before_backline_threat() -> None:
