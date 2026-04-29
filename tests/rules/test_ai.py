@@ -690,6 +690,63 @@ def test_level2_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
     assert_spell_action_core(decision.action, "fire_bolt", "G1")
 
 
+def test_smart_wizard_uses_level1_magic_missile_when_fire_bolt_hit_chance_is_very_low() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-low-fire-bolt-odds-magic-missile",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G1"].ac = 25
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "magic_missile", "G1")
+    assert decision.action["spell_level"] == 1
+    assert decision.action["target_ids"] == ["G1", "G1", "G1"]
+
+
+def test_smart_wizard_preserves_last_level1_slot_instead_of_low_odds_magic_missile() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-low-fire-bolt-odds-reserve-slot",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level2_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+    encounter.units["F1"].resources.spell_slots_level_1 = 1
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G1"].ac = 25
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "fire_bolt", "G1")
+
+
+def test_dumb_wizard_does_not_use_low_odds_fire_bolt_magic_missile_fallback() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-low-fire-bolt-odds-dumb",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}),
+            player_preset_id="wizard_level2_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    defeat_other_enemies(encounter, "G1")
+    encounter.units["G1"].current_hp = 20
+    encounter.units["G1"].ac = 25
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "fire_bolt", "G1")
+
+
 def test_level3_evoker_wizard_does_not_select_mage_armor_in_normal_ai_turns() -> None:
     encounter = create_encounter(
         EncounterConfig(

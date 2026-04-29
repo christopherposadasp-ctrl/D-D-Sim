@@ -3780,6 +3780,78 @@ def choose_magic_missile_action(
     return None
 
 
+def get_fire_bolt_hit_probability_for_decision(
+    state: EncounterState,
+    actor: UnitState,
+    decision: TurnDecision,
+    position_index: PositionIndex | None,
+) -> float | None:
+    if not decision.action or decision.action.get("spell_id") != "fire_bolt":
+        return None
+    target_id = str(decision.action.get("target_id") or "")
+    target = state.units.get(target_id)
+    if not target or not target.position or not actor.position:
+        return None
+
+    attack_position = (
+        decision.pre_action_movement.path[-1]
+        if decision.pre_action_movement and decision.pre_action_movement.path
+        else actor.position
+    )
+    spell_profile = build_spell_attack_profile(actor, "fire_bolt")
+    context = get_attack_context(
+        state,
+        actor.id,
+        target.id,
+        spell_profile,
+        attack_position,
+        target.position,
+        position_index,
+    )
+    if not context.legal:
+        return None
+
+    attack_mode = get_attack_mode_for_context(state, actor, target, spell_profile, context)
+    target_ac = target.ac + get_shield_ac_bonus(target) + context.cover_ac_bonus
+    return get_hit_probability(spell_profile.attack_bonus, target_ac, attack_mode)
+
+
+def choose_last_resort_level1_magic_missile_action(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+) -> dict[str, object] | None:
+    if state.player_behavior != "smart" or not actor.position or actor.resources.spell_slots_level_1 <= 1:
+        return None
+    if not can_cast_magic_missile(actor):
+        return None
+
+    magic_missile_profile = build_spell_attack_context_profile("magic_missile")
+    prioritized_targets = sort_player_ranged_targets(
+        state,
+        actor,
+        conscious_enemies,
+        state.player_behavior,
+        attack_profile=build_spell_attack_profile(actor, "magic_missile"),
+    )
+    for target in prioritized_targets:
+        if not target.position:
+            continue
+        magic_missile_context = get_attack_context(state, actor.id, target.id, magic_missile_profile)
+        if not magic_missile_context.legal or not magic_missile_context.within_normal_range:
+            continue
+        target_ids = build_magic_missile_target_ids(state, actor, prioritized_targets, 1)
+        return {
+            "kind": "cast_spell",
+            "spell_id": "magic_missile",
+            "target_id": target_ids[0],
+            "target_ids": target_ids,
+            "spell_level": 1,
+        }
+
+    return None
+
+
 def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnDecision:
     move_squares = get_move_squares(actor, state)
     position_index = build_position_index(state)
@@ -3844,7 +3916,24 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
             return TurnDecision(action={"kind": "attack", "target_id": adjacent_targets[0].id, "weapon_id": melee_weapon_id})
 
     if fire_bolt_decision:
+        hit_probability = get_fire_bolt_hit_probability_for_decision(state, actor, fire_bolt_decision, position_index)
+        if hit_probability is not None and hit_probability < 0.30:
+            last_resort_magic_missile_action = choose_last_resort_level1_magic_missile_action(
+                state,
+                actor,
+                conscious_enemies,
+            )
+            if last_resort_magic_missile_action:
+                return TurnDecision(action=last_resort_magic_missile_action)
         return fire_bolt_decision
+
+    last_resort_magic_missile_action = choose_last_resort_level1_magic_missile_action(
+        state,
+        actor,
+        conscious_enemies,
+    )
+    if last_resort_magic_missile_action:
+        return TurnDecision(action=last_resort_magic_missile_action)
 
     if can_use_player_weapon(actor, melee_weapon_id):
         for target in melee_targets:
