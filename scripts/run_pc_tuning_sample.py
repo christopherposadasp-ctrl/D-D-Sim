@@ -229,6 +229,15 @@ def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
         "magicMissileCastsByLevel": Counter(),
         "magicMissileProjectiles": 0,
         "magicMissileSplitCasts": 0,
+        "fireballCasts": 0,
+        "fireballTargetDamageEvents": 0,
+        "fireballDamage": 0,
+        "fireballTargetCounts": [],
+        "fireballEnemyTargets": [],
+        "fireballAllyTargets": [],
+        "fireballFriendlyFireCasts": 0,
+        "fireballSaveSuccesses": 0,
+        "fireballSaveFailures": 0,
         "burningHandsCasts": 0,
         "burningHandsCastsByLevel": Counter(),
         "burningHandsTargetDamageEvents": 0,
@@ -593,6 +602,13 @@ def record_wizard_attack(metrics: dict[str, Any], event: Any) -> None:
         add_metric(metrics, "magicMissileOverkillDamage", max(0, total_damage - damage_to_hp))
         if resolved_totals.get("blockedByShield") is True:
             add_metric(metrics, "magicMissileBlockedByShield")
+    elif spell_id == "fireball":
+        add_metric(metrics, "fireballTargetDamageEvents")
+        add_metric(metrics, "fireballDamage", damage_to_hp)
+        if resolved_totals.get("saveSucceeded") is True:
+            add_metric(metrics, "fireballSaveSuccesses")
+        else:
+            add_metric(metrics, "fireballSaveFailures")
     elif spell_id == "burning_hands":
         add_metric(metrics, "burningHandsTargetDamageEvents")
         add_metric(metrics, "burningHandsDamage", damage_to_hp)
@@ -708,6 +724,21 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
                 metrics["shatterTargetCounts"].append(int(resolved_totals.get("targetCount") or 0))
                 continue
 
+            if is_actor and spell_id == "fireball" and event.event_type == "phase_change":
+                spell_id_text = str(spell_id)
+                metrics["wizardSpellCasts"][spell_id_text] += 1
+                record_wizard_spell_slot_spend(metrics, spell_id_text, resolved_totals)
+                add_metric(metrics, "fireballCasts")
+                target_count = int(resolved_totals.get("targetCount") or 0)
+                enemy_targets = int(resolved_totals.get("enemyTargetCount") or 0)
+                ally_targets = int(resolved_totals.get("allyTargetCount") or 0)
+                metrics["fireballTargetCounts"].append(target_count)
+                metrics["fireballEnemyTargets"].append(enemy_targets)
+                metrics["fireballAllyTargets"].append(ally_targets)
+                if ally_targets > 0:
+                    add_metric(metrics, "fireballFriendlyFireCasts")
+                continue
+
             if is_actor and resolved_totals.get("reaction") == "shield" and event.event_type == "phase_change":
                 spell_id_text = "shield"
                 metrics["wizardSpellCasts"][spell_id_text] += 1
@@ -728,7 +759,7 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
 
             if is_actor and event.event_type == "attack":
                 spell_cast_event = resolved_totals.get("spellCastEvent") is not False
-                if spell_id and spell_id not in {"burning_hands", "scorching_ray", "shatter"} and spell_cast_event:
+                if spell_id and spell_id not in {"burning_hands", "fireball", "scorching_ray", "shatter"} and spell_cast_event:
                     metrics["wizardSpellCasts"][str(spell_id)] += 1
                     record_wizard_spell_slot_spend(metrics, str(spell_id), resolved_totals)
                 elif spell_id == "shatter" and int(resolved_totals.get("targetCount") or 0) <= 1 and spell_cast_event:
@@ -1101,6 +1132,10 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     lay_on_hands_heals = list(metrics["layOnHandsHeals"])
     cure_wounds_heals = list(metrics["cureWoundsHeals"])
     ending_wizard_hp = list(metrics["endingWizardHp"])
+    fireball_casts = int(metrics["fireballCasts"])
+    fireball_target_counts = list(metrics["fireballTargetCounts"])
+    fireball_enemy_targets = list(metrics["fireballEnemyTargets"])
+    fireball_ally_targets = list(metrics["fireballAllyTargets"])
     burning_hands_enemy_targets = list(metrics["burningHandsEnemyTargets"])
     burning_hands_ally_targets = list(metrics["burningHandsAllyTargets"])
     scorching_ray_casts = int(metrics["scorchingRayCasts"])
@@ -1263,6 +1298,26 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
             else 0.0,
             "magicMissileSplitCasts": metrics["magicMissileSplitCasts"],
             "magicMissileSplitCastRate": percent(metrics["magicMissileSplitCasts"], metrics["magicMissileCasts"]),
+            "fireballCasts": fireball_casts,
+            "fireballTargetDamageEvents": metrics["fireballTargetDamageEvents"],
+            "fireballDamage": metrics["fireballDamage"],
+            "fireballAverageDamagePerCast": round(float(metrics["fireballDamage"]) / fireball_casts, 2)
+            if fireball_casts
+            else 0.0,
+            "fireballAverageTargets": average(fireball_target_counts),
+            "fireballAverageEnemyTargets": average(fireball_enemy_targets),
+            "fireballAverageAllyTargets": average(fireball_ally_targets),
+            "fireballTargetDistribution": distribution(fireball_target_counts),
+            "fireballEnemyTargetDistribution": distribution(fireball_enemy_targets),
+            "fireballAllyTargetDistribution": distribution(fireball_ally_targets),
+            "fireballFriendlyFireCasts": metrics["fireballFriendlyFireCasts"],
+            "fireballFriendlyFireRate": percent(metrics["fireballFriendlyFireCasts"], fireball_casts),
+            "fireballSaveSuccesses": metrics["fireballSaveSuccesses"],
+            "fireballSaveFailures": metrics["fireballSaveFailures"],
+            "fireballFailedSaveRate": percent(
+                metrics["fireballSaveFailures"],
+                metrics["fireballSaveSuccesses"] + metrics["fireballSaveFailures"],
+            ),
             "burningHandsCasts": burning_hands_casts,
             "burningHandsCastsByLevel": dict(sorted(metrics["burningHandsCastsByLevel"].items())),
             "burningHandsTargetDamageEvents": metrics["burningHandsTargetDamageEvents"],
@@ -2004,6 +2059,7 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
         ),
         (
             f"- spells: Fire Bolt {overall['fireBoltHits']}/{overall['fireBoltCasts']} hit(s), "
+            f"Fireball {overall['fireballCasts']} cast(s), "
             f"Magic Missile {overall['magicMissileCasts']} cast(s), "
             f"Scorching Ray {overall['scorchingRayCasts']} cast(s), "
             f"Shatter {overall['shatterCasts']} cast(s), "
@@ -2021,6 +2077,8 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"{overall['averageEndingSpellSlotsLevel1']}/"
             f"{overall['averageEndingSpellSlotsLevel2']}/"
             f"{overall['averageEndingSpellSlotsLevel3']}, "
+            f"Fireball avg targets {overall['fireballAverageEnemyTargets']} "
+            f"friendly-fire {overall['fireballFriendlyFireCasts']}, "
             f"Magic Missile kills {overall['magicMissileKillSecures']} "
             f"(levels {overall['magicMissileCastsByLevel']}), "
             f"Scorching splits {overall['scorchingRaySplitCasts']}/{overall['scorchingRayCasts']}, "
@@ -2043,6 +2101,7 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"damage/run {row['averageWizardDamagePerRun']}, "
             f"slots spent {row['wizardSpellSlotsSpent']}, "
             f"Shield {row['shieldCasts']}, "
+            f"Fireball {row['fireballCasts']} (avg enemies {row['fireballAverageEnemyTargets']}), "
             f"Scorching {row['scorchingRayCasts']} ({row['scorchingRaySplitCasts']} split), "
             f"Shatter {row['shatterCasts']} (avg targets {row['shatterAverageTargets']}), "
             f"Burning Hands {row['burningHandsCasts']} "
@@ -2151,7 +2210,8 @@ def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
         return (
             f"- wizard ({unit_id}): dmg/run {overall['averageWizardDamagePerRun']}, "
             f"slots spent {overall['wizardSpellSlotsSpent']}, unused-slot runs {overall['runsWithUnusedSpellSlots']}, "
-            f"Fire Bolt {overall['fireBoltCasts']}, Magic Missile {overall['magicMissileCasts']}, "
+            f"Fire Bolt {overall['fireBoltCasts']}, Fireball {overall['fireballCasts']}, "
+            f"Magic Missile {overall['magicMissileCasts']}, "
             f"Scorching {overall['scorchingRayCasts']} ({overall['scorchingRaySplitCasts']} split), "
             f"Shatter {overall['shatterCasts']}, Burning Hands {overall['burningHandsCasts']}, "
             f"Shield {overall['shieldCasts']}, "
@@ -2403,6 +2463,11 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
         f"| Average ending 2nd-level slots | {overall['averageEndingSpellSlotsLevel2']} |",
         f"| Average ending 3rd-level slots | {overall['averageEndingSpellSlotsLevel3']} |",
         f"| Fire Bolt hits/casts | {overall['fireBoltHits']} / {overall['fireBoltCasts']} |",
+        f"| Fireball casts | {overall['fireballCasts']} |",
+        f"| Fireball average enemy targets | {overall['fireballAverageEnemyTargets']} |",
+        f"| Fireball average ally targets | {overall['fireballAverageAllyTargets']} |",
+        f"| Fireball friendly-fire casts | {overall['fireballFriendlyFireCasts']} |",
+        f"| Fireball failed save rate | {overall['fireballFailedSaveRate']}% |",
         f"| Magic Missile casts | {overall['magicMissileCasts']} |",
         f"| Magic Missile casts by level | {overall['magicMissileCastsByLevel']} |",
         f"| Magic Missile projectiles | {overall['magicMissileProjectiles']} |",
@@ -2452,8 +2517,8 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
             "",
             "## Scenarios",
             "",
-            "| Scenario | Win Rate | Avg Rounds | Damage/Run | Slots Spent | Unused Slots | Unused L1 | Unused L2 | Shield | Magic Missile | Scorching | SR Split | Shatter | Shatter Targets | Burning Hands | BH Enemies | BH Allies | Down Rate |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Scenario | Win Rate | Avg Rounds | Damage/Run | Slots Spent | Unused Slots | Unused L1 | Unused L2 | Shield | Fireball | FB Enemies | FB Allies | Magic Missile | Scorching | SR Split | Shatter | Shatter Targets | Burning Hands | BH Enemies | BH Allies | Down Rate |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in payload["scenarios"]:
@@ -2461,7 +2526,9 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
             f"| `{row['scenarioId']}` | {row['playerWinRate']}% | {row['averageRounds']} | "
             f"{row['averageWizardDamagePerRun']} | {row['wizardSpellSlotsSpent']} | "
             f"{row['runsWithUnusedSpellSlots']} | {row['runsWithUnusedSpellSlotsLevel1']} | "
-            f"{row['runsWithUnusedSpellSlotsLevel2']} | {row['shieldCasts']} | {row['magicMissileCasts']} | "
+            f"{row['runsWithUnusedSpellSlotsLevel2']} | {row['shieldCasts']} | "
+            f"{row['fireballCasts']} | {row['fireballAverageEnemyTargets']} | {row['fireballAverageAllyTargets']} | "
+            f"{row['magicMissileCasts']} | "
             f"{row['scorchingRayCasts']} | {row['scorchingRaySplitCasts']} | "
             f"{row['shatterCasts']} | {row['shatterAverageTargets']} | "
             f"{row['burningHandsCasts']} | {row['burningHandsAverageEnemyTargets']} | "

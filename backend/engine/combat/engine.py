@@ -4208,6 +4208,33 @@ def resolve_cast_spell_action(
             overrides,
         )
 
+    if spell.targeting_mode == "point_sphere_save":
+        target_id = str(action["target_id"])
+        target = state.units.get(target_id)
+        if "center_x" in action and "center_y" in action:
+            center = GridPosition(x=int(action["center_x"]), y=int(action["center_y"]))
+        elif target and target.position:
+            center = target.position
+        else:
+            return counterspell_events + [create_skip_event(state, actor_id, f"{spell.display_name} has no legal sphere.")]
+        raw_spell_events = spell_resolvers.resolve_point_sphere_save_spell(
+            state,
+            actor_id,
+            action["spell_id"],
+            center,
+            overrides,
+            required_primary_target_id=target_id,
+        )
+        follow_up_events: list[CombatEvent] = []
+        for event in raw_spell_events:
+            if event.event_type != "attack":
+                continue
+            for resolved_target_id in event.target_ids:
+                if state.units[resolved_target_id].conditions.dead:
+                    follow_up_events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
+                    follow_up_events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+        return counterspell_events + raw_spell_events + follow_up_events
+
     if spell.on_hit_effect_kind == "poisoned_save":
         spell_event = resolve_cast_spell(
             state,

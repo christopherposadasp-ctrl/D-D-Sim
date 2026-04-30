@@ -34,6 +34,7 @@ from backend.engine.models.state import (
 )
 from backend.engine.rules.combat_rules import (
     build_spell_attack_profile,
+    build_sphere_targeting,
     can_apply_assassinate_advantage,
     can_apply_sneak_attack,
     can_use_battle_master_maneuver,
@@ -334,7 +335,7 @@ def can_cast_combat_spell(unit: UnitState, spell_id: str) -> bool:
         return unit.resources.spell_slots_level_1 > 0
     if spell.level == 2:
         return unit.resources.spell_slots_level_2 > 0
-    return False
+    return unit.resources.get_pool(f"spell_slots_level_{spell.level}") > 0
 
 
 def can_open_barbarian_rage(actor: UnitState) -> bool:
@@ -3359,6 +3360,119 @@ def build_shatter_decision(
     return None
 
 
+def build_fireball_action(targeting, primary_target_id: str) -> dict[str, object]:
+    return {
+        "kind": "cast_spell",
+        "spell_id": "fireball",
+        "target_id": primary_target_id,
+        "target_ids": list(targeting.target_ids),
+        "center_x": targeting.center.x,
+        "center_y": targeting.center.y,
+        "spell_level": 3,
+    }
+
+
+def get_fireball_conscious_enemy_target_ids(state: EncounterState, targeting) -> tuple[str, ...]:
+    return tuple(
+        target_id
+        for target_id in targeting.enemy_target_ids
+        if target_id in state.units and is_unit_conscious(state.units[target_id])
+    )
+
+
+def get_fireball_expected_kills_and_damage(
+    state: EncounterState, enemy_target_ids: tuple[str, ...]
+) -> tuple[int, float]:
+    average_damage = 28.0
+    expected_kills = 0
+    expected_damage = 0.0
+    for target_id in enemy_target_ids:
+        target = state.units[target_id]
+        if target.current_hp <= average_damage:
+            expected_kills += 1
+        expected_damage += min(float(target.current_hp), average_damage)
+    return expected_kills, expected_damage
+
+
+def build_fireball_decision(
+    state: EncounterState,
+    actor: UnitState,
+    conscious_enemies: list[UnitState],
+    position_index: PositionIndex | None,
+) -> TurnDecision | None:
+    if not actor.position or not can_cast_combat_spell(actor, "fireball"):
+        return None
+
+    spell = get_spell_definition("fireball")
+    radius_squares = max(1, spell.radius_feet // 5)
+    range_squares = max(1, spell.range_feet // 5)
+    prioritized_targets = sort_player_ranged_targets(
+        state,
+        actor,
+        conscious_enemies,
+        state.player_behavior,
+        attack_profile=build_spell_attack_profile(actor, "fireball"),
+        position_index=position_index,
+    )
+    target_rank = {target.id: index for index, target in enumerate(prioritized_targets)}
+
+    if state.player_behavior == "dumb":
+        for target in prioritized_targets:
+            if not target.position:
+                continue
+            targeting = build_sphere_targeting(
+                state,
+                actor.id,
+                center=target.position,
+                radius_squares=radius_squares,
+                range_squares=range_squares,
+                required_primary_target_id=target.id,
+            )
+            if not targeting or targeting.ally_target_ids:
+                continue
+            conscious_enemy_ids = get_fireball_conscious_enemy_target_ids(state, targeting)
+            if len(conscious_enemy_ids) >= 3:
+                return TurnDecision(action=build_fireball_action(targeting, target.id))
+        return None
+
+    candidates = []
+    for x in range(1, GRID_SIZE + 1):
+        for y in range(1, GRID_SIZE + 1):
+            targeting = build_sphere_targeting(
+                state,
+                actor.id,
+                center=GridPosition(x=x, y=y),
+                radius_squares=radius_squares,
+                range_squares=range_squares,
+            )
+            if not targeting or targeting.ally_target_ids:
+                continue
+            conscious_enemy_ids = get_fireball_conscious_enemy_target_ids(state, targeting)
+            if len(conscious_enemy_ids) < 3:
+                continue
+            primary_target_id = sorted(conscious_enemy_ids, key=lambda target_id: (target_rank.get(target_id, 999), target_id))[0]
+            expected_kills, expected_damage = get_fireball_expected_kills_and_damage(state, conscious_enemy_ids)
+            candidates.append((targeting, primary_target_id, conscious_enemy_ids, expected_kills, expected_damage))
+
+    if not candidates:
+        return None
+
+    best_targeting, primary_target_id, _, _, _ = sorted(
+        candidates,
+        key=lambda candidate: (
+            -len(candidate[2]),
+            -candidate[3],
+            -candidate[4],
+            target_rank.get(candidate[1], 999),
+            candidate[0].center.x,
+            candidate[0].center.y,
+            candidate[1],
+            candidate[0].target_ids,
+        ),
+    )[0]
+    return TurnDecision(action=build_fireball_action(best_targeting, primary_target_id))
+
+
 def get_ray_hit_probability(
     state: EncounterState,
     actor: UnitState,
@@ -3873,6 +3987,10 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     has_adjacent_enemy = any(
         actor.position and target.position and get_distance_between_units(actor, target) <= 1 for target in conscious_enemies
     )
+
+    fireball_decision = build_fireball_decision(state, actor, conscious_enemies, position_index)
+    if fireball_decision:
+        return fireball_decision
 
     magic_missile_multikill_action = choose_magic_missile_multikill_action(state, actor, conscious_enemies)
     if magic_missile_multikill_action:

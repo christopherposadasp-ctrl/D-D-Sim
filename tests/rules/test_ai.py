@@ -784,7 +784,7 @@ def test_level4_evoker_wizard_keeps_existing_spell_priority_and_ignores_mage_arm
     assert set(decision.action["target_ids"]) == {"G1", "G2"}
 
 
-def test_level5_evoker_wizard_does_not_select_metadata_only_level3_spells() -> None:
+def test_level5_evoker_wizard_does_not_select_non_fireball_level3_spells() -> None:
     encounter = create_encounter(
         EncounterConfig(
             seed="wizard-level5-no-level3-ai",
@@ -800,6 +800,117 @@ def test_level5_evoker_wizard_does_not_select_metadata_only_level3_spells() -> N
     decision = choose_turn_decision(encounter, "F1")
 
     assert_spell_action_core(decision.action, "fire_bolt", "G1")
+
+
+def test_smart_level5_wizard_uses_fireball_before_other_spell_rungs() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-fireball-first-rung",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 8, "y": 1},
+                G2={"x": 8, "y": 2},
+                G3={"x": 8, "y": 3},
+                G4={"x": 13, "y": 13},
+            ),
+            player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3", "G4")
+    for target_id in ("G1", "G2", "G3"):
+        encounter.units[target_id].current_hp = 3
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert decision.pre_action_movement is None
+    assert_spell_action_core(decision.action, "fireball")
+    assert set(decision.action["target_ids"]) >= {"G1", "G2", "G3"}
+
+
+def test_smart_level5_wizard_fireball_chooses_best_ally_safe_blast() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-fireball-best-blast",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 7, "y": 1},
+                G2={"x": 8, "y": 1},
+                G3={"x": 9, "y": 1},
+                G4={"x": 12, "y": 10},
+                G5={"x": 13, "y": 10},
+                G6={"x": 12, "y": 11},
+                G7={"x": 13, "y": 11},
+            ),
+            player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3", "G4", "G5", "G6", "G7")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "fireball")
+    assert set(decision.action["target_ids"]) == {"G4", "G5", "G6", "G7"}
+
+
+def test_dumb_level5_wizard_fireball_uses_first_target_centered_blast() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-fireball-dumb-first-centered",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                G1={"x": 7, "y": 1},
+                G2={"x": 8, "y": 1},
+                G3={"x": 9, "y": 1},
+                G4={"x": 12, "y": 10},
+                G5={"x": 13, "y": 10},
+                G6={"x": 12, "y": 11},
+                G7={"x": 13, "y": 11},
+            ),
+            player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="dumb",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "G1", "G2", "G3", "G4", "G5", "G6", "G7")
+
+    decision = choose_turn_decision(encounter, "F1")
+
+    assert_spell_action_core(decision.action, "fireball", "G1")
+    assert (decision.action["center_x"], decision.action["center_y"]) == (7, 1)
+    assert set(decision.action["target_ids"]) == {"G1", "G2", "G3"}
+
+
+def test_level5_wizard_skips_fireball_on_two_targets_or_ally_unsafe_blast() -> None:
+    two_targets = create_encounter(
+        EncounterConfig(
+            seed="wizard-fireball-two-targets",
+            placements=build_trio_placements(F1={"x": 1, "y": 1}, G1={"x": 8, "y": 1}, G2={"x": 8, "y": 2}),
+            player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(two_targets, "F1", "G1", "G2")
+    two_target_decision = choose_turn_decision(two_targets, "F1")
+    assert two_target_decision.action["spell_id"] != "fireball"
+
+    ally_unsafe = create_encounter(
+        EncounterConfig(
+            seed="wizard-fireball-ally-unsafe",
+            placements=build_trio_placements(
+                F1={"x": 1, "y": 1},
+                F2={"x": 8, "y": 2},
+                G1={"x": 8, "y": 1},
+                G2={"x": 8, "y": 3},
+                G3={"x": 9, "y": 2},
+            ),
+            player_preset_id="wizard_level5_evoker_sample_trio",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(ally_unsafe, "F1", "F2", "G1", "G2", "G3")
+    ally_unsafe_decision = choose_turn_decision(ally_unsafe, "F1")
+    assert ally_unsafe_decision.action["spell_id"] != "fireball"
 
 
 def test_evoker_wizard_shatter_plans_only_mutually_legal_cluster_targets() -> None:

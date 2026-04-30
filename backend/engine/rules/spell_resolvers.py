@@ -13,6 +13,7 @@ from backend.engine.models.state import (
     DiceSpec,
     DivineFavorEffect,
     EncounterState,
+    GridPosition,
     HasteEffect,
     HealingBlockedEffect,
     HeroismEffect,
@@ -26,6 +27,7 @@ from backend.engine.models.state import (
 )
 from backend.engine.rules.combat_rules import (
     apply_damage,
+    build_sphere_targeting,
     can_trigger_attack_reaction,
     choose_burning_hands_targeting,
     choose_redirect_attack_ally,
@@ -1494,6 +1496,170 @@ def resolve_multi_target_save_spell(
                     f"{attacker_id}'s {spell.display_name} "
                     f"{'deals no damage to' if save_success else 'hits'} {resolved_target_id}"
                     f"{f' for {applied_damage} damage' if applied_damage > 0 else ''}"
+                    f"{' after a successful save' if save_success else ' after a failed save'}."
+                ),
+            )
+        )
+
+    return events
+
+
+def resolve_point_sphere_save_spell(
+    state: EncounterState,
+    attacker_id: str,
+    spell_id: str,
+    center: GridPosition,
+    overrides: AttackRollOverrides | None = None,
+    *,
+    required_primary_target_id: str | None = None,
+) -> list[CombatEvent]:
+    attacker = state.units[attacker_id]
+    spell = get_spell_definition(spell_id)
+    if spell.targeting_mode != "point_sphere_save":
+        return [build_spell_skip_event(state, attacker_id, spell_id, "is not a point-origin spell.")]
+    if not unit_has_combat_spell(attacker, spell_id):
+        return [build_spell_skip_event(state, attacker_id, spell_id, "is not prepared.")]
+    if attacker.current_hp <= 0 or attacker.conditions.dead or attacker.conditions.unconscious:
+        return [build_spell_skip_event(state, attacker_id, spell_id, "cannot be cast while down.")]
+
+    radius_squares = max(1, spell.radius_feet // 5)
+    range_squares = max(1, spell.range_feet // 5)
+    targeting = build_sphere_targeting(
+        state,
+        attacker_id,
+        center=center,
+        radius_squares=radius_squares,
+        range_squares=range_squares,
+        required_primary_target_id=required_primary_target_id,
+    )
+    if not targeting:
+        return [build_spell_skip_event(state, attacker_id, spell_id, "has no legal sphere.")]
+    if spell.level > 0 and not spend_spell_slot(attacker, spell.level):
+        return [build_spell_skip_event(state, attacker_id, spell_id, f"No level {spell.level} spell slots remain.")]
+
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    damage_dice = get_scaled_spell_damage_dice(attacker, spell)
+    damage_rolls = [
+        pull_die(state, dice.sides, damage_rolls_override.pop(0) if damage_rolls_override else None)
+        for dice in damage_dice
+        for _ in range(dice.count)
+    ]
+    full_damage = sum(damage_rolls) + spell.damage_modifier
+    save_dc = get_spell_save_dc(attacker, spell_id)
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
+    events: list[CombatEvent] = [
+        CombatEvent(
+            **event_base(state, attacker_id),
+            target_ids=list(targeting.target_ids),
+            event_type="phase_change",
+            raw_rolls={},
+            resolved_totals={
+                "spellId": spell_id,
+                "spellLevel": spell.level,
+                "centerX": targeting.center.x,
+                "centerY": targeting.center.y,
+                "radiusFeet": spell.radius_feet,
+                "radiusSquares": radius_squares,
+                "enemyTargetCount": len(targeting.enemy_target_ids),
+                "allyTargetCount": len(targeting.ally_target_ids),
+                "targetCount": len(targeting.target_ids),
+                f"spellSlotsLevel{spell.level}Remaining": get_remaining_spell_slots(attacker, spell.level),
+            },
+            movement_details=None,
+            damage_details=None,
+            condition_deltas=[
+                f"{attacker_id} casts {spell.display_name} at ({targeting.center.x}, {targeting.center.y})."
+            ],
+            text_summary=f"{attacker_id} casts {spell.display_name}.",
+        )
+    ]
+
+    for resolved_target_id in targeting.target_ids:
+        target = state.units[resolved_target_id]
+        target_was_alive_before_hit = spell_target_was_alive_before_damage(target)
+        save_mode, _, _ = get_saving_throw_mode(target, spell.save_ability or "dex", state=state)
+        save_roll_count = 1 if save_mode == "normal" else 2
+        save_rolls = [
+            save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))
+        ]
+        save_event = resolve_saving_throw(
+            state,
+            ResolveSavingThrowArgs(
+                actor_id=resolved_target_id,
+                ability=spell.save_ability or "dex",
+                dc=save_dc,
+                reason=spell.display_name,
+                overrides=SavingThrowOverrides(save_rolls=save_rolls),
+            ),
+        )
+        save_success = bool(save_event.resolved_totals["success"])
+        applied_damage = full_damage // 2 if save_success and spell.half_on_success else full_damage
+        damage_components = build_spell_save_damage_component(damage_rolls, applied_damage, spell.damage_type)
+        damage_result = apply_damage(
+            state,
+            resolved_target_id,
+            damage_components,
+            False,
+            concentration_save_rolls=concentration_rolls_override,
+        )
+
+        raw_rolls = {"damageRolls": list(damage_rolls)}
+        resolved_totals = {
+            "spellId": spell_id,
+            "spellLevel": spell.level,
+            "saveAbility": spell.save_ability,
+            "saveDc": save_dc,
+            "saveSucceeded": save_success,
+            "fullDamage": full_damage,
+            "halfOnSuccess": spell.half_on_success,
+            "damageApplied": applied_damage,
+            "centerX": targeting.center.x,
+            "centerY": targeting.center.y,
+            "radiusFeet": spell.radius_feet,
+            "radiusSquares": radius_squares,
+            "enemyTargetCount": len(targeting.enemy_target_ids),
+            "allyTargetCount": len(targeting.ally_target_ids),
+            "targetCount": len(targeting.target_ids),
+            f"spellSlotsLevel{spell.level}Remaining": get_remaining_spell_slots(attacker, spell.level),
+        }
+        attach_spell_target_outcome_fields(state, resolved_totals, resolved_target_id, target_was_alive_before_hit)
+        attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
+
+        events.append(save_event)
+        events.append(
+            CombatEvent(
+                **event_base(state, attacker_id),
+                target_ids=[resolved_target_id],
+                event_type="attack",
+                raw_rolls=raw_rolls,
+                resolved_totals=resolved_totals,
+                movement_details=None,
+                damage_details=DamageDetails(
+                    weapon_id=spell_id,
+                    weapon_name=spell.display_name,
+                    damage_components=damage_components,
+                    primary_candidate=None,
+                    savage_candidate=None,
+                    chosen_candidate=None,
+                    critical_applied=False,
+                    critical_multiplier=1,
+                    flat_modifier=spell.damage_modifier,
+                    advantage_bonus_candidate=None,
+                    mastery_applied=None,
+                    mastery_notes=None,
+                    attack_riders_applied=None,
+                    total_damage=applied_damage,
+                    resisted_damage=damage_result.resisted_damage,
+                    amplified_damage=damage_result.amplified_damage or None,
+                    temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                    final_damage_to_hp=damage_result.final_damage_to_hp,
+                    hp_delta=damage_result.hp_delta,
+                ),
+                condition_deltas=list(damage_result.condition_deltas),
+                text_summary=(
+                    f"{attacker_id}'s {spell.display_name} deals {applied_damage} damage "
+                    f"to {resolved_target_id}"
                     f"{' after a successful save' if save_success else ' after a failed save'}."
                 ),
             )

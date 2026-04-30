@@ -3629,6 +3629,77 @@ def test_scorching_ray_can_split_rays_across_targets() -> None:
     assert encounter.units["F1"].resources.spell_slots_level_2 == 1
 
 
+def test_fireball_spends_level3_slot_and_affects_all_units_in_sphere() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-fireball-rules"))
+    defeat_other_enemies(encounter, "E1", "E2")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=10, y=6)
+    encounter.units["F3"].position = GridPosition(x=1, y=15)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=13, y=5)
+    encounter.units["E1"].current_hp = 50
+    encounter.units["E2"].current_hp = 50
+    encounter.units["F2"].current_hp = 32
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "fireball",
+            "target_id": "E1",
+            "center_x": 10,
+            "center_y": 5,
+            "spell_level": 3,
+        },
+        overrides=AttackRollOverrides(
+            save_rolls=[1, 20, 1],
+            damage_rolls=[6, 6, 6, 6, 6, 6, 6, 6],
+        ),
+    )
+
+    phase_event = spell_events[0]
+    damage_events = [event for event in spell_events if event.event_type == "attack"]
+    assert phase_event.event_type == "phase_change"
+    assert phase_event.resolved_totals["spellId"] == "fireball"
+    assert phase_event.resolved_totals["spellSlotsLevel3Remaining"] == 1
+    assert phase_event.resolved_totals["enemyTargetCount"] == 2
+    assert phase_event.resolved_totals["allyTargetCount"] == 1
+    damage_by_target = {event.target_ids[0]: event.resolved_totals["damageApplied"] for event in damage_events}
+    assert damage_by_target == {"F2": 48, "E1": 24, "E2": 48}
+    assert encounter.units["F1"].resources.spell_slots_level_3 == 1
+
+
+def test_fireball_fails_cleanly_without_level3_slots() -> None:
+    encounter = create_encounter(build_level5_wizard_config("wizard-fireball-no-slot"))
+    defeat_other_enemies(encounter, "E1", "E2", "E3")
+    encounter.units["F1"].resources.spell_slots_level_3 = 0
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=11, y=5)
+    encounter.units["E3"].position = GridPosition(x=12, y=5)
+    hp_before = encounter.units["E1"].current_hp
+
+    spell_events = resolve_cast_spell_action(
+        encounter,
+        "F1",
+        {
+            "kind": "cast_spell",
+            "spell_id": "fireball",
+            "target_id": "E1",
+            "center_x": 10,
+            "center_y": 5,
+            "spell_level": 3,
+        },
+        overrides=AttackRollOverrides(save_rolls=[1, 1, 1], damage_rolls=[6, 6, 6, 6, 6, 6, 6, 6]),
+    )
+
+    assert len(spell_events) == 1
+    assert spell_events[0].event_type == "skip"
+    assert "No level 3 spell slots remain" in spell_events[0].text_summary
+    assert encounter.units["E1"].current_hp == hp_before
+
+
 def test_shatter_requires_prepared_spell_and_does_not_spend_level2_slot() -> None:
     encounter = create_encounter(build_wizard_config("wizard-shatter-unprepared"))
     defeat_other_enemies(encounter, "E1")
