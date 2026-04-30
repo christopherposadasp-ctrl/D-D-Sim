@@ -1776,7 +1776,9 @@ def test_adult_white_dragon_legendary_resistance_turns_failed_save_into_success(
             actor_id="E1",
             ability="dex",
             dc=20,
-            reason="test effect",
+            reason="Shatter",
+            spell_id="shatter",
+            spell_level=2,
             overrides=SavingThrowOverrides(save_rolls=[1]),
         ),
     )
@@ -1786,6 +1788,46 @@ def test_adult_white_dragon_legendary_resistance_turns_failed_save_into_success(
     assert event.resolved_totals["legendaryResistanceUsesRemaining"] == 2
     assert encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 2
     assert "E1 uses Legendary Resistance to succeed instead." in event.condition_deltas
+
+
+def test_adult_white_dragon_legendary_resistance_does_not_spend_on_low_level_spell() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+
+    event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E1",
+            ability="dex",
+            dc=20,
+            reason="Burning Hands",
+            spell_id="burning_hands",
+            spell_level=1,
+            overrides=SavingThrowOverrides(save_rolls=[1]),
+        ),
+    )
+
+    assert event.resolved_totals["success"] is False
+    assert "legendaryResistanceApplied" not in event.resolved_totals
+    assert encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 3
+
+
+def test_adult_white_dragon_legendary_resistance_does_not_spend_on_non_spell_save() -> None:
+    encounter = build_monster_benchmark_encounter("adult_white_dragon")
+
+    event = resolve_saving_throw(
+        encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E1",
+            ability="dex",
+            dc=20,
+            reason="test effect",
+            overrides=SavingThrowOverrides(save_rolls=[1]),
+        ),
+    )
+
+    assert event.resolved_totals["success"] is False
+    assert "legendaryResistanceApplied" not in event.resolved_totals
+    assert encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 3
 
 
 def test_adult_white_dragon_legendary_resistance_does_not_apply_without_uses() -> None:
@@ -1798,7 +1840,9 @@ def test_adult_white_dragon_legendary_resistance_does_not_apply_without_uses() -
             actor_id="E1",
             ability="dex",
             dc=20,
-            reason="test effect",
+            reason="Shatter",
+            spell_id="shatter",
+            spell_level=2,
             overrides=SavingThrowOverrides(save_rolls=[1]),
         ),
     )
@@ -1817,7 +1861,9 @@ def test_adult_white_dragon_legendary_resistance_does_not_spend_on_successful_sa
             actor_id="E1",
             ability="con",
             dc=12,
-            reason="test effect",
+            reason="Shatter",
+            spell_id="shatter",
+            spell_level=2,
             overrides=SavingThrowOverrides(save_rolls=[20]),
         ),
     )
@@ -2720,7 +2766,9 @@ def test_adult_red_dragon_legendary_resistance_turns_failed_save_into_success() 
             actor_id="E1",
             ability="dex",
             dc=20,
-            reason="test effect",
+            reason="Shatter",
+            spell_id="shatter",
+            spell_level=2,
             overrides=SavingThrowOverrides(save_rolls=[1]),
         ),
     )

@@ -86,6 +86,8 @@ class ResolveSavingThrowArgs:
         advantage_sources: list[str] | None = None,
         disadvantage_sources: list[str] | None = None,
         overrides: SavingThrowOverrides | None = None,
+        spell_id: str | None = None,
+        spell_level: int | None = None,
     ) -> None:
         self.actor_id = actor_id
         self.ability = ability
@@ -94,6 +96,8 @@ class ResolveSavingThrowArgs:
         self.advantage_sources = advantage_sources or []
         self.disadvantage_sources = disadvantage_sources or []
         self.overrides = overrides
+        self.spell_id = spell_id
+        self.spell_level = spell_level
 
 
 def event_base(state: EncounterState, actor_id: str) -> dict[str, int | str]:

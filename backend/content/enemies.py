@@ -2603,8 +2603,8 @@ MONSTER_DEFINITIONS.update(
             initiative_mod=3,
             passive_perception=16,
             ability_mods=young_white_dragon_ability_mods,
-            size_category="large",
-            footprint=large_footprint,
+            size_category="huge",
+            footprint=huge_footprint,
             attacks={
                 "rend": WeaponProfile(
                     id="rend",

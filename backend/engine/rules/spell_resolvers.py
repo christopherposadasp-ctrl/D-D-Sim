@@ -720,6 +720,8 @@ def resolve_ray_of_sickness_poison_save(
             dc=save_dc,
             reason=spell.display_name,
             overrides=save_overrides,
+            spell_id="ray_of_sickness",
+            spell_level=spell.level,
         ),
     )
     save_success = bool(save_event.resolved_totals["success"])
@@ -1412,6 +1414,8 @@ def resolve_multi_target_save_spell(
                 dc=save_dc,
                 reason=spell.display_name,
                 overrides=SavingThrowOverrides(save_rolls=save_rolls),
+                spell_id=spell_id,
+                spell_level=spell.level,
             ),
         )
         save_success = bool(save_event.resolved_totals["success"])
@@ -1591,6 +1595,8 @@ def resolve_point_sphere_save_spell(
                 dc=save_dc,
                 reason=spell.display_name,
                 overrides=SavingThrowOverrides(save_rolls=save_rolls),
+                spell_id=spell_id,
+                spell_level=spell.level,
             ),
         )
         save_success = bool(save_event.resolved_totals["success"])
@@ -1743,6 +1749,8 @@ def resolve_burning_hands(
                 dc=save_dc,
                 reason=spell.display_name,
                 overrides=SavingThrowOverrides(save_rolls=save_rolls),
+                spell_id="burning_hands",
+                spell_level=cast_level,
             ),
         )
         save_success = bool(save_event.resolved_totals["success"])

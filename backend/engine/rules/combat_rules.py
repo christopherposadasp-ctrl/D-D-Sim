@@ -1125,7 +1125,8 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
     total = selected_roll + modifier + bless_bonus
     success = total >= args.dc
     legendary_resistance_applied = False
-    if not success:
+    legendary_resistance_eligible = args.spell_level is not None and args.spell_level >= 2
+    if not success and legendary_resistance_eligible:
         try:
             has_legendary_resistance = unit_has_trait(actor, "legendary_resistance")
         except ValueError:
@@ -1150,6 +1151,10 @@ def resolve_saving_throw(state: EncounterState, args: ResolveSavingThrowArgs) ->
         "dc": args.dc,
         "success": success,
     }
+    if args.spell_id is not None:
+        resolved_totals["spellId"] = args.spell_id
+    if args.spell_level is not None:
+        resolved_totals["spellLevel"] = args.spell_level
     if bless_bonus:
         resolved_totals["blessBonus"] = bless_bonus
         resolved_totals["blessSourceId"] = bless_source_id
