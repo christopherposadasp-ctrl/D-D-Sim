@@ -828,6 +828,85 @@ def test_smart_level5_wizard_uses_fireball_before_other_spell_rungs() -> None:
     assert set(decision.action["target_ids"]) >= {"G1", "G2", "G3"}
 
 
+def test_smart_level5_wizard_hastes_fighter_after_fireball_fails() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-haste-after-no-fireball",
+            placements=build_placements(F1={"x": 1, "y": 1}, F4={"x": 1, "y": 2}, G1={"x": 8, "y": 1}),
+            player_preset_id="martial_mixed_party",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F4", "G1")
+    encounter.units["G1"].current_hp = 40
+
+    decision = choose_turn_decision(encounter, "F4")
+
+    assert_spell_action_core(decision.action, "haste", "F1")
+
+
+def test_smart_level5_wizard_skips_haste_when_already_concentrating() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-no-haste-while-concentrating",
+            placements=build_placements(F1={"x": 1, "y": 1}, F4={"x": 1, "y": 2}, G1={"x": 8, "y": 1}),
+            player_preset_id="martial_mixed_party",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F4", "G1")
+    encounter.units["F4"].temporary_effects.append(
+        ConcentrationEffect(kind="concentration", source_id="F4", spell_id="existing_spell", remaining_rounds=10)
+    )
+    encounter.units["G1"].current_hp = 40
+
+    decision = choose_turn_decision(encounter, "F4")
+
+    assert decision.action["spell_id"] != "haste"
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
+
+
+def test_smart_level5_wizard_uses_fireball_before_hasting_fighter() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-fireball-before-haste",
+            placements=build_placements(
+                F1={"x": 1, "y": 1},
+                F4={"x": 1, "y": 2},
+                G1={"x": 8, "y": 1},
+                G2={"x": 8, "y": 2},
+                G3={"x": 8, "y": 3},
+            ),
+            player_preset_id="martial_mixed_party",
+            player_behavior="smart",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F4", "G1", "G2", "G3")
+
+    decision = choose_turn_decision(encounter, "F4")
+
+    assert_spell_action_core(decision.action, "fireball")
+    assert decision.action.get("target_id") != "F1"
+
+
+def test_dumb_level5_wizard_does_not_haste_fighter() -> None:
+    encounter = create_encounter(
+        EncounterConfig(
+            seed="wizard-dumb-no-haste",
+            placements=build_placements(F1={"x": 1, "y": 1}, F4={"x": 1, "y": 2}, G1={"x": 8, "y": 1}),
+            player_preset_id="martial_mixed_party",
+            player_behavior="dumb",
+        )
+    )
+    keep_only_active_units(encounter, "F1", "F4", "G1")
+    encounter.units["G1"].current_hp = 40
+
+    decision = choose_turn_decision(encounter, "F4")
+
+    assert decision.action["spell_id"] != "haste"
+    assert_spell_action_core(decision.action, "scorching_ray", "G1")
+
+
 def test_smart_level5_wizard_fireball_chooses_best_ally_safe_blast() -> None:
     encounter = create_encounter(
         EncounterConfig(

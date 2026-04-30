@@ -3473,6 +3473,38 @@ def build_fireball_decision(
     return TurnDecision(action=build_fireball_action(best_targeting, primary_target_id))
 
 
+def build_haste_on_fighter_decision(state: EncounterState, actor: UnitState) -> TurnDecision | None:
+    if state.player_behavior != "smart" or not actor.position or not can_cast_combat_spell(actor, "haste"):
+        return None
+    if any(effect.kind == "concentration" for effect in actor.temporary_effects):
+        return None
+
+    spell = get_spell_definition("haste")
+    range_squares = max(0, spell.range_feet // 5)
+    fighter_candidates = sorted(
+        (
+            unit
+            for unit in get_units_by_faction(state, actor.faction)
+            if is_player_fighter(unit)
+            and is_unit_conscious(unit)
+            and unit.position
+            and get_active_haste_effect(state, unit) is None
+            and get_distance_between_units(actor, unit) <= range_squares
+        ),
+        key=lambda unit: (unit.id != "F1", unit_sort_key(unit.id)),
+    )
+    if not fighter_candidates:
+        return None
+
+    return TurnDecision(
+        action={
+            "kind": "cast_spell",
+            "spell_id": "haste",
+            "target_id": fighter_candidates[0].id,
+        }
+    )
+
+
 def get_ray_hit_probability(
     state: EncounterState,
     actor: UnitState,
@@ -3991,6 +4023,10 @@ def get_player_wizard_decision(state: EncounterState, actor: UnitState) -> TurnD
     fireball_decision = build_fireball_decision(state, actor, conscious_enemies, position_index)
     if fireball_decision:
         return fireball_decision
+
+    haste_decision = build_haste_on_fighter_decision(state, actor)
+    if haste_decision:
+        return haste_decision
 
     magic_missile_multikill_action = choose_magic_missile_multikill_action(state, actor, conscious_enemies)
     if magic_missile_multikill_action:

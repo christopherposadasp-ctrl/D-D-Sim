@@ -265,6 +265,9 @@ def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
         "shieldPreventedHits": 0,
         "shieldFailedToStopHits": 0,
         "shieldMagicMissileBlocks": 0,
+        "hasteCasts": 0,
+        "hasteFighterCasts": 0,
+        "hasteTargets": Counter(),
         "mageArmorCasts": 0,
         "mageArmorAcChanged": 0,
         "daggerFallbackAttacks": 0,
@@ -737,6 +740,19 @@ def record_wizard_run(metrics: dict[str, Any], result: RunEncounterResult, unit_
                 metrics["fireballAllyTargets"].append(ally_targets)
                 if ally_targets > 0:
                     add_metric(metrics, "fireballFriendlyFireCasts")
+                continue
+
+            if is_actor and spell_id == "haste" and event.event_type == "phase_change":
+                spell_id_text = str(spell_id)
+                metrics["wizardSpellCasts"][spell_id_text] += 1
+                record_wizard_spell_slot_spend(metrics, spell_id_text, resolved_totals)
+                add_metric(metrics, "hasteCasts")
+                target_id = str(resolved_totals.get("targetId") or "")
+                if target_id:
+                    metrics["hasteTargets"][target_id] += 1
+                    target_unit = final_state.units.get(target_id)
+                    if target_unit and target_unit.class_id == "fighter":
+                        add_metric(metrics, "hasteFighterCasts")
                 continue
 
             if is_actor and resolved_totals.get("reaction") == "shield" and event.event_type == "phase_change":
@@ -1380,6 +1396,9 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
             "shieldFailedToStopHits": metrics["shieldFailedToStopHits"],
             "shieldPreventedHitRate": percent(metrics["shieldPreventedHits"], shield_casts),
             "shieldMagicMissileBlocks": metrics["shieldMagicMissileBlocks"],
+            "hasteCasts": metrics["hasteCasts"],
+            "hasteFighterCasts": metrics["hasteFighterCasts"],
+            "hasteTargets": dict(sorted(metrics["hasteTargets"].items())),
             "mageArmorCasts": metrics["mageArmorCasts"],
             "mageArmorAcChanged": metrics["mageArmorAcChanged"],
             "daggerFallbackAttacks": metrics["daggerFallbackAttacks"],
@@ -2065,6 +2084,7 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"Shatter {overall['shatterCasts']} cast(s), "
             f"Burning Hands {overall['burningHandsCasts']} cast(s), "
             f"Shocking Grasp {overall['shockingGraspCasts']} cast(s), "
+            f"Haste {overall['hasteCasts']} cast(s), "
             f"Mage Armor {overall['mageArmorCasts']} cast(s), "
             f"Shield {overall['shieldCasts']} cast(s)"
         ),
@@ -2102,6 +2122,7 @@ def format_wizard_console_summary(payload: dict[str, Any]) -> str:
             f"slots spent {row['wizardSpellSlotsSpent']}, "
             f"Shield {row['shieldCasts']}, "
             f"Fireball {row['fireballCasts']} (avg enemies {row['fireballAverageEnemyTargets']}), "
+            f"Haste {row['hasteCasts']}, "
             f"Scorching {row['scorchingRayCasts']} ({row['scorchingRaySplitCasts']} split), "
             f"Shatter {row['shatterCasts']} (avg targets {row['shatterAverageTargets']}), "
             f"Burning Hands {row['burningHandsCasts']} "
@@ -2214,6 +2235,7 @@ def format_compact_party_line(profile: str, entry: dict[str, Any]) -> str:
             f"Magic Missile {overall['magicMissileCasts']}, "
             f"Scorching {overall['scorchingRayCasts']} ({overall['scorchingRaySplitCasts']} split), "
             f"Shatter {overall['shatterCasts']}, Burning Hands {overall['burningHandsCasts']}, "
+            f"Haste {overall['hasteCasts']}, "
             f"Shield {overall['shieldCasts']}, "
             f"down {overall['wizardDownAtEndRate']}%"
         )
