@@ -123,6 +123,7 @@ class EnemyPresetUnit:
     unit_id: str
     variant_id: str
     position: GridPosition
+    resource_pools: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,7 @@ class EnemyPresetDefinition:
     description: str
     units: tuple[EnemyPresetUnit, ...]
     terrain_features: tuple[TerrainFeature, ...] = ()
+    player_placements: dict[str, GridPosition] = field(default_factory=dict)
 
 
 goblin_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=0, wis=-1, cha=-1)
@@ -234,6 +236,15 @@ def build_boulder_terrain_feature(feature_id: str, x: int, y: int) -> TerrainFea
     )
 
 
+def build_column_terrain_feature(feature_id: str, x: int, y: int) -> TerrainFeature:
+    return TerrainFeature(
+        feature_id=feature_id,
+        kind="column",
+        position=GridPosition(x=x, y=y),
+        footprint=Footprint(width=1, height=1),
+    )
+
+
 def build_low_wall_terrain_feature(feature_id: str, x: int, y: int, width: int = 2) -> TerrainFeature:
     return TerrainFeature(
         feature_id=feature_id,
@@ -249,6 +260,18 @@ def build_hobgoblin_command_screen_terrain_features() -> tuple[TerrainFeature, .
         build_low_wall_terrain_feature("command_low_wall_1", 7, 6),
         build_low_wall_terrain_feature("command_low_wall_2", 7, 10),
         build_boulder_terrain_feature("command_boulder_1", 6, 4),
+    )
+
+
+def build_frozen_courtyard_terrain_features() -> tuple[TerrainFeature, ...]:
+    return (
+        build_rock_terrain_feature(),
+        build_column_terrain_feature("courtyard_column_1", 3, 5),
+        build_column_terrain_feature("courtyard_column_2", 3, 11),
+        build_column_terrain_feature("courtyard_column_3", 5, 6),
+        build_column_terrain_feature("courtyard_column_4", 5, 10),
+        build_low_wall_terrain_feature("courtyard_low_wall_1", 7, 5),
+        build_low_wall_terrain_feature("courtyard_low_wall_2", 7, 11),
     )
 
 
@@ -3680,6 +3703,26 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E15", "hobgoblin_archer", GridPosition(x=14, y=12)),
         ),
         terrain_features=(build_rock_terrain_feature(),),
+    ),
+    "frozen_courtyard_dragon_test": EnemyPresetDefinition(
+        preset_id="frozen_courtyard_dragon_test",
+        display_name="Frozen Courtyard Dragon Test",
+        description="A young white dragon tests landing lanes across a frozen ruined courtyard.",
+        units=(
+            EnemyPresetUnit(
+                "E1",
+                "young_white_dragon",
+                GridPosition(x=9, y=8),
+                resource_pools={"opening_landing_uses": 0},
+            ),
+        ),
+        terrain_features=build_frozen_courtyard_terrain_features(),
+        player_placements={
+            "F1": GridPosition(x=1, y=7),
+            "F2": GridPosition(x=1, y=9),
+            "F3": GridPosition(x=2, y=5),
+            "F4": GridPosition(x=2, y=11),
+        },
     ),
 }
 

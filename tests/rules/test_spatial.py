@@ -25,6 +25,15 @@ def build_low_wall(feature_id: str = "low_wall_1", x: int = 5, y: int = 8) -> Te
     )
 
 
+def build_column(feature_id: str = "column_1", x: int = 5, y: int = 8) -> TerrainFeature:
+    return TerrainFeature(
+        feature_id=feature_id,
+        kind="column",
+        position=GridPosition(x=x, y=y),
+        footprint=Footprint(width=1, height=1),
+    )
+
+
 def test_flanking_requires_support_angle_greater_than_ninety_degrees() -> None:
     encounter = create_encounter(EncounterConfig(seed="flanking-obtuse", placements=DEFAULT_POSITIONS))
     encounter.units["F1"].position = GridPosition(x=5, y=4)
@@ -141,6 +150,24 @@ def test_terrain_blocks_manual_placement_validation() -> None:
             "position": GridPosition(x=5, y=8),
             "unit_ids": ["F1"],
             "terrain_feature_ids": ["rock_1"],
+        }
+    ]
+
+
+def test_column_blocks_manual_placement_validation() -> None:
+    validation = inspect_placements_for_unit_ids(
+        {"F1": GridPosition(x=5, y=8)},
+        ["F1"],
+        {"F1": Footprint(width=1, height=1)},
+        [build_column()],
+    )
+
+    assert validation.is_valid is False
+    assert validation.blocked_square_groups == [
+        {
+            "position": GridPosition(x=5, y=8),
+            "unit_ids": ["F1"],
+            "terrain_feature_ids": ["column_1"],
         }
     ]
 

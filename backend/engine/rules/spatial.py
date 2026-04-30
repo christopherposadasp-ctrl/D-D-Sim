@@ -19,10 +19,10 @@ from backend.engine.utils.helpers import is_unit_conscious, unit_can_take_reacti
 
 GRID_SIZE = 15
 SINGLE_SQUARE_FOOTPRINT = Footprint(width=1, height=1)
-BLOCKING_TERRAIN_KINDS = frozenset({"rock", "boulder"})
-HALF_COVER_TERRAIN_KINDS = frozenset({"rock", "boulder", "low_wall"})
-LINE_OF_SIGHT_BLOCKING_TERRAIN_KINDS = frozenset({"rock", "boulder"})
-HIDE_SUPPORTING_TERRAIN_KINDS = frozenset({"rock", "boulder"})
+BLOCKING_TERRAIN_KINDS = frozenset({"rock", "boulder", "column"})
+HALF_COVER_TERRAIN_KINDS = frozenset({"rock", "boulder", "column", "low_wall"})
+LINE_OF_SIGHT_BLOCKING_TERRAIN_KINDS = frozenset({"rock", "boulder", "column"})
+HIDE_SUPPORTING_TERRAIN_KINDS = frozenset({"rock", "boulder", "column"})
 
 
 class ReachableSquare:

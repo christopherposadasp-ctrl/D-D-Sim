@@ -86,6 +86,8 @@ def get_default_preset_placements(config: EncounterConfig) -> dict[str, GridPosi
         return {}
 
     placements = get_default_player_positions(config.player_preset_id)
+    for unit_id, position in preset.player_placements.items():
+        placements[unit_id] = position.model_copy(deep=True)
     for unit in preset.units:
         placements[unit.unit_id] = unit.position.model_copy(deep=True)
     return placements
@@ -145,7 +147,9 @@ def build_units(
     if enemy_preset_id:
         preset = get_enemy_preset(enemy_preset_id)
         for unit in preset.units:
-            units[unit.unit_id] = create_enemy(unit.unit_id, unit.variant_id)
+            enemy = create_enemy(unit.unit_id, unit.variant_id)
+            enemy.resource_pools.update(unit.resource_pools)
+            units[unit.unit_id] = enemy
     else:
         units.update(
             {

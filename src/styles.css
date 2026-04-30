@@ -484,6 +484,12 @@ button {
     linear-gradient(145deg, rgba(116, 106, 92, 0.58), rgba(64, 55, 48, 0.88));
 }
 
+.board-cell.terrain.column {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(239, 244, 246, 0.78), rgba(239, 244, 246, 0) 26%),
+    linear-gradient(145deg, rgba(123, 125, 126, 0.58), rgba(70, 73, 75, 0.86));
+}
+
 .board-cell.terrain.low_wall {
   background:
     linear-gradient(90deg, rgba(91, 103, 88, 0.42), rgba(132, 143, 119, 0.54), rgba(91, 103, 88, 0.42)),

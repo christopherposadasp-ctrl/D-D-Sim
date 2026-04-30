@@ -133,6 +133,13 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
             "hobgoblin_longbow_attack",
         ),
     ),
+    "frozen_courtyard_dragon_test": ScenarioDefinition(
+        scenario_id="frozen_courtyard_dragon_test",
+        display_name="Frozen Courtyard Dragon Test",
+        description=ENEMY_PRESETS["frozen_courtyard_dragon_test"].description,
+        enemy_preset_id="frozen_courtyard_dragon_test",
+        audit_expectation_ids=(),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS

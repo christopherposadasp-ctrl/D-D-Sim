@@ -6,6 +6,7 @@ import {
   getOccupiedSquaresForPosition,
   inspectPlacementsForUnitIds,
   isWithinBounds,
+  terrainBlocksPlacement,
 } from '../shared/sim/spatial';
 
 describe('shared spatial helpers', () => {
@@ -116,5 +117,29 @@ describe('shared spatial helpers', () => {
 
     expect(validation.isValid).toBe(true);
     expect(validation.blockedSquareGroups).toEqual([]);
+  });
+
+  it('treats columns as blocking terrain', () => {
+    const column = { featureId: 'column_1', kind: 'column' as const, position: { x: 5, y: 8 }, footprint: SINGLE_SQUARE_FOOTPRINT };
+    const validation = inspectPlacementsForUnitIds(
+      {
+        F1: { x: 5, y: 8 }
+      },
+      ['F1'],
+      {
+        F1: SINGLE_SQUARE_FOOTPRINT
+      },
+      [column]
+    );
+
+    expect(terrainBlocksPlacement(column)).toBe(true);
+    expect(validation.isValid).toBe(false);
+    expect(validation.blockedSquareGroups).toEqual([
+      {
+        position: { x: 5, y: 8 },
+        unitIds: ['F1'],
+        terrainFeatureIds: ['column_1']
+      }
+    ]);
   });
 });

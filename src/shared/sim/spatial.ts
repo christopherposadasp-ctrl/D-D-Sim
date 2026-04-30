@@ -52,7 +52,7 @@ export function isWithinBounds(position: GridPosition, footprint: Footprint = SI
 }
 
 export function terrainBlocksPlacement(feature: TerrainFeature): boolean {
-  return feature.kind === 'rock' || feature.kind === 'boulder';
+  return feature.kind === 'rock' || feature.kind === 'boulder' || feature.kind === 'column';
 }
 
 export function inspectPlacementsForUnitIds(

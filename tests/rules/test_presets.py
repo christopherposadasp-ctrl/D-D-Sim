@@ -224,6 +224,65 @@ def test_berserker_overrun_builds_staggered_mob_and_hammers() -> None:
     assert encounter.units["E14"].combat_role == "hobgoblin_archer"
 
 
+def test_frozen_courtyard_dragon_test_builds_white_dragon_map() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="frozen-courtyard-dragon-test", enemy_preset_id="frozen_courtyard_dragon_test")
+    )
+
+    assert sorted(encounter.units) == ["E1", "F1", "F2", "F3", "F4"]
+    assert encounter.units["F1"].position.model_dump() == {"x": 1, "y": 7}
+    assert encounter.units["F2"].position.model_dump() == {"x": 1, "y": 9}
+    assert encounter.units["F3"].position.model_dump() == {"x": 2, "y": 5}
+    assert encounter.units["F4"].position.model_dump() == {"x": 2, "y": 11}
+    assert encounter.units["E1"].combat_role == "young_white_dragon"
+    assert encounter.units["E1"].position.model_dump() == {"x": 9, "y": 8}
+    assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
+    assert [feature.model_dump() for feature in encounter.terrain_features] == [
+        {
+            "feature_id": "rock_1",
+            "kind": "rock",
+            "position": {"x": 5, "y": 8},
+            "footprint": {"width": 1, "height": 1},
+        },
+        {
+            "feature_id": "courtyard_column_1",
+            "kind": "column",
+            "position": {"x": 3, "y": 5},
+            "footprint": {"width": 1, "height": 1},
+        },
+        {
+            "feature_id": "courtyard_column_2",
+            "kind": "column",
+            "position": {"x": 3, "y": 11},
+            "footprint": {"width": 1, "height": 1},
+        },
+        {
+            "feature_id": "courtyard_column_3",
+            "kind": "column",
+            "position": {"x": 5, "y": 6},
+            "footprint": {"width": 1, "height": 1},
+        },
+        {
+            "feature_id": "courtyard_column_4",
+            "kind": "column",
+            "position": {"x": 5, "y": 10},
+            "footprint": {"width": 1, "height": 1},
+        },
+        {
+            "feature_id": "courtyard_low_wall_1",
+            "kind": "low_wall",
+            "position": {"x": 7, "y": 5},
+            "footprint": {"width": 2, "height": 1},
+        },
+        {
+            "feature_id": "courtyard_low_wall_2",
+            "kind": "low_wall",
+            "position": {"x": 7, "y": 11},
+            "footprint": {"width": 2, "height": 1},
+        },
+    ]
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(

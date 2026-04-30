@@ -60,6 +60,9 @@ function getTerrainToken(feature: TerrainFeature): string {
   if (feature.kind === 'boulder') {
     return 'B';
   }
+  if (feature.kind === 'column') {
+    return 'C';
+  }
   return 'R';
 }
 
@@ -69,6 +72,9 @@ function getTerrainLabel(feature: TerrainFeature): string {
   }
   if (feature.kind === 'boulder') {
     return 'boulder';
+  }
+  if (feature.kind === 'column') {
+    return 'column';
   }
   return 'rock';
 }
