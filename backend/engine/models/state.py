@@ -582,6 +582,10 @@ class EncounterState(CamelModel):
     smart_targeting_policy: SmartTargetingPolicy = Field(default="new", exclude=True)
     enable_end_turn_flanking: bool = Field(default=True, exclude=True)
     enable_frontline_body_blocking: bool = Field(default=True, exclude=True)
+    lay_on_hands_downed_percent: int = Field(default=30, exclude=True)
+    lay_on_hands_ally_percent: int = Field(default=55, exclude=True)
+    lay_on_hands_self_percent: int = Field(default=65, exclude=True)
+    lay_on_hands_remainder_percent: int = Field(default=20, exclude=True)
 
 
 class ReplayFrame(CamelModel):
@@ -603,6 +607,10 @@ class EncounterConfig(CamelModel):
     smart_targeting_policy: SmartTargetingPolicy = "new"
     enable_end_turn_flanking: bool = True
     enable_frontline_body_blocking: bool = True
+    lay_on_hands_downed_percent: int = 30
+    lay_on_hands_ally_percent: int = 55
+    lay_on_hands_self_percent: int = 65
+    lay_on_hands_remainder_percent: int = 20
 
 
 class RunEncounterResult(CamelModel):

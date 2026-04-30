@@ -24,6 +24,15 @@ from backend.engine.models.state import (
     UnitState,
 )
 from scripts.audit_common import collect_git_context, write_json_report, write_text_report
+from scripts.tuning_policy import (
+    DEFAULT_LAY_ON_HANDS_ALLY_PERCENT,
+    DEFAULT_LAY_ON_HANDS_DOWNED_PERCENT,
+    DEFAULT_LAY_ON_HANDS_REMAINDER_PERCENT,
+    DEFAULT_LAY_ON_HANDS_SELF_PERCENT,
+    LayOnHandsPolicy,
+    build_lay_on_hands_policy,
+    lay_on_hands_policy_config_kwargs,
+)
 
 DEFAULT_SCENARIO_IDS = (
     "reaction_bastion",
@@ -79,6 +88,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Print the final JSON payload to stdout.")
     parser.add_argument("--json-path", type=Path, default=DEFAULT_JSON_PATH, help="Write the JSON report here.")
     parser.add_argument("--markdown-path", type=Path, default=DEFAULT_MARKDOWN_PATH, help="Write the Markdown report here.")
+    parser.add_argument(
+        "--lay-on-hands-downed-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_DOWNED_PERCENT,
+        help="Lay on Hands target HP percentage for downed targets.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-ally-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_ALLY_PERCENT,
+        help="Lay on Hands target HP percentage for living allies.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-self-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_SELF_PERCENT,
+        help="Lay on Hands target HP percentage for Paladin self-heals.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-remainder-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_REMAINDER_PERCENT,
+        help="Spend the remaining Lay on Hands pool if a planned heal would leave less than this percentage.",
+    )
     return parser.parse_args()
 
 
@@ -292,6 +325,7 @@ def run_replay_smoke(
     scenario_ids: tuple[str, ...],
     player_behavior: str,
     replay_runs: int,
+    lay_on_hands_policy: LayOnHandsPolicy,
 ) -> tuple[list[dict[str, Any]], list[RunEncounterResult], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     results: list[RunEncounterResult] = []
@@ -308,6 +342,7 @@ def run_replay_smoke(
                     player_preset_id=player_preset_id,
                     player_behavior=player_behavior,
                     monster_behavior=DEFAULT_REPLAY_MONSTER_BEHAVIOR,
+                    **lay_on_hands_policy_config_kwargs(lay_on_hands_policy),
                 )
             )
             elapsed_seconds = time.perf_counter() - start_time
@@ -397,6 +432,7 @@ def run_batch_health(
     monster_behavior: str,
     force_serial: bool,
     worker_count: int | None,
+    lay_on_hands_policy: LayOnHandsPolicy,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
     rows: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
@@ -422,6 +458,7 @@ def run_batch_health(
                     batch_size=sub_batch_size,
                     player_behavior=player_behavior,
                     monster_behavior=sub_behavior,
+                    **lay_on_hands_policy_config_kwargs(lay_on_hands_policy),
                 ),
                 force_serial=force_serial,
                 worker_count=worker_count,
@@ -492,6 +529,7 @@ def build_report_payload(
     batch_rows: list[dict[str, Any]],
     feature_evidence: list[dict[str, Any]],
     issue_list: list[dict[str, Any]],
+    lay_on_hands_policy: LayOnHandsPolicy,
 ) -> dict[str, Any]:
     overall_status = determine_overall_status(rules_gate, issue_list)
     return {
@@ -504,6 +542,7 @@ def build_report_payload(
         "workerCount": worker_count,
         "totalRuns": total_runs,
         "elapsedSeconds": round(elapsed_seconds, 3),
+        "layOnHandsPolicy": lay_on_hands_policy,
         "rulesGate": rules_gate,
         "replayRows": replay_rows,
         "batchRows": batch_rows,
@@ -529,6 +568,7 @@ def format_markdown_report(payload: dict[str, Any]) -> str:
         f"- executionMode: `{payload['executionMode']}`",
         f"- workerCount: `{payload['workerCount']}`",
         f"- totalRuns: `{payload['totalRuns']}`",
+        f"- layOnHandsPolicy: `{payload.get('layOnHandsPolicy', {}).get('signature', 'default')}`",
         f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
         "",
         "## Rules Gate",
@@ -605,6 +645,7 @@ def format_console_summary(payload: dict[str, Any]) -> str:
         f"- monsterBehavior: {monster_behavior}",
         f"- batchSizePerScenario: {payload['batchSize']}",
         f"- scenarioCount: {len(payload['scenarioIds'])}",
+        f"- layOnHandsPolicy: {payload.get('layOnHandsPolicy', {}).get('signature', 'default')}",
     ]
 
     for row in batch_rows:
@@ -640,6 +681,12 @@ def main() -> None:
     args = parse_args()
     scenario_ids = tuple(args.scenario_ids) if args.scenario_ids else DEFAULT_SCENARIO_IDS
     validate_scenarios(scenario_ids)
+    lay_on_hands_policy = build_lay_on_hands_policy(
+        downed_percent=args.lay_on_hands_downed_percent,
+        ally_percent=args.lay_on_hands_ally_percent,
+        self_percent=args.lay_on_hands_self_percent,
+        remainder_percent=args.lay_on_hands_remainder_percent,
+    )
     total_runs = args.batch_size * len(scenario_ids)
     execution_plan = resolve_batch_execution_plan(
         args.batch_size,
@@ -663,6 +710,7 @@ def main() -> None:
         scenario_ids,
         args.player_behavior,
         DEFAULT_REPLAY_SMOKE_RUNS,
+        lay_on_hands_policy,
     )
     batch_rows, batch_issues, batch_elapsed_seconds = run_batch_health(
         args.player_preset,
@@ -672,6 +720,7 @@ def main() -> None:
         args.monster_behavior,
         args.serial,
         args.workers,
+        lay_on_hands_policy,
     )
     feature_evidence = build_feature_evidence(replay_results)
     issue_list = [*replay_issues, *batch_issues, *collect_feature_issues(feature_evidence)]
@@ -689,6 +738,7 @@ def main() -> None:
         batch_rows=batch_rows,
         feature_evidence=feature_evidence,
         issue_list=issue_list,
+        lay_on_hands_policy=lay_on_hands_policy,
     )
     markdown_report = format_markdown_report(payload)
     console_summary = format_console_summary(payload)

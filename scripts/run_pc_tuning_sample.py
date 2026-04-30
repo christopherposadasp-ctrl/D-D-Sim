@@ -18,6 +18,15 @@ from backend.engine import run_encounter
 from backend.engine.models.state import EncounterConfig, RunEncounterResult
 from scripts.audit_common import collect_git_context, write_json_report, write_text_report
 from scripts.run_party_validation import DEFAULT_SCENARIO_IDS
+from scripts.tuning_policy import (
+    DEFAULT_LAY_ON_HANDS_ALLY_PERCENT,
+    DEFAULT_LAY_ON_HANDS_DOWNED_PERCENT,
+    DEFAULT_LAY_ON_HANDS_REMAINDER_PERCENT,
+    DEFAULT_LAY_ON_HANDS_SELF_PERCENT,
+    LayOnHandsPolicy,
+    build_lay_on_hands_policy,
+    lay_on_hands_policy_config_kwargs,
+)
 
 PROFILE_CHOICES = ("paladin", "rogue", "fighter", "wizard")
 PROFILE_DEFAULT_UNIT_IDS = {"paladin": "F2", "rogue": "F3", "fighter": "F1", "wizard": "F4"}
@@ -32,6 +41,7 @@ DEFAULT_MONSTER_BEHAVIOR = "balanced"
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "pc_tuning"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "pc_tuning_latest.json"
 DEFAULT_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "pc_tuning_latest.md"
+LAY_ON_HANDS_TARGET_CATEGORIES = ("downed", "self", "living_ally", "unknown")
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +80,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Print the final JSON payload to stdout.")
     parser.add_argument("--json-path", type=Path, default=DEFAULT_JSON_PATH, help="Write the JSON report here.")
     parser.add_argument("--markdown-path", type=Path, default=DEFAULT_MARKDOWN_PATH, help="Write the Markdown report here.")
+    parser.add_argument(
+        "--seed-offset",
+        type=int,
+        default=0,
+        help="Offset deterministic run indexes so paired experiments can use independent seed windows.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-downed-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_DOWNED_PERCENT,
+        help="Lay on Hands target HP percentage for downed targets.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-ally-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_ALLY_PERCENT,
+        help="Lay on Hands target HP percentage for living allies.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-self-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_SELF_PERCENT,
+        help="Lay on Hands target HP percentage for Paladin self-heals.",
+    )
+    parser.add_argument(
+        "--lay-on-hands-remainder-percent",
+        type=int,
+        default=DEFAULT_LAY_ON_HANDS_REMAINDER_PERCENT,
+        help="Spend the remaining Lay on Hands pool if the planned heal would leave less than this percentage.",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +128,12 @@ def average(values: list[int | float]) -> float:
 
 def distribution(values: list[int]) -> dict[str, int]:
     return {str(value): count for value, count in sorted(Counter(values).items())}
+
+
+def sample_seed(prefix: str, scenario_id: str, run_index: int, seed_offset: int, *parts: str) -> str:
+    seed_index = run_index + seed_offset
+    middle = "-".join(part for part in parts if part)
+    return f"{prefix}-{middle}-{scenario_id}-{seed_index:03d}" if middle else f"{prefix}-{scenario_id}-{seed_index:03d}"
 
 
 def resolve_profile_unit_id(profile: str, unit_id: str | None) -> str:
@@ -133,6 +179,13 @@ def new_metrics(profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
         "layOnHandsTotalHealing": 0,
         "layOnHandsHeals": [],
         "layOnHandsDownedPickups": 0,
+        "layOnHandsPolicySignatures": Counter(),
+        "layOnHandsUsesByCategory": Counter(),
+        "layOnHandsTotalHealingByCategory": Counter(),
+        "layOnHandsHealsByCategory": {category: [] for category in LAY_ON_HANDS_TARGET_CATEGORIES},
+        "layOnHandsDownedPickupsByCategory": Counter(),
+        "layOnHandsTargetIdsByCategory": {category: Counter() for category in LAY_ON_HANDS_TARGET_CATEGORIES},
+        "layOnHandsTargetClassesByCategory": {category: Counter() for category in LAY_ON_HANDS_TARGET_CATEGORIES},
         "cureWoundsUses": 0,
         "cureWoundsTotalHealing": 0,
         "cureWoundsHeals": [],
@@ -305,6 +358,42 @@ def add_metric(counter: dict[str, Any], key: str, value: int = 1) -> None:
     counter[key] = int(counter.get(key, 0)) + value
 
 
+def normalize_lay_on_hands_category(value: Any, *, target_id: str | None, unit_id: str, was_down: bool) -> str:
+    if isinstance(value, str) and value in LAY_ON_HANDS_TARGET_CATEGORIES:
+        return value
+    if was_down:
+        return "downed"
+    if target_id == unit_id:
+        return "self"
+    if target_id:
+        return "living_ally"
+    return "unknown"
+
+
+def add_lay_on_hands_category_metric(
+    metrics: dict[str, Any],
+    *,
+    category: str,
+    healing_total: int,
+    target_id: str | None,
+    target_class: str,
+    was_down: bool,
+    policy_signature: str | None,
+) -> None:
+    if category not in LAY_ON_HANDS_TARGET_CATEGORIES:
+        category = "unknown"
+    metrics["layOnHandsUsesByCategory"][category] += 1
+    metrics["layOnHandsTotalHealingByCategory"][category] += healing_total
+    metrics["layOnHandsHealsByCategory"][category].append(healing_total)
+    if was_down:
+        metrics["layOnHandsDownedPickupsByCategory"][category] += 1
+    if target_id:
+        metrics["layOnHandsTargetIdsByCategory"][category][target_id] += 1
+    metrics["layOnHandsTargetClassesByCategory"][category][target_class] += 1
+    if policy_signature:
+        metrics["layOnHandsPolicySignatures"][policy_signature] += 1
+
+
 def get_precombat_aid_targets(result: RunEncounterResult, source_id: str) -> list[tuple[str, int]]:
     if not result.replay_frames:
         return []
@@ -388,6 +477,24 @@ def record_paladin_run(metrics: dict[str, Any], result: RunEncounterResult, unit
                 metrics["layOnHandsHeals"].append(healing_total)
                 if was_down:
                     add_metric(metrics, "layOnHandsDownedPickups")
+                target_class = "unknown"
+                if target_id and target_id in frame.state.units:
+                    target_class = frame.state.units[target_id].class_id or "unknown"
+                category = normalize_lay_on_hands_category(
+                    resolved_totals.get("layOnHandsTargetCategory"),
+                    target_id=target_id,
+                    unit_id=unit_id,
+                    was_down=was_down,
+                )
+                add_lay_on_hands_category_metric(
+                    metrics,
+                    category=category,
+                    healing_total=healing_total,
+                    target_id=target_id,
+                    target_class=target_class,
+                    was_down=was_down,
+                    policy_signature=resolved_totals.get("layOnHandsPolicySignature"),
+                )
             elif is_cure_wounds:
                 add_metric(metrics, "cureWoundsUses")
                 add_metric(metrics, "cureWoundsTotalHealing", healing_total)
@@ -965,6 +1072,23 @@ def get_profile_recording_skip_reason(result: RunEncounterResult, profile: str, 
     return None
 
 
+def summarize_lay_on_hands_categories(metrics: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    category_summary: dict[str, dict[str, Any]] = {}
+    for category in LAY_ON_HANDS_TARGET_CATEGORIES:
+        heals = list(metrics["layOnHandsHealsByCategory"].get(category, []))
+        uses = int(metrics["layOnHandsUsesByCategory"].get(category, 0))
+        category_summary[category] = {
+            "uses": uses,
+            "healingTotal": int(metrics["layOnHandsTotalHealingByCategory"].get(category, 0)),
+            "averageHeal": average(heals),
+            "healDistribution": distribution(heals),
+            "pickups": int(metrics["layOnHandsDownedPickupsByCategory"].get(category, 0)),
+            "targetIds": dict(sorted(metrics["layOnHandsTargetIdsByCategory"].get(category, Counter()).items())),
+            "targetClasses": dict(sorted(metrics["layOnHandsTargetClassesByCategory"].get(category, Counter()).items())),
+        }
+    return category_summary
+
+
 def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     runs = int(metrics["runs"])
     ending_slots = list(metrics["endingSpellSlots"])
@@ -1061,6 +1185,8 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         "layOnHandsAverageHeal": average(lay_on_hands_heals),
         "layOnHandsDownedPickups": metrics["layOnHandsDownedPickups"],
         "layOnHandsHealDistribution": distribution(lay_on_hands_heals),
+        "layOnHandsPolicySignatureDistribution": dict(sorted(metrics["layOnHandsPolicySignatures"].items())),
+        "layOnHandsByCategory": summarize_lay_on_hands_categories(metrics),
         "cureWoundsUses": metrics["cureWoundsUses"],
         "cureWoundsTotalHealing": metrics["cureWoundsTotalHealing"],
         "cureWoundsAverageHeal": average(cure_wounds_heals),
@@ -1370,6 +1496,8 @@ def run_paladin_sample(
     runs_per_scenario: int,
     player_behavior: str,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     overall_metrics = new_metrics("paladin")
     scenario_rows: list[dict[str, Any]] = []
@@ -1378,7 +1506,7 @@ def run_paladin_sample(
         scenario_metrics = new_metrics("paladin")
         print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s)")
         for run_index in range(runs_per_scenario):
-            seed = f"pc-tuning-{unit_id}-{scenario_id}-{run_index:03d}"
+            seed = sample_seed("pc-tuning", scenario_id, run_index, seed_offset, unit_id)
             result = run_encounter(
                 EncounterConfig(
                     seed=seed,
@@ -1386,6 +1514,9 @@ def run_paladin_sample(
                     player_preset_id=player_preset_id,
                     player_behavior=player_behavior,
                     monster_behavior=monster_behavior,
+                    **lay_on_hands_policy_config_kwargs(
+                        lay_on_hands_policy or build_lay_on_hands_policy()
+                    ),
                 )
             )
             unit = result.final_state.units.get(unit_id)
@@ -1412,6 +1543,8 @@ def run_rogue_sample(
     runs_per_scenario: int,
     player_behavior: str,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     overall_metrics = new_metrics("rogue")
     scenario_rows: list[dict[str, Any]] = []
@@ -1420,7 +1553,7 @@ def run_rogue_sample(
         scenario_metrics = new_metrics("rogue")
         print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s)")
         for run_index in range(runs_per_scenario):
-            seed = f"pc-tuning-{unit_id}-{scenario_id}-{run_index:03d}"
+            seed = sample_seed("pc-tuning", scenario_id, run_index, seed_offset, unit_id)
             result = run_encounter(
                 EncounterConfig(
                     seed=seed,
@@ -1428,6 +1561,9 @@ def run_rogue_sample(
                     player_preset_id=player_preset_id,
                     player_behavior=player_behavior,
                     monster_behavior=monster_behavior,
+                    **lay_on_hands_policy_config_kwargs(
+                        lay_on_hands_policy or build_lay_on_hands_policy()
+                    ),
                 )
             )
             unit = result.final_state.units.get(unit_id)
@@ -1454,6 +1590,8 @@ def run_fighter_sample(
     runs_per_scenario: int,
     player_behavior: str,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     overall_metrics = new_metrics("fighter")
     scenario_rows: list[dict[str, Any]] = []
@@ -1462,7 +1600,7 @@ def run_fighter_sample(
         scenario_metrics = new_metrics("fighter")
         print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s), player={player_behavior}")
         for run_index in range(runs_per_scenario):
-            seed = f"pc-tuning-{unit_id}-{player_behavior}-{scenario_id}-{run_index:03d}"
+            seed = sample_seed("pc-tuning", scenario_id, run_index, seed_offset, unit_id, player_behavior)
             result = run_encounter(
                 EncounterConfig(
                     seed=seed,
@@ -1470,6 +1608,9 @@ def run_fighter_sample(
                     player_preset_id=player_preset_id,
                     player_behavior=player_behavior,
                     monster_behavior=monster_behavior,
+                    **lay_on_hands_policy_config_kwargs(
+                        lay_on_hands_policy or build_lay_on_hands_policy()
+                    ),
                 )
             )
             unit = result.final_state.units.get(unit_id)
@@ -1496,6 +1637,8 @@ def run_wizard_sample(
     runs_per_scenario: int,
     player_behavior: str,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     overall_metrics = new_metrics("wizard")
     scenario_rows: list[dict[str, Any]] = []
@@ -1504,7 +1647,7 @@ def run_wizard_sample(
         scenario_metrics = new_metrics("wizard")
         print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s)")
         for run_index in range(runs_per_scenario):
-            seed = f"pc-tuning-{unit_id}-{scenario_id}-{run_index:03d}"
+            seed = sample_seed("pc-tuning", scenario_id, run_index, seed_offset, unit_id)
             result = run_encounter(
                 EncounterConfig(
                     seed=seed,
@@ -1512,6 +1655,9 @@ def run_wizard_sample(
                     player_preset_id=player_preset_id,
                     player_behavior=player_behavior,
                     monster_behavior=monster_behavior,
+                    **lay_on_hands_policy_config_kwargs(
+                        lay_on_hands_policy or build_lay_on_hands_policy()
+                    ),
                 )
             )
             unit = result.final_state.units.get(unit_id)
@@ -1539,6 +1685,8 @@ def run_profile_sample(
     runs_per_scenario: int,
     player_behavior: str,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if profile == "paladin":
         return run_paladin_sample(
@@ -1548,6 +1696,8 @@ def run_profile_sample(
             runs_per_scenario=runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
+            seed_offset=seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
     if profile == "rogue":
         return run_rogue_sample(
@@ -1557,6 +1707,8 @@ def run_profile_sample(
             runs_per_scenario=runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
+            seed_offset=seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
     if profile == "fighter":
         return run_fighter_sample(
@@ -1566,6 +1718,8 @@ def run_profile_sample(
             runs_per_scenario=runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
+            seed_offset=seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
     if profile == "wizard":
         return run_wizard_sample(
@@ -1575,6 +1729,8 @@ def run_profile_sample(
             runs_per_scenario=runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
+            seed_offset=seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
     raise ValueError(f"Unsupported PC tuning profile `{profile}`.")
 
@@ -1608,9 +1764,12 @@ def run_party_profile_sample(
     runs_per_scenario: int,
     player_behavior: str,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, dict[str, Any]]]:
     profile_unit_ids = dict(PARTY_PROFILE_UNIT_IDS)
     profile_unit_ids[selected_profile] = selected_unit_id
+    policy = lay_on_hands_policy or build_lay_on_hands_policy()
     overall_metrics_by_profile = {profile: new_metrics(profile) for profile in PARTY_PROFILE_ORDER}
     scenario_rows_by_profile: dict[str, list[dict[str, Any]]] = {profile: [] for profile in PARTY_PROFILE_ORDER}
     missing_reasons: dict[str, str] = {}
@@ -1619,7 +1778,7 @@ def run_party_profile_sample(
         scenario_metrics_by_profile = {profile: new_metrics(profile) for profile in PARTY_PROFILE_ORDER}
         print(f"[{scenario_id}] {runs_per_scenario} event-level replay(s), player={player_behavior}")
         for run_index in range(runs_per_scenario):
-            seed = f"pc-tuning-party-{player_behavior}-{scenario_id}-{run_index:03d}"
+            seed = sample_seed("pc-tuning-party", scenario_id, run_index, seed_offset, player_behavior)
             result = run_encounter(
                 EncounterConfig(
                     seed=seed,
@@ -1627,6 +1786,7 @@ def run_party_profile_sample(
                     player_preset_id=player_preset_id,
                     player_behavior=player_behavior,
                     monster_behavior=monster_behavior,
+                    **lay_on_hands_policy_config_kwargs(policy),
                 )
             )
 
@@ -1683,6 +1843,8 @@ def run_fighter_behavior_comparison(
     scenario_ids: tuple[str, ...],
     runs_per_scenario: int,
     monster_behavior: str,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, float]]:
     behavior_summaries: dict[str, dict[str, Any]] = {}
     for player_behavior in ("smart", "dumb"):
@@ -1694,6 +1856,8 @@ def run_fighter_behavior_comparison(
             runs_per_scenario=runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=monster_behavior,
+            seed_offset=seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
         behavior_summaries[player_behavior] = {
             "overall": overall,
@@ -1720,6 +1884,8 @@ def build_report_payload(
     overall: dict[str, Any],
     scenarios: list[dict[str, Any]],
     party_breakdown: dict[str, dict[str, Any]] | None = None,
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> dict[str, Any]:
     return {
         "profile": profile,
@@ -1730,6 +1896,8 @@ def build_report_payload(
         "totalRuns": runs_per_scenario * len(scenario_ids),
         "playerBehavior": player_behavior,
         "monsterBehavior": monster_behavior,
+        "seedOffset": seed_offset,
+        "layOnHandsPolicy": lay_on_hands_policy or build_lay_on_hands_policy(),
         "elapsedSeconds": round(elapsed_seconds, 3),
         "generatedContext": collect_git_context(REPO_ROOT),
         "overall": overall,
@@ -1749,6 +1917,8 @@ def build_behavior_comparison_payload(
     elapsed_seconds: float,
     behavior_summaries: dict[str, dict[str, Any]],
     behavior_delta: dict[str, float],
+    seed_offset: int = 0,
+    lay_on_hands_policy: LayOnHandsPolicy | None = None,
 ) -> dict[str, Any]:
     return {
         "profile": profile,
@@ -1759,6 +1929,8 @@ def build_behavior_comparison_payload(
         "totalRuns": runs_per_scenario * len(scenario_ids) * len(behavior_summaries),
         "playerBehavior": "both",
         "monsterBehavior": monster_behavior,
+        "seedOffset": seed_offset,
+        "layOnHandsPolicy": lay_on_hands_policy or build_lay_on_hands_policy(),
         "elapsedSeconds": round(elapsed_seconds, 3),
         "generatedContext": collect_git_context(REPO_ROOT),
         "behaviorSummaries": behavior_summaries,
@@ -2053,6 +2225,11 @@ def format_selected_console_summary(payload: dict[str, Any]) -> str:
         return format_wizard_console_summary(payload)
 
     overall = payload["overall"]
+    lay_on_hands_policy = payload.get("layOnHandsPolicy", {})
+    lay_on_hands_categories = overall.get("layOnHandsByCategory", {})
+    downed_lay_on_hands = lay_on_hands_categories.get("downed", {})
+    self_lay_on_hands = lay_on_hands_categories.get("self", {})
+    ally_lay_on_hands = lay_on_hands_categories.get("living_ally", {})
     lines = [
         "PC tuning sample:",
         f"- profile: {payload['profile']}",
@@ -2060,6 +2237,8 @@ def format_selected_console_summary(payload: dict[str, Any]) -> str:
         f"- totalRuns: {payload['totalRuns']}",
         f"- playerBehavior: {payload['playerBehavior']}",
         f"- monsterBehavior: {payload['monsterBehavior']}",
+        f"- seedOffset: {payload.get('seedOffset', 0)}",
+        f"- Lay on Hands policy: {lay_on_hands_policy.get('signature', 'default')}",
         (
             f"- overall: players {overall['playerWinRate']}%, enemies {overall['enemyWinRate']}%, "
             f"avg rounds {overall['averageRounds']}"
@@ -2075,6 +2254,11 @@ def format_selected_console_summary(payload: dict[str, Any]) -> str:
             f"- healing: Lay on Hands {overall['layOnHandsUses']} use(s), "
             f"{overall['layOnHandsTotalHealing']} HP, {overall['layOnHandsDownedPickups']} downed pickup(s); "
             f"Cure Wounds {overall['cureWoundsUses']} use(s), {overall['cureWoundsTotalHealing']} HP"
+        ),
+        (
+            f"- Lay on Hands by category: downed {downed_lay_on_hands.get('uses', 0)} use(s), "
+            f"self {self_lay_on_hands.get('uses', 0)}, "
+            f"living ally {ally_lay_on_hands.get('uses', 0)}"
         ),
         (
             f"- features: Aid {overall['aidCasts']} cast(s), "
@@ -2131,6 +2315,8 @@ def format_rogue_markdown_report(payload: dict[str, Any]) -> str:
         f"- totalRuns: `{payload['totalRuns']}`",
         f"- playerBehavior: `{payload['playerBehavior']}`",
         f"- monsterBehavior: `{payload['monsterBehavior']}`",
+        f"- seedOffset: `{payload.get('seedOffset', 0)}`",
+        f"- layOnHandsPolicy: `{payload.get('layOnHandsPolicy', {}).get('signature', 'default')}`",
         f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
         "",
         "## Overall",
@@ -2191,6 +2377,8 @@ def format_wizard_markdown_report(payload: dict[str, Any]) -> str:
         f"- totalRuns: `{payload['totalRuns']}`",
         f"- playerBehavior: `{payload['playerBehavior']}`",
         f"- monsterBehavior: `{payload['monsterBehavior']}`",
+        f"- seedOffset: `{payload.get('seedOffset', 0)}`",
+        f"- layOnHandsPolicy: `{payload.get('layOnHandsPolicy', {}).get('signature', 'default')}`",
         f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
         "",
         "## Overall",
@@ -2339,6 +2527,8 @@ def format_fighter_markdown_report(payload: dict[str, Any]) -> str:
         f"- totalRuns: `{payload['totalRuns']}`",
         f"- playerBehavior: `{payload['playerBehavior']}`",
         f"- monsterBehavior: `{payload['monsterBehavior']}`",
+        f"- seedOffset: `{payload.get('seedOffset', 0)}`",
+        f"- layOnHandsPolicy: `{payload.get('layOnHandsPolicy', {}).get('signature', 'default')}`",
         f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
         "",
     ]
@@ -2358,6 +2548,8 @@ def format_fighter_comparison_markdown_report(payload: dict[str, Any]) -> str:
         f"- totalRuns: `{payload['totalRuns']}`",
         "- playerBehavior: `both`",
         f"- monsterBehavior: `{payload['monsterBehavior']}`",
+        f"- seedOffset: `{payload.get('seedOffset', 0)}`",
+        f"- layOnHandsPolicy: `{payload.get('layOnHandsPolicy', {}).get('signature', 'default')}`",
         f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
         "",
         "## Smart Vs Dumb Delta",
@@ -2417,6 +2609,8 @@ def format_selected_markdown_report(payload: dict[str, Any]) -> str:
         return format_wizard_markdown_report(payload)
 
     overall = payload["overall"]
+    lay_on_hands_policy = payload.get("layOnHandsPolicy", {})
+    lay_on_hands_categories = overall.get("layOnHandsByCategory", {})
     lines = [
         "# PC Tuning Sample",
         "",
@@ -2428,6 +2622,8 @@ def format_selected_markdown_report(payload: dict[str, Any]) -> str:
         f"- totalRuns: `{payload['totalRuns']}`",
         f"- playerBehavior: `{payload['playerBehavior']}`",
         f"- monsterBehavior: `{payload['monsterBehavior']}`",
+        f"- seedOffset: `{payload.get('seedOffset', 0)}`",
+        f"- layOnHandsPolicy: `{lay_on_hands_policy.get('signature', 'default')}`",
         f"- elapsedSeconds: `{payload['elapsedSeconds']}`",
         "",
         "## Overall",
@@ -2457,11 +2653,27 @@ def format_selected_markdown_report(payload: dict[str, Any]) -> str:
         f"| Nature's Wrath average targets | {overall['naturesWrathAverageTargets']} |",
         f"| Nature's Wrath average restrained | {overall['naturesWrathAverageRestrained']} |",
         "",
+        "## Lay on Hands By Category",
+        "",
+        "| Category | Uses | Healing | Avg Heal | Pickups | Target Classes |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for category in LAY_ON_HANDS_TARGET_CATEGORIES:
+        category_summary = lay_on_hands_categories.get(category, {})
+        lines.append(
+            f"| `{category}` | {category_summary.get('uses', 0)} | "
+            f"{category_summary.get('healingTotal', 0)} | {category_summary.get('averageHeal', 0.0)} | "
+            f"{category_summary.get('pickups', 0)} | `{category_summary.get('targetClasses', {})}` |"
+        )
+    lines.extend(
+        [
+            "",
         "## Scenarios",
         "",
         "| Scenario | Win Rate | Avg Rounds | Aid | Smite | LoH Uses | Cure | Nature | Avg Restrained | Sentinel | Halt |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+        ]
+    )
     for row in payload["scenarios"]:
         lines.append(
             f"| `{row['scenarioId']}` | {row['playerWinRate']}% | {row['averageRounds']} | "
@@ -2493,6 +2705,12 @@ def main() -> None:
     if args.runs_per_scenario <= 0:
         raise ValueError("--runs-per-scenario must be positive.")
     validate_scenarios(scenario_ids)
+    lay_on_hands_policy = build_lay_on_hands_policy(
+        downed_percent=args.lay_on_hands_downed_percent,
+        ally_percent=args.lay_on_hands_ally_percent,
+        self_percent=args.lay_on_hands_self_percent,
+        remainder_percent=args.lay_on_hands_remainder_percent,
+    )
 
     started = time.perf_counter()
     if player_behavior == "both":
@@ -2502,6 +2720,8 @@ def main() -> None:
             scenario_ids=scenario_ids,
             runs_per_scenario=args.runs_per_scenario,
             monster_behavior=args.monster_behavior,
+            seed_offset=args.seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
         elapsed = time.perf_counter() - started
         payload = build_behavior_comparison_payload(
@@ -2514,6 +2734,8 @@ def main() -> None:
             elapsed_seconds=elapsed,
             behavior_summaries=behavior_summaries,
             behavior_delta=behavior_delta,
+            seed_offset=args.seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
     else:
         overall, scenarios, party_breakdown = run_party_profile_sample(
@@ -2524,6 +2746,8 @@ def main() -> None:
             runs_per_scenario=args.runs_per_scenario,
             player_behavior=player_behavior,
             monster_behavior=args.monster_behavior,
+            seed_offset=args.seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
         elapsed = time.perf_counter() - started
         payload = build_report_payload(
@@ -2538,6 +2762,8 @@ def main() -> None:
             overall=overall,
             scenarios=scenarios,
             party_breakdown=party_breakdown,
+            seed_offset=args.seed_offset,
+            lay_on_hands_policy=lay_on_hands_policy,
         )
     write_json_report(args.json_path, payload)
     write_text_report(args.markdown_path, format_markdown_report(payload))

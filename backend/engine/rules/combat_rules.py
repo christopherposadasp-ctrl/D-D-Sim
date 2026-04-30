@@ -1520,6 +1520,19 @@ def units_are_within_spell_range(state: EncounterState, actor_id: str, target_id
     )
 
 
+def percentage_of_hp(max_hp: int, percent_value: int) -> int:
+    return max(1, (max_hp * percent_value + 99) // 100)
+
+
+def lay_on_hands_policy_signature(state: EncounterState) -> str:
+    return (
+        f"downed{state.lay_on_hands_downed_percent}"
+        f"_ally{state.lay_on_hands_ally_percent}"
+        f"_self{state.lay_on_hands_self_percent}"
+        f"_remainder{state.lay_on_hands_remainder_percent}"
+    )
+
+
 def get_second_wind_heal_modifier(actor: UnitState) -> int:
     return max(1, actor.level or 1)
 
@@ -1573,18 +1586,24 @@ def attempt_lay_on_hands(state: EncounterState, actor_id: str, target_id: str | 
         return create_skip_event(state, actor_id, "Lay on Hands target is not within touch range.")
 
     if target.current_hp == 0:
-        # Rescue pickups should leave the ally with enough HP to survive incidental follow-up damage.
-        intended_healing = max(1, (target.max_hp * 3 + 9) // 10)
+        target_category = "downed"
+        target_percent = state.lay_on_hands_downed_percent
     elif target.id == actor.id:
-        target_sixty_percent_hp = max(1, (target.max_hp * 3 + 4) // 5)
-        intended_healing = max(1, target_sixty_percent_hp - target.current_hp)
+        target_category = "self"
+        target_percent = state.lay_on_hands_self_percent
     else:
-        target_fifty_five_percent_hp = max(1, (target.max_hp * 11 + 19) // 20)
-        intended_healing = max(1, target_fifty_five_percent_hp - target.current_hp)
+        target_category = "living_ally"
+        target_percent = state.lay_on_hands_ally_percent
+
+    target_hp = percentage_of_hp(target.max_hp, target_percent)
+    intended_healing = max(1, target_hp - target.current_hp)
+    original_intended_healing = intended_healing
     max_lay_on_hands_pool = actor.resource_pools.get("lay_on_hands", actor.resources.lay_on_hands_points)
-    low_remainder_threshold = max(1, max_lay_on_hands_pool // 5)
+    low_remainder_threshold = max(1, (max_lay_on_hands_pool * state.lay_on_hands_remainder_percent) // 100)
+    spent_remainder = False
     if 0 < actor.resources.lay_on_hands_points - intended_healing < low_remainder_threshold:
         intended_healing = actor.resources.lay_on_hands_points
+        spent_remainder = True
     healing_total = min(intended_healing, target.max_hp - target.current_hp, actor.resources.lay_on_hands_points)
     if healing_total <= 0:
         return create_skip_event(state, actor_id, "Lay on Hands target does not need healing.")
@@ -1601,6 +1620,11 @@ def attempt_lay_on_hands(state: EncounterState, actor_id: str, target_id: str | 
             "healingTotal": healed,
             "currentHp": target.current_hp,
             "layOnHandsPointsRemaining": actor.resources.lay_on_hands_points,
+            "layOnHandsTargetCategory": target_category,
+            "layOnHandsPolicySignature": lay_on_hands_policy_signature(state),
+            "layOnHandsTargetPercent": target_percent,
+            "layOnHandsIntendedHealing": original_intended_healing,
+            "layOnHandsSpentRemainder": spent_remainder,
         },
         movement_details=None,
         damage_details=None,

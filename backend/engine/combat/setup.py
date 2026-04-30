@@ -332,6 +332,10 @@ def create_encounter(config: EncounterConfig) -> EncounterState:
         smart_targeting_policy=config.smart_targeting_policy,
         enable_end_turn_flanking=config.enable_end_turn_flanking,
         enable_frontline_body_blocking=config.enable_frontline_body_blocking,
+        lay_on_hands_downed_percent=config.lay_on_hands_downed_percent,
+        lay_on_hands_ally_percent=config.lay_on_hands_ally_percent,
+        lay_on_hands_self_percent=config.lay_on_hands_self_percent,
+        lay_on_hands_remainder_percent=config.lay_on_hands_remainder_percent,
     )
 
     for player_unit_id in player_unit_ids:

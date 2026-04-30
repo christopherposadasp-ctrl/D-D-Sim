@@ -21,6 +21,10 @@ def test_pc_tuning_sample_defaults_to_paladin_standard_battery() -> None:
     assert run_pc_tuning_sample.DEFAULT_PLAYER_BEHAVIOR == "smart"
     assert run_pc_tuning_sample.FIGHTER_DEFAULT_PLAYER_BEHAVIOR == "both"
     assert run_pc_tuning_sample.DEFAULT_MONSTER_BEHAVIOR == "balanced"
+    assert run_pc_tuning_sample.DEFAULT_LAY_ON_HANDS_DOWNED_PERCENT == 30
+    assert run_pc_tuning_sample.DEFAULT_LAY_ON_HANDS_ALLY_PERCENT == 55
+    assert run_pc_tuning_sample.DEFAULT_LAY_ON_HANDS_SELF_PERCENT == 65
+    assert run_pc_tuning_sample.DEFAULT_LAY_ON_HANDS_REMAINDER_PERCENT == 20
     assert run_pc_tuning_sample.DEFAULT_SCENARIO_IDS == (
         "reaction_bastion",
         "skyhunter_pincer",
@@ -51,6 +55,16 @@ def test_pc_tuning_sample_summary_tracks_paladin_resources_and_feature_rates() -
     metrics["layOnHandsTotalHealing"] = 21
     metrics["layOnHandsHeals"].extend([4, 7, 10])
     metrics["layOnHandsDownedPickups"] = 2
+    metrics["layOnHandsPolicySignatures"].update({"downed30_ally55_self65_remainder20": 3})
+    metrics["layOnHandsUsesByCategory"].update({"downed": 2, "living_ally": 1})
+    metrics["layOnHandsTotalHealingByCategory"].update({"downed": 11, "living_ally": 10})
+    metrics["layOnHandsHealsByCategory"]["downed"].extend([4, 7])
+    metrics["layOnHandsHealsByCategory"]["living_ally"].append(10)
+    metrics["layOnHandsDownedPickupsByCategory"].update({"downed": 2})
+    metrics["layOnHandsTargetIdsByCategory"]["downed"].update({"F3": 2})
+    metrics["layOnHandsTargetClassesByCategory"]["downed"].update({"rogue": 2})
+    metrics["layOnHandsTargetIdsByCategory"]["living_ally"].update({"F1": 1})
+    metrics["layOnHandsTargetClassesByCategory"]["living_ally"].update({"fighter": 1})
     metrics["cureWoundsUses"] = 1
     metrics["cureWoundsTotalHealing"] = 8
     metrics["cureWoundsHeals"].append(8)
@@ -75,6 +89,15 @@ def test_pc_tuning_sample_summary_tracks_paladin_resources_and_feature_rates() -
     assert summary["naturesWrathRestrainedTargetRate"] == 50.0
     assert summary["layOnHandsAverageHeal"] == 7
     assert summary["layOnHandsDownedPickups"] == 2
+    assert summary["layOnHandsPolicySignatureDistribution"] == {"downed30_ally55_self65_remainder20": 3}
+    assert summary["layOnHandsByCategory"]["downed"]["uses"] == 2
+    assert summary["layOnHandsByCategory"]["downed"]["healingTotal"] == 11
+    assert summary["layOnHandsByCategory"]["downed"]["averageHeal"] == 5.5
+    assert summary["layOnHandsByCategory"]["downed"]["pickups"] == 2
+    assert summary["layOnHandsByCategory"]["downed"]["targetIds"] == {"F3": 2}
+    assert summary["layOnHandsByCategory"]["downed"]["targetClasses"] == {"rogue": 2}
+    assert summary["layOnHandsByCategory"]["living_ally"]["uses"] == 1
+    assert summary["layOnHandsByCategory"]["living_ally"]["targetClasses"] == {"fighter": 1}
     assert summary["cureWoundsAverageHeal"] == 8
 
 
@@ -93,6 +116,33 @@ def test_pc_tuning_sample_resolves_default_behavior_by_profile() -> None:
     assert run_pc_tuning_sample.resolve_profile_player_behavior("fighter", None) == "both"
     assert run_pc_tuning_sample.resolve_profile_player_behavior("fighter", "smart") == "smart"
     assert run_pc_tuning_sample.resolve_profile_player_behavior("fighter", "dumb") == "dumb"
+
+
+def test_pc_tuning_sample_builds_lay_on_hands_policy_and_seed_offset() -> None:
+    policy = run_pc_tuning_sample.build_lay_on_hands_policy(
+        downed_percent=30,
+        ally_percent=60,
+        self_percent=65,
+        remainder_percent=20,
+    )
+
+    assert policy == {
+        "downedPercent": 30,
+        "allyPercent": 60,
+        "selfPercent": 65,
+        "remainderPercent": 20,
+        "signature": "downed30_ally60_self65_remainder20",
+    }
+    assert run_pc_tuning_sample.lay_on_hands_policy_config_kwargs(policy) == {
+        "lay_on_hands_downed_percent": 30,
+        "lay_on_hands_ally_percent": 60,
+        "lay_on_hands_self_percent": 65,
+        "lay_on_hands_remainder_percent": 20,
+    }
+    assert (
+        run_pc_tuning_sample.sample_seed("pc-tuning-party", "hobgoblin_kill_box", 3, 10000, "smart")
+        == "pc-tuning-party-smart-hobgoblin_kill_box-10003"
+    )
 
 
 def test_pc_tuning_sample_orders_selected_profile_last() -> None:
@@ -460,11 +510,15 @@ def test_pc_tuning_sample_report_payload_preserves_selected_summary_and_party_br
         overall=selected_overall,
         scenarios=selected_scenarios,
         party_breakdown=party_breakdown,
+        seed_offset=10000,
+        lay_on_hands_policy=run_pc_tuning_sample.build_lay_on_hands_policy(ally_percent=55),
     )
 
     assert payload["overall"] is selected_overall
     assert payload["scenarios"] is selected_scenarios
     assert payload["partyBreakdown"] is party_breakdown
+    assert payload["seedOffset"] == 10000
+    assert payload["layOnHandsPolicy"]["signature"] == "downed30_ally55_self65_remainder20"
 
 
 def test_pc_tuning_sample_fighter_both_payload_includes_party_breakdown_per_behavior() -> None:
@@ -491,10 +545,14 @@ def test_pc_tuning_sample_fighter_both_payload_includes_party_breakdown_per_beha
         elapsed_seconds=0.1,
         behavior_summaries=behavior_summaries,
         behavior_delta={"playerWinRate": 100.0},
+        seed_offset=250,
+        lay_on_hands_policy=run_pc_tuning_sample.build_lay_on_hands_policy(ally_percent=55),
     )
 
     assert payload["behaviorSummaries"]["smart"]["partyBreakdown"]["fighter"]["unitId"] == "F1"
     assert payload["behaviorSummaries"]["dumb"]["partyBreakdown"]["fighter"]["unitId"] == "F1"
+    assert payload["seedOffset"] == 250
+    assert payload["layOnHandsPolicy"]["signature"] == "downed30_ally55_self65_remainder20"
 
 
 def test_pc_tuning_sample_party_sampler_records_current_party_profiles() -> None:

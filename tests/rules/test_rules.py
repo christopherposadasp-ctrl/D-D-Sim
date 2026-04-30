@@ -3953,6 +3953,11 @@ def test_lay_on_hands_restores_downed_target_to_thirty_percent_hp() -> None:
 
     assert heal_event.event_type == "heal"
     assert heal_event.resolved_totals["healingTotal"] == 15
+    assert heal_event.resolved_totals["layOnHandsTargetCategory"] == "downed"
+    assert heal_event.resolved_totals["layOnHandsPolicySignature"] == "downed30_ally55_self65_remainder20"
+    assert heal_event.resolved_totals["layOnHandsTargetPercent"] == 30
+    assert heal_event.resolved_totals["layOnHandsIntendedHealing"] == 15
+    assert heal_event.resolved_totals["layOnHandsSpentRemainder"] is False
     assert encounter.units["F2"].current_hp == 15
     assert encounter.units["F2"].conditions.unconscious is False
     assert encounter.units["F1"].resources.lay_on_hands_points == 10
@@ -3967,29 +3972,59 @@ def test_lay_on_hands_living_ally_heals_to_fifty_five_percent_hp_when_triggered(
     heal_event = attempt_lay_on_hands(encounter, "F1", "F2")
 
     assert heal_event.resolved_totals["healingTotal"] == 17
+    assert heal_event.resolved_totals["layOnHandsTargetCategory"] == "living_ally"
+    assert heal_event.resolved_totals["layOnHandsPolicySignature"] == "downed30_ally55_self65_remainder20"
+    assert heal_event.resolved_totals["layOnHandsTargetPercent"] == 55
+    assert heal_event.resolved_totals["layOnHandsIntendedHealing"] == 17
+    assert heal_event.resolved_totals["layOnHandsSpentRemainder"] is False
     assert encounter.units["F2"].current_hp == 27
     assert encounter.units["F1"].resources.lay_on_hands_points == 8
 
 
-def test_lay_on_hands_self_heals_to_sixty_percent_hp_when_triggered() -> None:
+def test_lay_on_hands_policy_override_changes_living_ally_heal_only() -> None:
+    config = build_level5_paladin_config("paladin-lay-on-hands-ally-policy", player_behavior="dumb")
+    config.lay_on_hands_ally_percent = 60
+    encounter = create_encounter(config)
+    encounter.units["F1"].position = GridPosition(x=4, y=4)
+    encounter.units["F2"].position = GridPosition(x=5, y=4)
+    encounter.units["F2"].current_hp = 10
+
+    heal_event = attempt_lay_on_hands(encounter, "F1", "F2")
+
+    assert heal_event.resolved_totals["healingTotal"] == 20
+    assert heal_event.resolved_totals["layOnHandsTargetCategory"] == "living_ally"
+    assert heal_event.resolved_totals["layOnHandsPolicySignature"] == "downed30_ally60_self65_remainder20"
+    assert heal_event.resolved_totals["layOnHandsTargetPercent"] == 60
+    assert heal_event.resolved_totals["layOnHandsIntendedHealing"] == 20
+    assert encounter.units["F2"].current_hp == 30
+
+
+def test_lay_on_hands_self_heals_to_sixty_five_percent_hp_when_triggered() -> None:
     encounter = create_encounter(build_level5_paladin_config("paladin-lay-on-hands-self", player_behavior="dumb"))
     encounter.units["F1"].current_hp = 15
 
     heal_event = attempt_lay_on_hands(encounter, "F1", "F1")
 
-    assert heal_event.resolved_totals["healingTotal"] == 15
-    assert encounter.units["F1"].current_hp == 30
-    assert encounter.units["F1"].resources.lay_on_hands_points == 10
+    assert heal_event.resolved_totals["healingTotal"] == 17
+    assert heal_event.resolved_totals["layOnHandsTargetCategory"] == "self"
+    assert heal_event.resolved_totals["layOnHandsPolicySignature"] == "downed30_ally55_self65_remainder20"
+    assert heal_event.resolved_totals["layOnHandsTargetPercent"] == 65
+    assert heal_event.resolved_totals["layOnHandsIntendedHealing"] == 17
+    assert heal_event.resolved_totals["layOnHandsSpentRemainder"] is False
+    assert encounter.units["F1"].current_hp == 32
+    assert encounter.units["F1"].resources.lay_on_hands_points == 8
 
 
 def test_lay_on_hands_spends_remaining_pool_when_planned_heal_would_leave_small_remainder() -> None:
     encounter = create_encounter(build_level5_paladin_config("paladin-lay-on-hands-remainder", player_behavior="dumb"))
-    encounter.units["F1"].current_hp = 5
+    encounter.units["F1"].current_hp = 9
 
     heal_event = attempt_lay_on_hands(encounter, "F1", "F1")
 
     assert heal_event.resolved_totals["healingTotal"] == 25
-    assert encounter.units["F1"].current_hp == 30
+    assert heal_event.resolved_totals["layOnHandsIntendedHealing"] == 23
+    assert heal_event.resolved_totals["layOnHandsSpentRemainder"] is True
+    assert encounter.units["F1"].current_hp == 34
     assert encounter.units["F1"].resources.lay_on_hands_points == 0
 
 
