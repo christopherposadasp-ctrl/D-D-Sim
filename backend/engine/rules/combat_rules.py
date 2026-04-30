@@ -252,7 +252,7 @@ def get_shield_ac_bonus(unit: UnitState) -> int:
     return sum(
         effect.ac_bonus
         for effect in unit.temporary_effects
-        if effect.kind in {"shield", "shield_of_faith", "haste"}
+        if effect.kind in {"shield", "shield_of_faith", "haste", "icy_retreat"}
     )
 
 

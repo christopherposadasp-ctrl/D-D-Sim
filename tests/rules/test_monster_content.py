@@ -232,11 +232,17 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
 
     if "legendary_resistance" in expectation.special_mechanics:
         assert "legendary_resistance" in definition.trait_ids
-        assert runtime_unit.resource_pools.get("legendary_resistance_uses") == 3
+        expected_resistance_uses = dict(expectation.resource_pools).get("legendary_resistance_uses", 3)
+        assert runtime_unit.resource_pools.get("legendary_resistance_uses") == expected_resistance_uses
 
     if "pounce" in expectation.special_mechanics:
         assert "pounce" in definition.legendary_action_ids
-        assert runtime_unit.resource_pools.get("legendary_action_uses") == 3
+        expected_legendary_uses = dict(expectation.resource_pools).get("legendary_action_uses", 3)
+        assert runtime_unit.resource_pools.get("legendary_action_uses") == expected_legendary_uses
+
+    if "icy_retreat" in expectation.special_mechanics:
+        assert "icy_retreat" in definition.legendary_action_ids
+        assert runtime_unit.resource_pools.get("icy_retreat_available") == 1
 
     if "freezing_burst" in expectation.special_mechanics:
         burst = LEGENDARY_SPHERE_ACTIONS["freezing_burst"]

@@ -55,6 +55,10 @@ def assert_primary_benchmark_behavior(variant_id: str, attack_events: list) -> N
             assert weapon_ids.index("cold_breath") < weapon_ids.index("rend")
         return
 
+    if variant_id == "young_white_dragon_boss":
+        assert set(weapon_ids).issubset({"cold_breath", "rend"})
+        return
+
     if variant_id == "adult_white_dragon":
         assert set(weapon_ids).issubset({"cold_breath", "freezing_burst", "rend"})
         if "cold_breath" in weapon_ids and "rend" in weapon_ids:

@@ -265,6 +265,13 @@ class ShieldEffect(CamelModel):
     ac_bonus: int
 
 
+class IcyRetreatEffect(CamelModel):
+    kind: Literal["icy_retreat"]
+    source_id: str
+    expires_at_turn_start_of: str
+    ac_bonus: int
+
+
 class ShieldOfFaithEffect(CamelModel):
     kind: Literal["shield_of_faith"]
     source_id: str
@@ -398,6 +405,7 @@ TemporaryEffect: TypeAlias = (
     | HiddenEffect
     | DodgingEffect
     | ShieldEffect
+    | IcyRetreatEffect
     | ShieldOfFaithEffect
     | HeroismEffect
     | HasteEffect

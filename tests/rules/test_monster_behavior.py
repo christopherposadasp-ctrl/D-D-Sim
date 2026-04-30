@@ -9,6 +9,7 @@ from backend.engine.ai.profiles import get_monster_ai_profile
 from backend.engine.combat.engine import (
     execute_decision,
     expire_turn_end_effects,
+    get_legendary_action_ids_for_unit,
     reset_legendary_action_uses_at_turn_start,
     resolve_attack_action,
     resolve_cold_breath,
@@ -43,6 +44,8 @@ from backend.engine.rules.combat_rules import (
     ResolveSavingThrowArgs,
     SavingThrowOverrides,
     apply_damage,
+    expire_turn_effects,
+    get_shield_ac_bonus,
     resolve_attack,
     resolve_saving_throw,
 )
@@ -50,6 +53,7 @@ from backend.engine.rules.spatial import (
     GRID_SIZE,
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
+    get_unit_footprint,
 )
 from tests.rules.monster_expectations import (
     MELEE_ONLY_MONSTER_IDS,
@@ -125,6 +129,7 @@ FIXED_ATTACK_CASES = (
     ("griffon", "rend", [4], ["piercing"], [8]),
     ("hippopotamus", "bite", [5, 6], ["piercing"], [16]),
     ("young_white_dragon", "rend", [3, 4, 2], ["slashing", "cold"], [11, 2]),
+    ("young_white_dragon_boss", "rend", [3, 4, 2], ["slashing", "cold"], [11, 2]),
     ("young_red_dragon", "rend", [4, 5, 3], ["slashing", "fire"], [15, 3]),
     ("adult_white_dragon", "rend", [4, 5, 6], ["slashing", "cold"], [15, 6]),
     ("adult_red_dragon", "rend", [5, 2, 3], ["slashing", "fire"], [13, 5]),
@@ -1363,6 +1368,135 @@ def test_young_white_dragon_avoids_cold_breath_when_best_current_cone_includes_a
     decision = choose_turn_decision(encounter, "E1")
 
     assert decision.action["kind"] != "special_action"
+
+
+def test_young_white_dragon_boss_has_once_per_turn_pounce_and_icy_retreat() -> None:
+    regular_encounter = build_monster_benchmark_encounter("young_white_dragon")
+    boss_encounter = build_monster_benchmark_encounter("young_white_dragon_boss")
+
+    assert get_legendary_action_ids_for_unit(regular_encounter.units["E1"]) == ()
+    assert get_legendary_action_ids_for_unit(boss_encounter.units["E1"]) == ("icy_retreat", "pounce")
+    assert unit_has_trait(boss_encounter.units["E1"], "legendary_resistance")
+    assert boss_encounter.units["E1"].resource_pools["legendary_resistance_uses"] == 2
+    assert boss_encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert boss_encounter.units["E1"].resource_pools["legendary_action_max_uses"] == 2
+    assert boss_encounter.units["E1"].resource_pools["icy_retreat_available"] == 1
+    assert boss_encounter.units["E1"].resource_pools["pounce_available"] == 1
+
+    boss_encounter.units["E1"].resource_pools["legendary_action_uses"] = 0
+    boss_encounter.units["E1"].resource_pools["icy_retreat_available"] = 0
+    boss_encounter.units["E1"].resource_pools["pounce_available"] = 0
+    reset_legendary_action_uses_at_turn_start(boss_encounter, "E1")
+
+    assert boss_encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert boss_encounter.units["E1"].resource_pools["icy_retreat_available"] == 1
+    assert boss_encounter.units["E1"].resource_pools["pounce_available"] == 1
+
+
+@pytest.mark.parametrize("variant_id", ("adult_white_dragon", "adult_red_dragon"))
+def test_adult_dragons_still_reset_to_three_legendary_actions(variant_id: str) -> None:
+    encounter = build_monster_benchmark_encounter(variant_id)
+    encounter.units["E1"].resource_pools["legendary_action_uses"] = 0
+
+    reset_legendary_action_uses_at_turn_start(encounter, "E1")
+
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 3
+
+
+def test_young_white_dragon_boss_icy_retreat_moves_away_and_grants_ac_bonus() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon_boss")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=8)
+    encounter.units["F1"].position = GridPosition(x=4, y=8)
+
+    initial_distance = get_min_chebyshev_distance_between_footprints(
+        encounter.units["E1"].position,
+        get_unit_footprint(encounter.units["E1"]),
+        encounter.units["F1"].position,
+        get_unit_footprint(encounter.units["F1"]),
+    )
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    phase_events = [
+        event
+        for event in events
+        if event.event_type == "phase_change" and event.resolved_totals.get("legendaryAction") == "icy_retreat"
+    ]
+    move_events = [event for event in events if event.event_type == "move"]
+    final_distance = get_min_chebyshev_distance_between_footprints(
+        encounter.units["E1"].position,
+        get_unit_footprint(encounter.units["E1"]),
+        encounter.units["F1"].position,
+        get_unit_footprint(encounter.units["F1"]),
+    )
+
+    assert phase_events
+    assert phase_events[0].resolved_totals["legendaryActionUsesRemaining"] == 1
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 1
+    assert encounter.units["E1"].resource_pools["icy_retreat_available"] == 0
+    assert encounter.units["E1"].resource_pools["pounce_available"] == 1
+    assert move_events
+    assert move_events[0].resolved_totals["movementMode"] == "icy_retreat"
+    assert move_events[0].movement_details.distance <= 4
+    assert final_distance > initial_distance
+    assert get_shield_ac_bonus(encounter.units["E1"]) == 2
+
+    encounter.units["E1"].resource_pools["pounce_available"] = 0
+    second_events = resolve_legendary_actions_after_turn(encounter, "F1")
+
+    assert not any(event.resolved_totals.get("legendaryAction") == "icy_retreat" for event in second_events)
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 1
+
+    expire_events = expire_turn_effects(encounter, "E1")
+
+    assert get_shield_ac_bonus(encounter.units["E1"]) == 0
+    assert any("icy_retreat" in delta for event in expire_events for delta in event.condition_deltas)
+
+
+def test_young_white_dragon_boss_pounce_spends_one_use_and_uses_young_white_rend() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon_boss")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].resource_pools["icy_retreat_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=2, y=8)
+    encounter.units["F1"].max_hp = 500
+    encounter.units["F1"].current_hp = 500
+
+    events = resolve_legendary_actions_after_turn(encounter, "F1")
+    attacks = enemy_attack_events(events)
+
+    assert any(event.resolved_totals.get("legendaryAction") == "pounce" for event in events)
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 1
+    assert encounter.units["E1"].resource_pools["pounce_available"] == 0
+    assert [event.damage_details.weapon_id for event in attacks] == ["rend"]
+    assert [component.damage_type for component in attacks[0].damage_details.damage_components] == ["slashing", "cold"]
+    assert [component.flat_modifier for component in attacks[0].damage_details.damage_components] == [4, 0]
+    assert [len(component.raw_rolls) for component in attacks[0].damage_details.damage_components] == [2, 1]
+
+
+def test_young_white_dragon_boss_cannot_reuse_pounce_before_turn_reset() -> None:
+    encounter = build_monster_benchmark_encounter("young_white_dragon_boss")
+    defeat_other_units(encounter, "E1", "F1", "F3")
+    encounter.units["E1"].resource_pools["icy_retreat_available"] = 0
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=2, y=8)
+    encounter.units["F3"].position = GridPosition(x=2, y=10)
+    for unit_id in ("F1", "F3"):
+        encounter.units[unit_id].max_hp = 500
+        encounter.units[unit_id].current_hp = 500
+
+    first_events = resolve_legendary_actions_after_turn(encounter, "F1")
+    second_events = resolve_legendary_actions_after_turn(encounter, "F3")
+
+    assert any(event.resolved_totals.get("legendaryAction") == "pounce" for event in first_events)
+    assert not any(event.resolved_totals.get("legendaryAction") == "pounce" for event in second_events)
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 1
+    assert encounter.units["E1"].resource_pools["pounce_available"] == 0
+
+    reset_legendary_action_uses_at_turn_start(encounter, "E1")
+
+    assert encounter.units["E1"].resource_pools["legendary_action_uses"] == 2
+    assert encounter.units["E1"].resource_pools["pounce_available"] == 1
 
 
 def test_young_red_dragon_multiattack_resolves_three_rend_attacks_and_uses_legal_large_footprint() -> None:

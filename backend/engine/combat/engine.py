@@ -54,6 +54,7 @@ from backend.engine.models.state import (
     Footprint,
     FrightenedEffect,
     GridPosition,
+    IcyRetreatEffect,
     MovementDetails,
     RageEffect,
     ReplayFrame,
@@ -223,7 +224,7 @@ def reset_legendary_action_uses_at_turn_start(state: EncounterState, actor_id: s
         return
     legendary_action_ids = get_legendary_action_ids_for_unit(actor)
     if legendary_action_ids and "legendary_action_uses" in actor.resource_pools:
-        actor.resource_pools["legendary_action_uses"] = 3
+        actor.resource_pools["legendary_action_uses"] = actor.resource_pools.get("legendary_action_max_uses", 3)
     for action_id in legendary_action_ids:
         sphere_action = LEGENDARY_SPHERE_ACTIONS.get(action_id)
         if sphere_action and sphere_action.resource_pool_id in actor.resource_pools:
@@ -235,10 +236,16 @@ def reset_legendary_action_uses_at_turn_start(state: EncounterState, actor_id: s
             actor.resource_pools["fiery_rays_available"] = 1
         if action_id == "commanding_presence" and "commanding_presence_available" in actor.resource_pools:
             actor.resource_pools["commanding_presence_available"] = 1
+        if action_id == "pounce" and "pounce_available" in actor.resource_pools:
+            actor.resource_pools["pounce_available"] = 1
+        if action_id == "icy_retreat" and "icy_retreat_available" in actor.resource_pools:
+            actor.resource_pools["icy_retreat_available"] = 1
 
 
 def choose_legendary_pounce_option(state: EncounterState, actor: UnitState):
     if "pounce" not in get_legendary_action_ids_for_unit(actor):
+        return None
+    if "pounce_available" in actor.resource_pools and actor.resource_pools.get("pounce_available", 0) <= 0:
         return None
     if "rend" not in actor.attacks or not actor.position:
         return None
@@ -272,11 +279,21 @@ def choose_legendary_pounce_option(state: EncounterState, actor: UnitState):
 
 def resolve_legendary_pounce(state: EncounterState, actor_id: str) -> list[CombatEvent]:
     actor = state.units[actor_id]
+    if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+        return []
     option = choose_legendary_pounce_option(state, actor)
     if not option:
         return []
 
     actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    if "pounce_available" in actor.resource_pools:
+        actor.resource_pools["pounce_available"] = 0
+    resolved_totals: dict[str, object] = {
+        "legendaryAction": "pounce",
+        "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+    }
+    if "pounce_available" in actor.resource_pools:
+        resolved_totals["pounceAvailable"] = actor.resource_pools.get("pounce_available", 0)
     events = [
         add_unit_phase_event(
             state,
@@ -284,10 +301,7 @@ def resolve_legendary_pounce(state: EncounterState, actor_id: str) -> list[Comba
             option.target.id,
             f"{actor_id} uses Legendary Action: Pounce.",
             condition_deltas=[f"{actor_id} spends 1 legendary action use on Pounce."],
-            resolved_totals={
-                "legendaryAction": "pounce",
-                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
-            },
+            resolved_totals=resolved_totals,
         )
     ]
 
@@ -324,6 +338,127 @@ def resolve_legendary_pounce(state: EncounterState, actor_id: str) -> list[Comba
         if state.units[target_id].conditions.dead:
             events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
             events.extend(release_swallowed_units_from_source(state, target_id))
+    return events
+
+
+def choose_legendary_icy_retreat_option(state: EncounterState, actor: UnitState):
+    if "icy_retreat" not in get_legendary_action_ids_for_unit(actor):
+        return None
+    if actor.resource_pools.get("legendary_action_uses", 0) <= 0:
+        return None
+    if actor.resource_pools.get("icy_retreat_available", 0) <= 0:
+        return None
+    if not actor.position:
+        return None
+
+    enemies = sorted(
+        [
+            unit
+            for unit in state.units.values()
+            if unit.faction != actor.faction and is_unit_conscious(unit) and unit.position
+        ],
+        key=lambda unit: unit_sort_key(unit.id),
+    )
+    if not enemies:
+        return None
+
+    def distance_from(position: GridPosition, enemy: UnitState) -> int:
+        return get_min_chebyshev_distance_between_footprints(
+            position,
+            get_unit_footprint(actor),
+            enemy.position,
+            get_unit_footprint(enemy),
+        )
+
+    current_min_distance = min(distance_from(actor.position, enemy) for enemy in enemies)
+    if current_min_distance > 2:
+        return None
+
+    position_index = build_position_index(state)
+    retreat_move_squares = max(0, get_move_squares(state, actor) // 2)
+    candidates = [
+        square
+        for square in get_reachable_squares(state, actor.id, retreat_move_squares, position_index)
+        if square.distance > 0
+    ]
+    if not candidates:
+        return None
+
+    scored_candidates = [
+        (
+            min(distance_from(square.position, enemy) for enemy in enemies),
+            sum(distance_from(square.position, enemy) for enemy in enemies),
+            square,
+        )
+        for square in candidates
+    ]
+    best_min_distance, _best_total_distance, best_square = sorted(
+        scored_candidates,
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            item[2].distance,
+            item[2].position.x,
+            item[2].position.y,
+        ),
+    )[0]
+    if best_min_distance <= current_min_distance:
+        return None
+
+    closest_enemy = sorted(enemies, key=lambda unit: (distance_from(actor.position, unit), unit_sort_key(unit.id)))[0]
+    return best_square, closest_enemy
+
+
+def resolve_legendary_icy_retreat(state: EncounterState, actor_id: str) -> list[CombatEvent]:
+    actor = state.units[actor_id]
+    option = choose_legendary_icy_retreat_option(state, actor)
+    if not option:
+        return []
+
+    retreat_square, closest_enemy = option
+    actor.resource_pools["legendary_action_uses"] = max(0, actor.resource_pools.get("legendary_action_uses", 0) - 1)
+    actor.resource_pools["icy_retreat_available"] = 0
+    actor.temporary_effects = [
+        effect
+        for effect in actor.temporary_effects
+        if not (effect.kind == "icy_retreat" and effect.source_id == actor_id)
+    ]
+    actor.temporary_effects.append(
+        IcyRetreatEffect(
+            kind="icy_retreat",
+            source_id=actor_id,
+            expires_at_turn_start_of=actor_id,
+            ac_bonus=2,
+        )
+    )
+
+    events = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            closest_enemy.id,
+            f"{actor_id} uses Legendary Action: Icy Retreat.",
+            condition_deltas=[
+                f"{actor_id} spends 1 legendary action use on Icy Retreat.",
+                f"{actor_id}'s AC increases by 2 until the start of its next turn.",
+            ],
+            resolved_totals={
+                "legendaryAction": "icy_retreat",
+                "legendaryActionUsesRemaining": actor.resource_pools.get("legendary_action_uses", 0),
+                "icyRetreatAvailable": actor.resource_pools.get("icy_retreat_available", 0),
+                "icyRetreatAcBonus": 2,
+            },
+        )
+    ]
+
+    movement_events, _movement_halted = execute_movement(
+        state,
+        actor_id,
+        MovementPlan(path=retreat_square.path, mode="icy_retreat"),
+        False,
+        "legendary_action",
+    )
+    events.extend(movement_events)
     return events
 
 
@@ -1493,6 +1628,13 @@ def resolve_legendary_actions_after_turn(state: EncounterState, triggering_actor
             fiery_events = resolve_legendary_fiery_rays(state, actor.id)
             if fiery_events:
                 events.extend(fiery_events)
+                if fighters_defeated(state) or goblins_defeated(state):
+                    break
+                continue
+        if "icy_retreat" in legendary_action_ids:
+            icy_retreat_events = resolve_legendary_icy_retreat(state, actor.id)
+            if icy_retreat_events:
+                events.extend(icy_retreat_events)
                 if fighters_defeated(state) or goblins_defeated(state):
                     break
                 continue
@@ -4375,7 +4517,7 @@ def execute_movement(
     path_travelled = [movement.path[0]]
     reaction_events: list[CombatEvent] = []
     triggered_attackers: list[str] = []
-    opportunity_attacks_prevented = movement.mode in {"tactical_shift", "landing", "cunning_withdraw"}
+    opportunity_attacks_prevented = movement.mode in {"tactical_shift", "landing", "cunning_withdraw", "icy_retreat"}
 
     for index in range(1, len(movement.path)):
         previous = movement.path[index - 1]
