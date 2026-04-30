@@ -115,13 +115,14 @@ def test_fixed_seed_marsh_predators_encounter_shows_crocodile_control_and_toad_p
         )
     )
 
-    final_roles = {unit.combat_role for unit in result.final_state.units.values()}
+    final_enemy_units = [unit for unit in result.final_state.units.values() if unit.faction == "goblins"]
+    crocodile_ids = {unit.id for unit in final_enemy_units if unit.combat_role == "crocodile"}
+    giant_toad_ids = {unit.id for unit in final_enemy_units if unit.combat_role == "giant_toad"}
+    grapple_deltas = [delta for event in result.events for delta in event.condition_deltas if "is grappled by" in delta]
 
-    assert result.final_state.units["E2"].combat_role == "crocodile"
-    assert "crocodile" in final_roles
-    assert "giant_toad" in final_roles
+    assert len(crocodile_ids) == 5
+    assert len(giant_toad_ids) == 2
     assert any(
-        "is grappled by E2" in delta or "is grappled by E3" in delta or "is grappled by E4" in delta
-        for event in result.events
-        for delta in event.condition_deltas
+        any(f"is grappled by {crocodile_id}" in delta for crocodile_id in crocodile_ids)
+        for delta in grapple_deltas
     )
