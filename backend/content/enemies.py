@@ -2597,8 +2597,8 @@ MONSTER_DEFINITIONS.update(
             display_name="Young White Dragon Boss",
             combat_role="young_white_dragon_boss",
             ai_profile_id="dragon",
-            max_hp=165,
-            ac=17,
+            max_hp=178,
+            ac=18,
             speed=40,
             initiative_mod=3,
             passive_perception=16,
@@ -3763,11 +3763,11 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
     "frozen_courtyard_dragon_test": EnemyPresetDefinition(
         preset_id="frozen_courtyard_dragon_test",
         display_name="Frozen Courtyard Dragon Test",
-        description="A young white dragon tests landing lanes across a frozen ruined courtyard.",
+        description="A young white dragon boss tests landing lanes across a frozen ruined courtyard.",
         units=(
             EnemyPresetUnit(
                 "E1",
-                "young_white_dragon",
+                "young_white_dragon_boss",
                 GridPosition(x=9, y=8),
                 resource_pools={"opening_landing_uses": 0},
             ),

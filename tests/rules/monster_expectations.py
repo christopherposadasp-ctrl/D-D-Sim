@@ -1650,8 +1650,8 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
     ),
     "young_white_dragon_boss": MonsterExpectation(
         ai_profile_id="dragon",
-        max_hp=165,
-        ac=17,
+        max_hp=178,
+        ac=18,
         speed=40,
         initiative_mod=3,
         passive_perception=16,

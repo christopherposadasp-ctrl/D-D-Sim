@@ -234,7 +234,7 @@ def test_frozen_courtyard_dragon_test_builds_white_dragon_map() -> None:
     assert encounter.units["F2"].position.model_dump() == {"x": 1, "y": 9}
     assert encounter.units["F3"].position.model_dump() == {"x": 2, "y": 5}
     assert encounter.units["F4"].position.model_dump() == {"x": 2, "y": 11}
-    assert encounter.units["E1"].combat_role == "young_white_dragon"
+    assert encounter.units["E1"].combat_role == "young_white_dragon_boss"
     assert encounter.units["E1"].position.model_dump() == {"x": 9, "y": 8}
     assert encounter.units["E1"].resource_pools["opening_landing_uses"] == 0
     assert [feature.model_dump() for feature in encounter.terrain_features] == [
