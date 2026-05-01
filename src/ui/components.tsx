@@ -569,6 +569,7 @@ interface ControlsPanelProps {
 }
 
 export function ControlsPanel(props: ControlsPanelProps) {
+  const selectedScenario = props.enemyPresets.find((preset) => preset.id === props.enemyPresetIdInput) ?? null;
   const progressLabel = props.batchJobStatus
     ? `${props.batchJobStatus.completedRuns} / ${props.batchJobStatus.totalRuns} runs completed`
     : null;
@@ -625,7 +626,7 @@ export function ControlsPanel(props: ControlsPanelProps) {
         </label>
 
         <label className="field">
-          <span>Player Party</span>
+          <span>Party</span>
           <select
             value={props.playerPresetIdInput}
             onChange={(event) => props.onPlayerPresetChange(event.target.value)}
@@ -641,13 +642,13 @@ export function ControlsPanel(props: ControlsPanelProps) {
         </label>
 
         <label className="field">
-          <span>Enemy Preset</span>
+          <span>Scenario</span>
           <select
             value={props.enemyPresetIdInput}
             onChange={(event) => props.onEnemyPresetChange(event.target.value)}
             disabled={!props.catalogLoaded}
           >
-            {!props.catalogLoaded ? <option value="">Loading presets...</option> : null}
+            {!props.catalogLoaded ? <option value="">Loading scenarios...</option> : null}
             {props.enemyPresets.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.displayName}
@@ -657,7 +658,7 @@ export function ControlsPanel(props: ControlsPanelProps) {
         </label>
 
         <label className="field">
-          <span>DM Behavior</span>
+          <span>DM Style</span>
           <select
             value={props.monsterBehaviorInput}
             onChange={(event) => props.onMonsterBehaviorChange(event.target.value as MonsterBehaviorSelection)}
@@ -668,6 +669,15 @@ export function ControlsPanel(props: ControlsPanelProps) {
             <option value="combined">Combined Batch</option>
           </select>
         </label>
+      </div>
+
+      <div className="panel-copy accent scenario-callout">
+        <strong>Selected Scenario:</strong> {selectedScenario?.displayName ?? (props.enemyPresetIdInput || '-')}
+        {selectedScenario?.description ? <span> {selectedScenario.description}</span> : null}
+      </div>
+
+      <div className="panel-copy">
+        Combined Batch runs Kind, Balanced, and Evil DM styles and reports the aggregate.
       </div>
 
       <div className="button-row">
@@ -693,7 +703,7 @@ export function ControlsPanel(props: ControlsPanelProps) {
       </div>
 
       <div className="panel-copy">
-        Set <strong>Batch Size</strong> to <strong>1</strong> with a single <strong>DM Behavior</strong> for a
+        Set <strong>Batch Size</strong> to <strong>1</strong> with a single <strong>DM Style</strong> for a
         turn-by-turn replay. Use larger batches to estimate outcome rates.
       </div>
 
@@ -767,14 +777,14 @@ export function EncounterSummaryPanel(props: EncounterSummaryPanelProps) {
 
       <div className="metrics-grid">
         <MetricCard label="Seed" value={props.encounterSummary?.seed ?? props.seedInput} />
-        <MetricCard label="Player Party" value={getPlayerPresetLabel(props.playerCatalog, props.playerPresetIdInput)} />
-        <MetricCard label="Enemy Preset" value={getEnemyPresetLabel(props.enemyCatalog, props.enemyPresetIdInput)} />
+        <MetricCard label="Party" value={getPlayerPresetLabel(props.playerCatalog, props.playerPresetIdInput)} />
+        <MetricCard label="Scenario" value={getEnemyPresetLabel(props.enemyCatalog, props.enemyPresetIdInput)} />
         <MetricCard
           label="Player Behavior"
           value={formatPlayerBehavior(props.encounterSummary?.playerBehavior ?? props.playerBehaviorInput)}
         />
         <MetricCard
-          label="DM Behavior"
+          label="DM Style"
           value={formatMonsterBehavior(props.encounterSummary?.monsterBehavior ?? props.monsterBehaviorInput)}
         />
         <MetricCard label="Winner" value={formatWinner(props.encounterSummary?.winner)} />

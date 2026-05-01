@@ -2903,11 +2903,15 @@ describe('App', () => {
     expect(await screen.findByText(/10 \/ 10 units placed/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /batch run/i })).toBeEnabled();
     expect(screen.getByRole('combobox', { name: /player behavior/i })).toHaveValue('balanced');
-    expect(screen.getByRole('combobox', { name: /dm behavior/i })).toHaveValue('combined');
-    const enemyPresetSelect = screen.getByRole('combobox', { name: /enemy preset/i });
+    expect(screen.getByRole('combobox', { name: /dm style/i })).toHaveValue('combined');
+    const enemyPresetSelect = screen.getByRole('combobox', { name: /scenario/i });
     expect(enemyPresetSelect).toHaveValue('goblin_screen');
     expect(within(enemyPresetSelect).queryByRole('option', { name: 'Giant Toad' })).not.toBeInTheDocument();
     expect(within(enemyPresetSelect).getByRole('option', { name: 'Marsh Predators' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /seed/i })).toHaveValue('level5-party-001');
+    expect(screen.getByText(/Selected Scenario:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Three raiders screening three archers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Combined Batch runs Kind, Balanced, and Evil DM styles/i)).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: /batch size/i })).toHaveValue(100);
     expect(screen.getByRole('grid', { name: /placement grid/i })).toBeInTheDocument();
   });
@@ -2926,7 +2930,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByText(/10 \/ 10 units placed/i);
-    await user.selectOptions(screen.getByRole('combobox', { name: /dm behavior/i }), 'balanced');
+    await user.selectOptions(screen.getByRole('combobox', { name: /dm style/i }), 'balanced');
     const batchSizeInput = screen.getByRole('spinbutton', { name: /batch size/i });
     await user.clear(batchSizeInput);
     await user.type(batchSizeInput, '1');
@@ -2936,7 +2940,7 @@ describe('App', () => {
     expect(screen.getByRole('img', { name: /combat grid/i })).toBeInTheDocument();
     expect(screen.getByText(/Per-Round Event Log/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Level 2 Fighter Sample Build/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Enemy Preset/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Scenario/i).length).toBeGreaterThan(0);
   });
 
   it('lets the user return from replay to edit the layout', async () => {
@@ -2944,7 +2948,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByText(/10 \/ 10 units placed/i);
-    await user.selectOptions(screen.getByRole('combobox', { name: /dm behavior/i }), 'balanced');
+    await user.selectOptions(screen.getByRole('combobox', { name: /dm style/i }), 'balanced');
     const batchSizeInput = screen.getByRole('spinbutton', { name: /batch size/i });
     await user.clear(batchSizeInput);
     await user.type(batchSizeInput, '1');
