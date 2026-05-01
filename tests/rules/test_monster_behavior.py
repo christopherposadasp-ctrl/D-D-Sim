@@ -94,6 +94,8 @@ FIXED_ATTACK_CASES = (
     ("kobold_warrior", "dagger_throw", [3], ["piercing"], [5]),
     ("kobold_dragonshield", "spear", [3], ["piercing"], [4]),
     ("kobold_dragonshield", "spear_throw", [3], ["piercing"], [4]),
+    ("white_guard_drake", "bite", [4], ["piercing"], [7]),
+    ("white_guard_drake", "tail", [3], ["bludgeoning"], [6]),
     ("kobold_scale_sorcerer", "dagger", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "dagger_throw", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "chromatic_bolt", [3, 4], ["acid"], [9]),
@@ -590,6 +592,23 @@ def test_kobold_dragonshield_pack_tactics_and_metadata_traits_are_wired() -> Non
     assert attack.resolved_totals["attackMode"] == "advantage"
     assert "pack_tactics" in attack.raw_rolls["advantageSources"]
     assert [component.damage_type for component in attack.damage_details.damage_components] == ["piercing"]
+
+
+def test_white_guard_drake_multiattack_uses_bite_then_tail_and_has_cold_resistance_metadata() -> None:
+    encounter = build_monster_benchmark_encounter("white_guard_drake")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "bite"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["bite", "tail"]
+    assert encounter.units["E1"].damage_resistances == ("cold",)
+    assert encounter.units["E1"].movement_modes == ("walk", "burrow", "climb")
 
 
 def test_kobold_scale_sorcerer_opens_with_chromatic_bolt_at_range() -> None:

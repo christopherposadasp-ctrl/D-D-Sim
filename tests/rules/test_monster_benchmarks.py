@@ -44,6 +44,11 @@ def assert_primary_benchmark_behavior(variant_id: str, attack_events: list) -> N
         assert "tentacles" in weapon_ids
         return
 
+    if variant_id == "white_guard_drake":
+        assert attack_events[0].damage_details.weapon_id == "bite"
+        assert "tail" in weapon_ids
+        return
+
     if variant_id == "bugbear_warrior":
         assert attack_events[0].damage_details.weapon_id == "grab"
         assert set(weapon_ids).issubset({"grab", "light_hammer"})
