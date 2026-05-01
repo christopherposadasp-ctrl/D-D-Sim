@@ -7,6 +7,7 @@ from backend.content.class_progressions import get_progression_scalar
 from backend.content.combat_actions import action_prevents_opportunity_attacks, get_extra_movement_multiplier
 from backend.content.enemies import (
     MonsterSphereSpellDefinition,
+    create_enemy,
     get_attack_action_definition_for_unit,
     get_monster_command_spell_for_unit,
     get_monster_definition_for_unit,
@@ -40,7 +41,7 @@ from backend.engine.ai.decision import (
     get_smart_precision_max_miss_margin,
     use_class_smart_delta,
 )
-from backend.engine.combat.setup import create_encounter
+from backend.engine.combat.setup import create_encounter, sort_initiative_entries
 from backend.engine.models.state import (
     CombatEvent,
     CommandedEffect,
@@ -56,6 +57,7 @@ from backend.engine.models.state import (
     GridPosition,
     IcyRetreatEffect,
     MovementDetails,
+    PendingEnemyArrival,
     RageEffect,
     ReplayFrame,
     RunEncounterResult,
@@ -117,19 +119,23 @@ from backend.engine.rules.combat_rules import (
     unit_is_haste_lethargic,
 )
 from backend.engine.rules.spatial import (
+    GRID_SIZE,
     build_position_index,
     chebyshev_distance,
     find_advance_path,
     get_active_grappler_ids,
     get_attack_context,
+    get_blocking_terrain_features_for_position,
     get_melee_reach_squares,
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
+    get_occupants_for_position,
     get_reachable_squares,
     get_swallow_source_id,
     get_unit_footprint,
     has_line_of_sight_between_units,
     is_active_grapple,
+    is_within_bounds,
     is_unit_swallowed,
     path_provokes_opportunity_attack,
 )
@@ -144,6 +150,7 @@ from backend.engine.utils.helpers import (
     unit_can_take_reactions,
     unit_sort_key,
 )
+from backend.engine.utils.rng import roll_die
 
 
 @dataclass
@@ -170,7 +177,144 @@ def fighters_defeated(state: EncounterState) -> bool:
 
 
 def goblins_defeated(state: EncounterState) -> bool:
+    if state.pending_enemy_arrivals:
+        return False
     return all(unit.conditions.dead for unit in get_units_by_faction(state, "goblins"))
+
+
+def is_legal_arrival_position(state: EncounterState, unit: UnitState, position: GridPosition) -> bool:
+    footprint = get_unit_footprint(unit)
+    if not is_within_bounds(position, footprint):
+        return False
+
+    position_index = build_position_index(state)
+    if get_blocking_terrain_features_for_position(state, position, footprint, position_index):
+        return False
+    return not get_occupants_for_position(state, position, footprint, [unit.id], position_index)
+
+
+def find_enemy_arrival_position(
+    state: EncounterState,
+    unit: UnitState,
+    preferred_position: GridPosition,
+) -> GridPosition | None:
+    candidates = [
+        GridPosition(x=x, y=y)
+        for x in range(1, GRID_SIZE + 1)
+        for y in range(1, GRID_SIZE + 1)
+    ]
+    candidates.sort(
+        key=lambda candidate: (
+            chebyshev_distance(preferred_position, candidate),
+            abs(preferred_position.x - candidate.x) + abs(preferred_position.y - candidate.y),
+            candidate.x,
+            candidate.y,
+        )
+    )
+    for candidate in candidates:
+        if is_legal_arrival_position(state, unit, candidate):
+            return candidate
+    return None
+
+
+def rebuild_initiative_order(state: EncounterState) -> None:
+    entries = [
+        {
+            "id": unit_id,
+            "total": state.initiative_scores[unit_id],
+            "faction": state.units[unit_id].faction,
+        }
+        for unit_id in state.units
+        if unit_id in state.initiative_scores
+    ]
+    state.initiative_order = [entry["id"] for entry in sort_initiative_entries(entries)]
+
+
+def build_enemy_arrival_event(
+    state: EncounterState,
+    arrival: PendingEnemyArrival,
+    unit: UnitState,
+    requested_position: GridPosition,
+    initiative_roll: int,
+) -> CombatEvent:
+    resolved_totals = {
+        "event": "delayed_enemy_arrival",
+        "variantId": arrival.variant_id,
+        "arrivalRound": arrival.arrival_round,
+        "requestedX": requested_position.x,
+        "requestedY": requested_position.y,
+        "landingX": unit.position.x if unit.position else None,
+        "landingY": unit.position.y if unit.position else None,
+        "initiativeRoll": initiative_roll,
+        "initiativeTotal": unit.initiative_score,
+        "movementMode": "delayed_arrival_landing",
+    }
+    return CombatEvent(
+        round=state.round,
+        actor_id=unit.id,
+        target_ids=[unit.id],
+        event_type="move",
+        raw_rolls={"initiativeRoll": initiative_roll},
+        resolved_totals=resolved_totals,
+        movement_details=MovementDetails(start=None, end=unit.position.model_copy(deep=True) if unit.position else None, path=None, distance=0),
+        damage_details=None,
+        condition_deltas=[f"{unit.id} lands at {format_position(unit.position)}." if unit.position else f"{unit.id} cannot land."],
+        text_summary=f"{unit.id} arrives from the storm and lands at {format_position(unit.position)}.",
+    )
+
+
+def resolve_pending_enemy_arrivals(state: EncounterState) -> list[CombatEvent]:
+    if state.active_combatant_index != 0 or not state.pending_enemy_arrivals:
+        return []
+
+    due_arrivals = [arrival for arrival in state.pending_enemy_arrivals if arrival.arrival_round <= state.round]
+    if not due_arrivals:
+        return []
+
+    state.pending_enemy_arrivals = [
+        arrival for arrival in state.pending_enemy_arrivals if arrival.arrival_round > state.round
+    ]
+    events: list[CombatEvent] = []
+    for arrival in due_arrivals:
+        if arrival.unit_id in state.units:
+            continue
+
+        unit = create_enemy(arrival.unit_id, arrival.variant_id)
+        unit.resource_pools.update(arrival.resource_pools)
+        landing_position = find_enemy_arrival_position(state, unit, arrival.position)
+        if landing_position is None:
+            events.append(
+                CombatEvent(
+                    round=state.round,
+                    actor_id=arrival.unit_id,
+                    target_ids=[],
+                    event_type="skip",
+                    raw_rolls={},
+                    resolved_totals={
+                        "event": "delayed_enemy_arrival",
+                        "variantId": arrival.variant_id,
+                        "arrivalRound": arrival.arrival_round,
+                        "reason": "no_legal_landing_position",
+                    },
+                    movement_details=None,
+                    damage_details=None,
+                    condition_deltas=[],
+                    text_summary=f"{arrival.unit_id} cannot arrive because no legal landing position is available.",
+                )
+            )
+            continue
+
+        unit.position = landing_position
+        initiative_roll, state.rng_state = roll_die(state.rng_state, 20)
+        unit.initiative_score = initiative_roll + unit.initiative_mod
+        state.units[unit.id] = unit
+        state.initiative_scores[unit.id] = unit.initiative_score
+        events.append(build_enemy_arrival_event(state, arrival, unit, arrival.position, initiative_roll))
+
+    if events:
+        rebuild_initiative_order(state)
+        state.active_combatant_index = 0
+    return events
 
 
 def add_phase_event(state: EncounterState, actor_id: str, text_summary: str) -> CombatEvent:
@@ -5081,12 +5225,13 @@ def step_encounter_internal(
         return StepEncounterResult(state=terminal_state, events=[], done=True)
 
     next_state = clone_value(state) if copy_state else state
+    arrival_events = resolve_pending_enemy_arrivals(next_state)
     actor_id = next_state.initiative_order[next_state.active_combatant_index]
 
     # Encounters now end as soon as one side is fully down or dead, so skip
     # any additional turn processing if the incoming state is already terminal.
     if fighters_defeated(next_state) or goblins_defeated(next_state):
-        events = update_encounter_phase(next_state, actor_id)
+        events = [*arrival_events, *update_encounter_phase(next_state, actor_id)]
         if record_log:
             next_state.combat_log.extend(events)
         completed_state = clone_value(next_state) if copy_state else next_state
@@ -5095,6 +5240,7 @@ def step_encounter_internal(
     actor = next_state.units[actor_id]
     clear_turn_flags(actor)
     events = [
+        *arrival_events,
         CombatEvent(
             round=next_state.round,
             actor_id=actor_id,

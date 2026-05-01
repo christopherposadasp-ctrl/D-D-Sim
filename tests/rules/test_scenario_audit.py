@@ -285,6 +285,14 @@ def test_frozen_courtyard_dragon_test_scenario_definition_is_staged_without_expe
     assert definition.audit_expectation_ids == ()
 
 
+def test_frozen_courtyard_dragon_landing_scenario_definition_is_staged_without_expectations() -> None:
+    definition = get_scenario_definition("frozen_courtyard_dragon_landing")
+
+    assert definition.display_name == "Frozen Courtyard Dragon Landing"
+    assert definition.enemy_preset_id == "frozen_courtyard_dragon_landing"
+    assert definition.audit_expectation_ids == ()
+
+
 def test_audit_scenario_supports_staged_berserker_overrun() -> None:
     row = audit_scenario(
         "berserker_overrun",

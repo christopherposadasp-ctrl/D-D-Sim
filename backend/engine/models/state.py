@@ -570,6 +570,14 @@ class CombatEvent(CamelModel):
     text_summary: str
 
 
+class PendingEnemyArrival(CamelModel):
+    unit_id: str
+    variant_id: str
+    position: GridPosition
+    arrival_round: int
+    resource_pools: dict[str, int] = Field(default_factory=dict)
+
+
 class EncounterState(CamelModel):
     seed: str
     player_behavior: ResolvedPlayerBehavior
@@ -587,6 +595,7 @@ class EncounterState(CamelModel):
     # Terrain is runtime-only for now. The engine needs it for pathing and cover,
     # while the UI reads fixed terrain from the preset catalog instead of combat state.
     terrain_features: list[TerrainFeature] = Field(default_factory=list, exclude=True)
+    pending_enemy_arrivals: list[PendingEnemyArrival] = Field(default_factory=list, exclude=True)
     smart_targeting_policy: SmartTargetingPolicy = Field(default="new", exclude=True)
     enable_end_turn_flanking: bool = Field(default=True, exclude=True)
     enable_frontline_body_blocking: bool = Field(default=True, exclude=True)

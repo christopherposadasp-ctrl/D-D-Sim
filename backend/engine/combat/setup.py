@@ -23,6 +23,7 @@ from backend.engine.models.state import (
     GridPosition,
     MonsterBehavior,
     MonsterBehaviorSelection,
+    PendingEnemyArrival,
     PlayerBehavior,
     ResolvedPlayerBehavior,
     TerrainFeature,
@@ -98,6 +99,22 @@ def resolve_terrain_features(config: EncounterConfig) -> list[TerrainFeature]:
     if not preset:
         return []
     return [feature.model_copy(deep=True) for feature in preset.terrain_features]
+
+
+def resolve_pending_enemy_arrivals(config: EncounterConfig) -> list[PendingEnemyArrival]:
+    preset = get_enemy_preset_definition(config)
+    if not preset:
+        return []
+    return [
+        PendingEnemyArrival(
+            unit_id=unit.unit_id,
+            variant_id=unit.variant_id,
+            position=unit.position.model_copy(deep=True),
+            arrival_round=unit.arrival_round,
+            resource_pools=dict(unit.resource_pools),
+        )
+        for unit in preset.delayed_units
+    ]
 
 
 def resolve_placements(config: EncounterConfig) -> dict[str, GridPosition]:
@@ -290,6 +307,7 @@ def create_encounter(config: EncounterConfig) -> EncounterState:
     placements = resolve_placements(config)
     units = build_units(placements, config.enemy_preset_id, config.player_preset_id)
     terrain_features = resolve_terrain_features(config)
+    pending_enemy_arrivals = resolve_pending_enemy_arrivals(config)
     player_unit_ids = get_player_unit_ids(units)
     enemy_unit_ids = get_enemy_unit_ids(units)
     apply_smart_precombat_buffs(units, player_unit_ids, player_behavior)
@@ -333,6 +351,7 @@ def create_encounter(config: EncounterConfig) -> EncounterState:
         terminal_state="ongoing",
         rescue_subphase=False,
         terrain_features=terrain_features,
+        pending_enemy_arrivals=pending_enemy_arrivals,
         smart_targeting_policy=config.smart_targeting_policy,
         enable_end_turn_flanking=config.enable_end_turn_flanking,
         enable_frontline_body_blocking=config.enable_frontline_body_blocking,

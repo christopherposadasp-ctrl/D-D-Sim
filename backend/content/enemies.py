@@ -127,6 +127,15 @@ class EnemyPresetUnit:
 
 
 @dataclass(frozen=True)
+class DelayedEnemyPresetUnit:
+    unit_id: str
+    variant_id: str
+    position: GridPosition
+    arrival_round: int
+    resource_pools: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class EnemyPresetDefinition:
     preset_id: str
     display_name: str
@@ -134,12 +143,14 @@ class EnemyPresetDefinition:
     units: tuple[EnemyPresetUnit, ...]
     terrain_features: tuple[TerrainFeature, ...] = ()
     player_placements: dict[str, GridPosition] = field(default_factory=dict)
+    delayed_units: tuple[DelayedEnemyPresetUnit, ...] = ()
 
 
 goblin_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=0, wis=-1, cha=-1)
 kobold_warrior_ability_mods = AbilityModifiers(str=-2, dex=2, con=-1, int=-1, wis=-2, cha=-1)
 kobold_scale_sorcerer_ability_mods = AbilityModifiers(str=-2, dex=2, con=2, int=0, wis=-1, cha=2)
 kobold_dragonshield_ability_mods = AbilityModifiers(str=1, dex=2, con=2, int=-1, wis=-1, cha=0)
+white_guard_drake_ability_mods = AbilityModifiers(str=3, dex=0, con=3, int=-3, wis=0, cha=-2)
 bandit_ability_mods = AbilityModifiers(str=1, dex=1, con=0, int=0, wis=0, cha=0)
 guard_ability_mods = AbilityModifiers(str=1, dex=1, con=1, int=0, wis=0, cha=0)
 scout_ability_mods = AbilityModifiers(str=0, dex=2, con=1, int=0, wis=1, cha=0)
@@ -3855,6 +3866,8 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             EnemyPresetUnit("E12", "kobold_warrior", GridPosition(x=15, y=12)),
             EnemyPresetUnit("E13", "kobold_dragonshield", GridPosition(x=5, y=5)),
             EnemyPresetUnit("E14", "kobold_dragonshield", GridPosition(x=5, y=12)),
+            EnemyPresetUnit("E15", "kobold_dragonshield", GridPosition(x=14, y=6)),
+            EnemyPresetUnit("E16", "kobold_dragonshield", GridPosition(x=14, y=13)),
         ),
         terrain_features=build_frozen_courtyard_terrain_features(),
         player_placements={
@@ -3863,6 +3876,45 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             "F3": GridPosition(x=1, y=5),
             "F4": GridPosition(x=1, y=13),
         },
+    ),
+    "frozen_courtyard_dragon_landing": EnemyPresetDefinition(
+        preset_id="frozen_courtyard_dragon_landing",
+        display_name="Frozen Courtyard Dragon Landing",
+        description="Kobolds draw the party into the frozen courtyard before the white dragon boss lands on the third round.",
+        units=(
+            EnemyPresetUnit("E1", "kobold_warrior", GridPosition(x=14, y=7)),
+            EnemyPresetUnit("E2", "kobold_warrior", GridPosition(x=14, y=8)),
+            EnemyPresetUnit("E3", "kobold_warrior", GridPosition(x=14, y=9)),
+            EnemyPresetUnit("E4", "kobold_warrior", GridPosition(x=14, y=10)),
+            EnemyPresetUnit("E5", "kobold_warrior", GridPosition(x=14, y=11)),
+            EnemyPresetUnit("E6", "kobold_warrior", GridPosition(x=14, y=12)),
+            EnemyPresetUnit("E7", "kobold_warrior", GridPosition(x=15, y=7)),
+            EnemyPresetUnit("E8", "kobold_warrior", GridPosition(x=15, y=8)),
+            EnemyPresetUnit("E9", "kobold_scale_sorcerer", GridPosition(x=15, y=9)),
+            EnemyPresetUnit("E10", "kobold_scale_sorcerer", GridPosition(x=15, y=10)),
+            EnemyPresetUnit("E11", "kobold_warrior", GridPosition(x=15, y=11)),
+            EnemyPresetUnit("E12", "kobold_warrior", GridPosition(x=15, y=12)),
+            EnemyPresetUnit("E13", "kobold_dragonshield", GridPosition(x=5, y=5)),
+            EnemyPresetUnit("E14", "kobold_dragonshield", GridPosition(x=5, y=12)),
+            EnemyPresetUnit("E15", "kobold_dragonshield", GridPosition(x=14, y=6)),
+            EnemyPresetUnit("E16", "kobold_dragonshield", GridPosition(x=14, y=13)),
+        ),
+        terrain_features=build_frozen_courtyard_terrain_features(),
+        player_placements={
+            "F1": GridPosition(x=3, y=7),
+            "F2": GridPosition(x=3, y=12),
+            "F3": GridPosition(x=1, y=5),
+            "F4": GridPosition(x=1, y=13),
+        },
+        delayed_units=(
+            DelayedEnemyPresetUnit(
+                "E17",
+                "young_white_dragon_boss",
+                GridPosition(x=9, y=8),
+                arrival_round=3,
+                resource_pools={"opening_landing_uses": 0},
+            ),
+        ),
     ),
 }
 

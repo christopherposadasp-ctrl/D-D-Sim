@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.content.enemies import get_enemy_preset
-from backend.engine import create_encounter, run_batch
+from backend.engine import create_encounter, run_batch, step_encounter
 from backend.engine.models.state import EncounterConfig
 from backend.engine.rules.spatial import has_line_of_sight_between_units
 
@@ -296,6 +296,8 @@ def test_frozen_courtyard_kobold_opening_builds_accepted_opening_layout() -> Non
         "E12",
         "E13",
         "E14",
+        "E15",
+        "E16",
         "E2",
         "E3",
         "E4",
@@ -319,7 +321,54 @@ def test_frozen_courtyard_kobold_opening_builds_accepted_opening_layout() -> Non
     assert encounter.units["E13"].position.model_dump() == {"x": 5, "y": 5}
     assert encounter.units["E14"].combat_role == "kobold_dragonshield"
     assert encounter.units["E14"].position.model_dump() == {"x": 5, "y": 12}
+    assert encounter.units["E15"].combat_role == "kobold_dragonshield"
+    assert encounter.units["E15"].position.model_dump() == {"x": 14, "y": 6}
+    assert encounter.units["E16"].combat_role == "kobold_dragonshield"
+    assert encounter.units["E16"].position.model_dump() == {"x": 14, "y": 13}
     assert all(has_line_of_sight_between_units(encounter, "F4", f"E{index}") for index in range(1, 13))
+    assert all(has_line_of_sight_between_units(encounter, "F4", f"E{index}") for index in (15, 16))
+
+
+def test_frozen_courtyard_dragon_landing_stages_boss_for_round_three() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="frozen-courtyard-dragon-landing", enemy_preset_id="frozen_courtyard_dragon_landing")
+    )
+
+    assert "E17" not in encounter.units
+    assert len(encounter.pending_enemy_arrivals) == 1
+    arrival = encounter.pending_enemy_arrivals[0]
+    assert arrival.unit_id == "E17"
+    assert arrival.variant_id == "young_white_dragon_boss"
+    assert arrival.arrival_round == 3
+    assert arrival.position.model_dump() == {"x": 9, "y": 8}
+    assert arrival.resource_pools == {"opening_landing_uses": 0}
+
+
+def test_frozen_courtyard_dragon_landing_boss_arrives_at_round_three() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="frozen-courtyard-dragon-arrival", enemy_preset_id="frozen_courtyard_dragon_landing")
+    )
+    encounter.round = 3
+    encounter.active_combatant_index = 0
+
+    result = step_encounter(encounter)
+
+    arrival_events = [
+        event
+        for event in result.events
+        if event.resolved_totals.get("event") == "delayed_enemy_arrival"
+    ]
+    assert len(arrival_events) == 1
+    assert arrival_events[0].actor_id == "E17"
+    assert arrival_events[0].event_type == "move"
+    assert arrival_events[0].resolved_totals["movementMode"] == "delayed_arrival_landing"
+    assert arrival_events[0].resolved_totals["arrivalRound"] == 3
+    assert arrival_events[0].movement_details
+    assert arrival_events[0].movement_details.end
+    assert arrival_events[0].movement_details.end.model_dump() == {"x": 9, "y": 8}
+    assert result.state.units["E17"].combat_role == "young_white_dragon_boss"
+    assert "E17" in result.state.initiative_order
+    assert result.state.pending_enemy_arrivals == []
 
 
 def test_preset_layout_rejects_missing_active_unit() -> None:
