@@ -2614,7 +2614,7 @@ MONSTER_DEFINITIONS.update(
                     damage_components=[
                         WeaponDamageComponent(
                             damage_type="slashing",
-                            damage_dice=[DiceSpec(count=2, sides=4)],
+                            damage_dice=[DiceSpec(count=2, sides=6)],
                             damage_modifier=4,
                         ),
                         WeaponDamageComponent(

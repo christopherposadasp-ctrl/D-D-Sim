@@ -1668,7 +1668,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
                 damage_type=None,
                 reach=10,
                 damage_components=(
-                    DamageComponentExpectation("slashing", ((2, 4),), 4),
+                    DamageComponentExpectation("slashing", ((2, 6),), 4),
                     DamageComponentExpectation("cold", ((1, 4),), 0),
                 ),
             )
