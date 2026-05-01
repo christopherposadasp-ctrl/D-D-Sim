@@ -822,9 +822,53 @@ button {
   font-family: 'Courier New', monospace;
 }
 
+.presentation-shell {
+  gap: 28px;
+}
+
+.presentation-hero {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+}
+
+.presentation-control-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.presentation-frame-note {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(49, 86, 75, 0.2);
+  background: linear-gradient(145deg, rgba(49, 86, 75, 0.11), rgba(232, 217, 186, 0.38));
+}
+
+.presentation-frame-note strong {
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fighters);
+}
+
+.presentation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.link-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  text-decoration: none;
+}
+
 @media (max-width: 1024px) {
   .hero,
-  .grid-layout {
+  .grid-layout,
+  .presentation-grid {
     grid-template-columns: 1fr;
   }
 

@@ -15,6 +15,7 @@ import type {
   UnitState,
 } from '../shared/sim/types';
 import { App } from '../ui/App';
+import { PresentationReplay } from '../ui/PresentationReplay';
 
 const TEST_ENEMY_CATALOG: EnemyCatalogResponse = {
   "defaultEnemyPresetId": "goblin_screen",
@@ -2914,6 +2915,18 @@ describe('App', () => {
     expect(screen.getByText(/Combined Batch runs Kind, Balanced, and Evil DM styles/i)).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: /batch size/i })).toHaveValue(100);
     expect(screen.getByRole('grid', { name: /placement grid/i })).toBeInTheDocument();
+  });
+
+  it('renders the fixed presentation replay page', async () => {
+    render(<PresentationReplay />);
+
+    expect(await screen.findByRole('heading', { name: /Captain's Crossfire/i })).toBeInTheDocument();
+    expect(screen.getByText(/presentation-heroic-victory-001/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Smart/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Balanced/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/F1 moves into range/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /next frame/i })).toBeEnabled();
+    expect(screen.getByRole('link', { name: /open simulator/i })).toHaveAttribute('href', '/');
   });
 
   it('renders the preset rock and blocks placement onto that square', async () => {
