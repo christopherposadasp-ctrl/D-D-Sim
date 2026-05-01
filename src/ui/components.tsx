@@ -25,6 +25,7 @@ import type {
 } from '../shared/sim/types';
 import {
   DEFAULT_PARTY_MAX_HP,
+  MAX_BATCH_SIZE,
   getEnemyPreset,
   getPlayerPreset,
   getTotalEnemyMaxHpForPreset,
@@ -604,7 +605,7 @@ export function ControlsPanel(props: ControlsPanelProps) {
           <input
             type="number"
             min={1}
-            max={1000}
+            max={MAX_BATCH_SIZE}
             value={props.batchSizeInput}
             onChange={(event) => props.onBatchSizeChange(event.target.value)}
             inputMode="numeric"
