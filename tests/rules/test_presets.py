@@ -5,6 +5,7 @@ import pytest
 from backend.content.enemies import get_enemy_preset
 from backend.engine import create_encounter, run_batch
 from backend.engine.models.state import EncounterConfig
+from backend.engine.rules.spatial import has_line_of_sight_between_units
 
 
 def test_preset_default_layout_builds_expected_units() -> None:
@@ -281,6 +282,44 @@ def test_frozen_courtyard_dragon_test_builds_white_dragon_map() -> None:
             "footprint": {"width": 2, "height": 1},
         },
     ]
+
+
+def test_frozen_courtyard_kobold_opening_builds_accepted_opening_layout() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="frozen-courtyard-kobold-opening", enemy_preset_id="frozen_courtyard_kobold_opening")
+    )
+
+    assert sorted(encounter.units) == [
+        "E1",
+        "E10",
+        "E11",
+        "E12",
+        "E13",
+        "E14",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+    ]
+    assert encounter.units["F1"].position.model_dump() == {"x": 3, "y": 7}
+    assert encounter.units["F2"].position.model_dump() == {"x": 3, "y": 12}
+    assert encounter.units["F3"].position.model_dump() == {"x": 1, "y": 5}
+    assert encounter.units["F4"].position.model_dump() == {"x": 1, "y": 13}
+    assert encounter.units["E9"].combat_role == "kobold_scale_sorcerer"
+    assert encounter.units["E10"].combat_role == "kobold_scale_sorcerer"
+    assert encounter.units["E13"].combat_role == "kobold_dragonshield"
+    assert encounter.units["E13"].position.model_dump() == {"x": 5, "y": 5}
+    assert encounter.units["E14"].combat_role == "kobold_dragonshield"
+    assert encounter.units["E14"].position.model_dump() == {"x": 5, "y": 12}
+    assert all(has_line_of_sight_between_units(encounter, "F4", f"E{index}") for index in range(1, 13))
 
 
 def test_preset_layout_rejects_missing_active_unit() -> None:

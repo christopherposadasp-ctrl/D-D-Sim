@@ -3836,6 +3836,34 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             "F4": GridPosition(x=2, y=11),
         },
     ),
+    "frozen_courtyard_kobold_opening": EnemyPresetDefinition(
+        preset_id="frozen_courtyard_kobold_opening",
+        display_name="Frozen Courtyard Kobold Opening",
+        description="Kobolds surge across the ruined courtyard while dragonshields pressure the party's north and south lanes.",
+        units=(
+            EnemyPresetUnit("E1", "kobold_warrior", GridPosition(x=14, y=7)),
+            EnemyPresetUnit("E2", "kobold_warrior", GridPosition(x=14, y=8)),
+            EnemyPresetUnit("E3", "kobold_warrior", GridPosition(x=14, y=9)),
+            EnemyPresetUnit("E4", "kobold_warrior", GridPosition(x=14, y=10)),
+            EnemyPresetUnit("E5", "kobold_warrior", GridPosition(x=14, y=11)),
+            EnemyPresetUnit("E6", "kobold_warrior", GridPosition(x=14, y=12)),
+            EnemyPresetUnit("E7", "kobold_warrior", GridPosition(x=15, y=7)),
+            EnemyPresetUnit("E8", "kobold_warrior", GridPosition(x=15, y=8)),
+            EnemyPresetUnit("E9", "kobold_scale_sorcerer", GridPosition(x=15, y=9)),
+            EnemyPresetUnit("E10", "kobold_scale_sorcerer", GridPosition(x=15, y=10)),
+            EnemyPresetUnit("E11", "kobold_warrior", GridPosition(x=15, y=11)),
+            EnemyPresetUnit("E12", "kobold_warrior", GridPosition(x=15, y=12)),
+            EnemyPresetUnit("E13", "kobold_dragonshield", GridPosition(x=5, y=5)),
+            EnemyPresetUnit("E14", "kobold_dragonshield", GridPosition(x=5, y=12)),
+        ),
+        terrain_features=build_frozen_courtyard_terrain_features(),
+        player_placements={
+            "F1": GridPosition(x=3, y=7),
+            "F2": GridPosition(x=3, y=12),
+            "F3": GridPosition(x=1, y=5),
+            "F4": GridPosition(x=1, y=13),
+        },
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
