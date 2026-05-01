@@ -149,6 +149,26 @@ function formatMonsterBehavior(
   return value === 'balanced' ? 'Balanced' : 'Evil';
 }
 
+function formatWinner(value: EncounterSummary['winner'] | null | undefined): string {
+  if (!value) {
+    return '-';
+  }
+
+  if (value === 'fighters') {
+    return 'Party';
+  }
+
+  if (value === 'goblins') {
+    return 'Enemies';
+  }
+
+  if (value === 'mutual_annihilation') {
+    return 'Mutual Annihilation';
+  }
+
+  return value;
+}
+
 export interface AttackLine {
   actorId: string;
   targetId: string;
@@ -287,7 +307,7 @@ function GridBoard(props: {
   return (
     <div className="board-shell">
       <div className="board-legend">
-        <span className="legend-chip fighters">Fighter</span>
+        <span className="legend-chip fighters">Party</span>
         <span className="legend-chip goblins">Enemy</span>
         <span className="legend-chip terrain">Terrain / Cover</span>
         {placementMode ? (
@@ -404,8 +424,8 @@ function BatchMetrics(props: {
   if (!batchSummary) {
     return (
       <div className="panel-copy">
-        Batch mode is ready. Run a seeded sample set to compute win rates, average round counts, deaths, and
-        remaining HP.
+        Batch mode is ready. Run a seeded sample set to estimate win rates, average round counts, losses, and
+        remaining HP for the selected party and scenario.
       </div>
     );
   }
@@ -421,7 +441,7 @@ function BatchMetrics(props: {
         <MetricCard label="Player Policy" value={formatPlayerBehavior(summary.playerBehavior)} />
         <MetricCard label="DM Policy" value={formatMonsterBehavior(summary.monsterBehavior)} />
         <MetricCard label="Runs" value={String(summary.totalRuns)} />
-        <MetricCard label="Player Win Rate" value={formatPercent(summary.playerWinRate)} tone="fighters" />
+        <MetricCard label="Party Win Rate" value={formatPercent(summary.playerWinRate)} tone="fighters" />
         <MetricCard label="Enemy Win Rate" value={formatPercent(summary.goblinWinRate)} tone="goblins" />
         <MetricCard label="Mutual Annihilation" value={formatPercent(summary.mutualAnnihilationRate)} />
         {summary.playerBehavior === 'balanced' ? (
@@ -439,7 +459,7 @@ function BatchMetrics(props: {
           </>
         ) : null}
         <MetricCard label="Average Rounds" value={formatNumber(summary.averageRounds)} />
-        <MetricCard label="Average Player Deaths" value={formatNumber(summary.averageFighterDeaths)} />
+        <MetricCard label="Average Party Deaths" value={formatNumber(summary.averageFighterDeaths)} />
         <MetricCard label="Average Enemies Killed" value={formatNumber(summary.averageGoblinsKilled)} />
         <MetricCard
           label="Average Party HP"
@@ -490,9 +510,9 @@ export function HeroSection() {
         <span className="eyebrow">Deterministic Combat Replay</span>
         <h1>D&amp;D 2024 Encounter Simulator</h1>
         <p>
-          A seed-driven replay lab for curated level 1 martial parties against preset enemy groups. Every result
-          is logged from initiative through combat resolution, and the current V4.2 slice now supports
-          backend-driven Fighter, Barbarian, and Rogue party presets instead of a hardwired fighter-only trio.
+          A seed-driven replay lab for a fixed level 5 party against backend-driven encounter scenarios. Use
+          turn-by-turn replay to inspect tactical choices, then run batches to estimate encounter difficulty and
+          compare behavior assumptions.
         </p>
       </div>
       <div className="hero-callout">
@@ -566,7 +586,7 @@ export function ControlsPanel(props: ControlsPanelProps) {
     <section className="panel controls-panel">
       <div className="panel-header">
         <h2>Controls</h2>
-        <p>Seed input, batch execution, replay controls, and placement setup.</p>
+        <p>Choose the party, scenario, behavior model, and batch size for a deterministic simulation run.</p>
       </div>
 
       <div className="control-grid">
@@ -672,13 +692,12 @@ export function ControlsPanel(props: ControlsPanelProps) {
       </div>
 
       <div className="panel-copy">
-        Set <strong>Batch Size</strong> to <strong>1</strong> with a single <strong>DM Behavior</strong> when you
-        want a single replayable encounter.
+        Set <strong>Batch Size</strong> to <strong>1</strong> with a single <strong>DM Behavior</strong> for a
+        turn-by-turn replay. Use larger batches to estimate outcome rates.
       </div>
 
       <div className="panel-copy">
-        The UI sends simulation requests to the Python backend at <strong>/api/encounters/run</strong>,
-        <strong> /api/encounters/batch</strong>, and <strong> /api/encounters/batch-jobs</strong>.
+        Runs are processed by the local Python simulation backend.
       </div>
 
       {props.batchJobStatus ? (
@@ -757,10 +776,10 @@ export function EncounterSummaryPanel(props: EncounterSummaryPanelProps) {
           label="DM Behavior"
           value={formatMonsterBehavior(props.encounterSummary?.monsterBehavior ?? props.monsterBehaviorInput)}
         />
-        <MetricCard label="Winner" value={props.encounterSummary?.winner ?? '-'} />
+        <MetricCard label="Winner" value={formatWinner(props.encounterSummary?.winner)} />
         <MetricCard label="Rounds" value={props.encounterSummary ? String(props.encounterSummary.rounds) : '-'} />
         <MetricCard
-          label="Player Deaths"
+          label="Party Deaths"
           value={props.encounterSummary ? String(props.encounterSummary.fighterDeaths) : '-'}
           tone="fighters"
         />
