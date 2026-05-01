@@ -2632,6 +2632,7 @@ MONSTER_DEFINITIONS.update(
             movement_modes=("walk", "burrow", "fly", "swim"),
             action_ids=("multiattack", "cold_breath"),
             special_action_ids=("cold_breath",),
+            dragon_breath_profile_ids={"cold_breath": "young_white_boss_cold_breath"},
             legendary_action_ids=("icy_retreat", "pounce"),
             trait_ids=("ice_walk", "opening_flight_landing", "legendary_resistance"),
             attack_actions=(repeated_choice_attack_action("multiattack", "Multiattack", ("rend",), 3),),

@@ -118,6 +118,17 @@ DRAGON_BREATH_ACTIONS: dict[str, DragonBreathActionDefinition] = {
         damage_die_sides=8,
         damage_type="cold",
     ),
+    "young_white_boss_cold_breath": DragonBreathActionDefinition(
+        action_id="cold_breath",
+        display_name="Cold Breath",
+        resource_pool_id="cold_breath_available",
+        save_ability="con",
+        save_dc=16,
+        range_squares=8,
+        damage_die_count=10,
+        damage_die_sides=8,
+        damage_type="cold",
+    ),
     "adult_white_cold_breath": DragonBreathActionDefinition(
         action_id="cold_breath",
         display_name="Cold Breath",

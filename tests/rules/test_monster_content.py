@@ -272,6 +272,19 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
         assert "cold_breath" in definition.special_action_ids
         assert runtime_unit.resource_pools.get("cold_breath_available") == 1
 
+    if "young_white_boss_cold_breath" in expectation.special_mechanics:
+        breath = DRAGON_BREATH_ACTIONS["young_white_boss_cold_breath"]
+        assert definition.dragon_breath_profile_ids.get("cold_breath") == "young_white_boss_cold_breath"
+        assert breath.action_id == "cold_breath"
+        assert breath.resource_pool_id == "cold_breath_available"
+        assert breath.save_ability == "con"
+        assert breath.save_dc == 16
+        assert breath.range_squares == 8
+        assert breath.damage_die_count == 10
+        assert breath.damage_die_sides == 8
+        assert breath.damage_type == "cold"
+        assert breath.recharge_threshold == 5
+
     if "adult_cold_breath" in expectation.special_mechanics:
         breath = DRAGON_BREATH_ACTIONS["adult_white_cold_breath"]
         assert breath.action_id == "cold_breath"

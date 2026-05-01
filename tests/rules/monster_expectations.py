@@ -1681,6 +1681,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
             "ice_walk",
             "opening_flight_landing",
             "cold_breath",
+            "young_white_boss_cold_breath",
             "recharge_5_6",
             "legendary_resistance",
             "icy_retreat",
@@ -1701,6 +1702,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
             ("icy_retreat_available", 1),
             ("pounce_available", 1),
         ),
+        dragon_breath_profile_ids=(("cold_breath", "young_white_boss_cold_breath"),),
         legendary_action_ids=("icy_retreat", "pounce"),
     ),
     "young_red_dragon": MonsterExpectation(
