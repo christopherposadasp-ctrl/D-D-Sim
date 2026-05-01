@@ -329,9 +329,9 @@ def test_frozen_courtyard_kobold_opening_builds_accepted_opening_layout() -> Non
     assert all(has_line_of_sight_between_units(encounter, "F4", f"E{index}") for index in (15, 16))
 
 
-def test_frozen_courtyard_dragon_landing_stages_boss_for_round_three() -> None:
+def test_frostfall_courtyard_stages_boss_for_round_three() -> None:
     encounter = create_encounter(
-        EncounterConfig(seed="frozen-courtyard-dragon-landing", enemy_preset_id="frozen_courtyard_dragon_landing")
+        EncounterConfig(seed="frostfall-courtyard", enemy_preset_id="frostfall_courtyard")
     )
 
     assert "E17" not in encounter.units
@@ -344,9 +344,9 @@ def test_frozen_courtyard_dragon_landing_stages_boss_for_round_three() -> None:
     assert arrival.resource_pools == {"opening_landing_uses": 0}
 
 
-def test_frozen_courtyard_dragon_landing_boss_arrives_at_round_three() -> None:
+def test_frostfall_courtyard_boss_arrives_at_round_three() -> None:
     encounter = create_encounter(
-        EncounterConfig(seed="frozen-courtyard-dragon-arrival", enemy_preset_id="frozen_courtyard_dragon_landing")
+        EncounterConfig(seed="frostfall-courtyard-arrival", enemy_preset_id="frostfall_courtyard")
     )
     encounter.round = 3
     encounter.active_combatant_index = 0

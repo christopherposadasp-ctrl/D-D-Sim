@@ -39,6 +39,7 @@ DEFAULT_SCENARIO_IDS = (
     "skyhunter_pincer",
     "hobgoblin_command_screen",
     "berserker_overrun",
+    "frostfall_courtyard",
 )
 DEFAULT_BATCH_SIZE = 300
 DEFAULT_PLAYER_BEHAVIOR = "balanced"

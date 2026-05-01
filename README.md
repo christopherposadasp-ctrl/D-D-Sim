@@ -195,7 +195,7 @@ These map to:
 - `app`: start the Python backend and React frontend from one PowerShell window; press `Ctrl+C` to stop both
 - `check-fast`: `ruff` plus the non-slow backend `pytest` suite
 - `daily-housekeeping`: conservative repo status, doc-drift, and safe commit recommendation report with no automatic staging or commits
-- `party-validation`: focused current-party validation for `martial_mixed_party` against `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, and `berserker_overrun`
+- `party-validation`: focused current-party validation for `martial_mixed_party` against `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`
 - `pc-tuning-sample`: event-level PC tuning sample across the standard validation scenarios; every run reports current-party Fighter `F1`, Paladin `F2`, ranged Rogue `F3`, and Wizard `F4`, with the selected profile shown last in detail
 - `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
 - `audit-full`: the slower full scenario audit profile

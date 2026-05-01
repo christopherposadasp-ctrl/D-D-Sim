@@ -89,7 +89,7 @@ For normal class, AI, and focused content work, run:
 .\scripts\dev.ps1 party-validation
 ```
 
-The party-validation command uses the current `martial_mixed_party` and the focused scenario battery: `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, and `berserker_overrun`. It uses default parallel batch execution and writes the focused validation reports listed above.
+The party-validation command uses the current `martial_mixed_party` and the focused scenario battery: `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`. It uses default parallel batch execution and writes the focused validation reports listed above.
 
 For daily admin review, run:
 

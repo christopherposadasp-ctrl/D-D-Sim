@@ -147,11 +147,11 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         enemy_preset_id="frozen_courtyard_kobold_opening",
         audit_expectation_ids=(),
     ),
-    "frozen_courtyard_dragon_landing": ScenarioDefinition(
-        scenario_id="frozen_courtyard_dragon_landing",
-        display_name="Frozen Courtyard Dragon Landing",
-        description=ENEMY_PRESETS["frozen_courtyard_dragon_landing"].description,
-        enemy_preset_id="frozen_courtyard_dragon_landing",
+    "frostfall_courtyard": ScenarioDefinition(
+        scenario_id="frostfall_courtyard",
+        display_name="Frostfall Courtyard",
+        description=ENEMY_PRESETS["frostfall_courtyard"].description,
+        enemy_preset_id="frostfall_courtyard",
         audit_expectation_ids=(),
     ),
 }

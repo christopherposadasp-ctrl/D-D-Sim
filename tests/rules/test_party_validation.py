@@ -33,12 +33,17 @@ def make_batch_summary(seed: str = "party-validation-test") -> BatchSummary:
     )
 
 
+def make_lay_on_hands_policy():
+    return run_party_validation.build_lay_on_hands_policy()
+
+
 def test_party_validation_defaults_are_focused_on_current_party() -> None:
     assert run_party_validation.DEFAULT_SCENARIO_IDS == (
         "reaction_bastion",
         "skyhunter_pincer",
         "hobgoblin_command_screen",
         "berserker_overrun",
+        "frostfall_courtyard",
     )
     assert run_party_validation.DEFAULT_BATCH_SIZE == 300
     assert run_party_validation.DEFAULT_PLAYER_BEHAVIOR == "balanced"
@@ -75,6 +80,7 @@ def test_party_validation_report_shape_is_stable(monkeypatch) -> None:
         batch_rows=[],
         feature_evidence=[],
         issue_list=[],
+        lay_on_hands_policy=make_lay_on_hands_policy(),
     )
 
     assert payload["overallStatus"] == "pass"
@@ -167,6 +173,7 @@ def test_party_validation_console_summary_includes_batch_results() -> None:
         ],
         feature_evidence=[],
         issue_list=[],
+        lay_on_hands_policy=make_lay_on_hands_policy(),
     )
 
     summary = run_party_validation.format_console_summary(payload)
@@ -214,6 +221,7 @@ def test_party_validation_failures_drive_overall_failure(monkeypatch) -> None:
         batch_rows=[],
         feature_evidence=[],
         issue_list=[{"severity": "fail", "section": "batchHealth", "message": "failed"}],
+        lay_on_hands_policy=make_lay_on_hands_policy(),
     )
 
     assert payload["overallStatus"] == "fail"
@@ -243,6 +251,7 @@ def test_replay_smoke_runs_each_scenario_twice() -> None:
             ("hobgoblin_kill_box",),
             "balanced",
             2,
+            make_lay_on_hands_policy(),
         )
     finally:
         run_party_validation.run_encounter = original_run_encounter
@@ -282,6 +291,7 @@ def test_batch_health_splits_combined_totals_evenly(monkeypatch) -> None:
         "combined",
         True,
         None,
+        make_lay_on_hands_policy(),
     )
 
     assert calls == [("kind", 100), ("balanced", 100), ("evil", 100)]

@@ -3920,10 +3920,10 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             "F4": GridPosition(x=1, y=13),
         },
     ),
-    "frozen_courtyard_dragon_landing": EnemyPresetDefinition(
-        preset_id="frozen_courtyard_dragon_landing",
-        display_name="Frozen Courtyard Dragon Landing",
-        description="Kobolds draw the party into the frozen courtyard before the white dragon boss lands on the third round.",
+    "frostfall_courtyard": EnemyPresetDefinition(
+        preset_id="frostfall_courtyard",
+        display_name="Frostfall Courtyard",
+        description="Kobolds draw the party into a frozen ruined courtyard before the white dragon boss descends through the storm.",
         units=(
             EnemyPresetUnit("E1", "kobold_warrior", GridPosition(x=14, y=7)),
             EnemyPresetUnit("E2", "kobold_warrior", GridPosition(x=14, y=8)),
