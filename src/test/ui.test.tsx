@@ -18,7 +18,7 @@ import { App } from '../ui/App';
 import { PresentationReplay } from '../ui/PresentationReplay';
 
 const TEST_ENEMY_CATALOG: EnemyCatalogResponse = {
-  "defaultEnemyPresetId": "goblin_screen",
+  "defaultEnemyPresetId": "skyhunter_pincer",
   "enemyVariants": [
     {
       "id": "animated_armor",
@@ -1314,6 +1314,108 @@ const TEST_ENEMY_CATALOG: EnemyCatalogResponse = {
           }
         }
       ]
+    },
+    {
+      "id": "berserker_overrun",
+      "displayName": "Berserker Overrun",
+      "description": "A staggered goblin wave floods the lane while berserkers crash through any gap the party leaves open.",
+      "units": [
+        { "unitId": "E1", "variantId": "goblin_raider", "position": { "x": 8, "y": 4 } },
+        { "unitId": "E2", "variantId": "goblin_raider", "position": { "x": 8, "y": 6 } },
+        { "unitId": "E3", "variantId": "goblin_raider", "position": { "x": 8, "y": 8 } },
+        { "unitId": "E4", "variantId": "goblin_raider", "position": { "x": 8, "y": 10 } },
+        { "unitId": "E5", "variantId": "goblin_raider", "position": { "x": 8, "y": 12 } },
+        { "unitId": "E6", "variantId": "goblin_raider", "position": { "x": 9, "y": 5 } },
+        { "unitId": "E7", "variantId": "goblin_raider", "position": { "x": 9, "y": 7 } },
+        { "unitId": "E8", "variantId": "goblin_raider", "position": { "x": 9, "y": 9 } },
+        { "unitId": "E9", "variantId": "goblin_raider", "position": { "x": 9, "y": 11 } },
+        { "unitId": "E10", "variantId": "hobgoblin_captain", "position": { "x": 11, "y": 5 } },
+        { "unitId": "E11", "variantId": "hobgoblin_captain", "position": { "x": 11, "y": 10 } },
+        { "unitId": "E12", "variantId": "berserker", "position": { "x": 10, "y": 7 } },
+        { "unitId": "E13", "variantId": "berserker", "position": { "x": 10, "y": 9 } },
+        { "unitId": "E14", "variantId": "hobgoblin_archer", "position": { "x": 14, "y": 4 } },
+        { "unitId": "E15", "variantId": "hobgoblin_archer", "position": { "x": 14, "y": 12 } }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": { "x": 5, "y": 8 },
+          "footprint": { "width": 1, "height": 1 }
+        }
+      ]
+    },
+    {
+      "id": "hobgoblin_command_screen",
+      "displayName": "Hobgoblin Command Screen",
+      "description": "Hobgoblin captains direct a layered shell of disciplined warriors while archers punish any premature dive on the command layer.",
+      "units": [
+        { "unitId": "E1", "variantId": "hobgoblin_warrior", "position": { "x": 8, "y": 4 } },
+        { "unitId": "E2", "variantId": "hobgoblin_warrior", "position": { "x": 8, "y": 8 } },
+        { "unitId": "E3", "variantId": "hobgoblin_warrior", "position": { "x": 8, "y": 12 } },
+        { "unitId": "E4", "variantId": "hobgoblin_warrior", "position": { "x": 9, "y": 6 } },
+        { "unitId": "E5", "variantId": "hobgoblin_warrior", "position": { "x": 9, "y": 10 } },
+        { "unitId": "E6", "variantId": "hobgoblin_warrior", "position": { "x": 10, "y": 8 } },
+        { "unitId": "E7", "variantId": "hobgoblin_warrior", "position": { "x": 10, "y": 5 } },
+        { "unitId": "E8", "variantId": "hobgoblin_warrior", "position": { "x": 10, "y": 11 } },
+        { "unitId": "E9", "variantId": "hobgoblin_warrior", "position": { "x": 11, "y": 6 } },
+        { "unitId": "E10", "variantId": "hobgoblin_captain", "position": { "x": 11, "y": 10 } },
+        { "unitId": "E11", "variantId": "hobgoblin_captain", "position": { "x": 11, "y": 8 } },
+        { "unitId": "E12", "variantId": "hobgoblin_archer", "position": { "x": 12, "y": 4 } },
+        { "unitId": "E13", "variantId": "hobgoblin_archer", "position": { "x": 12, "y": 7 } },
+        { "unitId": "E14", "variantId": "hobgoblin_archer", "position": { "x": 12, "y": 10 } },
+        { "unitId": "E15", "variantId": "hobgoblin_archer", "position": { "x": 12, "y": 13 } }
+      ],
+      "terrainFeatures": [
+        { "featureId": "rock_1", "kind": "rock", "position": { "x": 5, "y": 8 }, "footprint": { "width": 1, "height": 1 } },
+        { "featureId": "command_low_wall_1", "kind": "low_wall", "position": { "x": 7, "y": 6 }, "footprint": { "width": 2, "height": 1 } },
+        { "featureId": "command_low_wall_2", "kind": "low_wall", "position": { "x": 7, "y": 10 }, "footprint": { "width": 2, "height": 1 } },
+        { "featureId": "command_boulder_1", "kind": "boulder", "position": { "x": 6, "y": 4 }, "footprint": { "width": 2, "height": 2 } }
+      ]
+    },
+    {
+      "id": "skyhunter_pincer",
+      "displayName": "Skyhunter Pincer",
+      "description": "A griffon dives onto the back line while centaurs and skirmishers stretch the party into a crossfire.",
+      "units": [
+        { "unitId": "E1", "variantId": "griffon", "position": { "x": 14, "y": 8 } },
+        { "unitId": "E2", "variantId": "centaur_trooper", "position": { "x": 10, "y": 5 } },
+        { "unitId": "E3", "variantId": "centaur_trooper", "position": { "x": 10, "y": 10 } },
+        { "unitId": "E4", "variantId": "scout", "position": { "x": 14, "y": 4 } },
+        { "unitId": "E5", "variantId": "scout", "position": { "x": 14, "y": 12 } },
+        { "unitId": "E6", "variantId": "guard_captain", "position": { "x": 12, "y": 8 } },
+        { "unitId": "E7", "variantId": "knight", "position": { "x": 11, "y": 8 } }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": { "x": 5, "y": 8 },
+          "footprint": { "width": 1, "height": 1 }
+        }
+      ]
+    },
+    {
+      "id": "reaction_bastion",
+      "displayName": "Reaction Bastion",
+      "description": "Knights and veterans lock the center while a guard captain and scouts punish any attempted break.",
+      "units": [
+        { "unitId": "E1", "variantId": "knight", "position": { "x": 10, "y": 6 } },
+        { "unitId": "E2", "variantId": "warrior_veteran", "position": { "x": 10, "y": 10 } },
+        { "unitId": "E3", "variantId": "warrior_veteran", "position": { "x": 12, "y": 6 } },
+        { "unitId": "E4", "variantId": "warrior_veteran", "position": { "x": 12, "y": 10 } },
+        { "unitId": "E5", "variantId": "guard_captain", "position": { "x": 14, "y": 8 } },
+        { "unitId": "E6", "variantId": "bandit_archer", "position": { "x": 15, "y": 4 } },
+        { "unitId": "E7", "variantId": "scout", "position": { "x": 15, "y": 12 } }
+      ],
+      "terrainFeatures": [
+        {
+          "featureId": "rock_1",
+          "kind": "rock",
+          "position": { "x": 5, "y": 8 },
+          "footprint": { "width": 1, "height": 1 }
+        }
+      ]
     }
   ]
 };
@@ -2283,8 +2385,8 @@ const TEST_PLAYER_CATALOG: PlayerCatalogResponse = {
     },
     {
       "id": "martial_mixed_party",
-      "displayName": "Mixed Martial Party",
-      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 2 wizard.",
+      "displayName": "Level 5 Adventuring Party",
+      "description": "One level 5 Battle Master fighter, one level 5 Paladin, one level 5 ranged Assassin rogue, and one level 5 Evoker wizard.",
       "units": [
         {
           "unitId": "F1",
@@ -2319,6 +2421,10 @@ const ACTIVE_ENEMY_PRESET_IDS = [
   'bugbear_dragnet',
   'deadwatch_phalanx',
   'captains_crossfire',
+  'berserker_overrun',
+  'hobgoblin_command_screen',
+  'skyhunter_pincer',
+  'reaction_bastion',
 ];
 
 const ACTIVE_PLAYER_PRESET_IDS = [
@@ -2883,7 +2989,7 @@ describe('App', () => {
     ]);
 
     for (const preset of TEST_ENEMY_CATALOG.enemyPresets) {
-      expect(preset.terrainFeatures).toEqual([FIXED_ROCK_TERRAIN]);
+      expect(preset.terrainFeatures).toContainEqual(FIXED_ROCK_TERRAIN);
     }
 
     const marshPredators = TEST_ENEMY_CATALOG.enemyPresets.find((preset) => preset.id === 'marsh_predators');
@@ -2901,20 +3007,46 @@ describe('App', () => {
   it('opens with the default layout already loaded and ready to run', async () => {
     render(<App />);
 
-    expect(await screen.findByText(/10 \/ 10 units placed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/11 \/ 11 units placed/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /batch run/i })).toBeEnabled();
     expect(screen.getByRole('combobox', { name: /player behavior/i })).toHaveValue('balanced');
     expect(screen.getByRole('combobox', { name: /dm style/i })).toHaveValue('combined');
     const enemyPresetSelect = screen.getByRole('combobox', { name: /scenario/i });
-    expect(enemyPresetSelect).toHaveValue('goblin_screen');
+    expect(enemyPresetSelect).toHaveValue('skyhunter_pincer');
+    expect(within(enemyPresetSelect).getAllByRole('option').slice(0, 4).map((option) => option.textContent)).toEqual([
+      'Reaction Bastion',
+      'Skyhunter Pincer',
+      'Hobgoblin Command Screen',
+      'Berserker Overrun',
+    ]);
     expect(within(enemyPresetSelect).queryByRole('option', { name: 'Giant Toad' })).not.toBeInTheDocument();
     expect(within(enemyPresetSelect).getByRole('option', { name: 'Marsh Predators' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /seed/i })).toHaveValue('level5-party-001');
+    expect(screen.queryByRole('textbox', { name: /seed/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText('level5-party-001').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /new seed/i })).toBeEnabled();
+    expect(screen.getByRole('option', { name: 'Level 5 Adventuring Party' })).toBeInTheDocument();
     expect(screen.getByText(/Selected Scenario:/i)).toBeInTheDocument();
-    expect(screen.getByText(/Three raiders screening three archers/i)).toBeInTheDocument();
+    expect(screen.getByText(/A griffon dives onto the back line/i)).toBeInTheDocument();
     expect(screen.getByText(/Combined Batch runs Kind, Balanced, and Evil DM styles/i)).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: /batch size/i })).toHaveValue(100);
     expect(screen.getByRole('grid', { name: /placement grid/i })).toBeInTheDocument();
+  });
+
+  it('generates a new seed from the controls panel', async () => {
+    const user = userEvent.setup();
+    const toISOStringSpy = vi
+      .spyOn(Date.prototype, 'toISOString')
+      .mockReturnValue('2026-04-30T12:34:56.000Z');
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    render(<App />);
+
+    await screen.findByText(/11 \/ 11 units placed/i);
+    await user.click(screen.getByRole('button', { name: /new seed/i }));
+
+    expect(screen.getAllByText(/^level5-party-20260430123456-[a-z0-9]+$/).length).toBeGreaterThan(0);
+
+    toISOStringSpy.mockRestore();
+    randomSpy.mockRestore();
   });
 
   it('renders the fixed presentation replay page', async () => {
@@ -2932,7 +3064,7 @@ describe('App', () => {
   it('renders the preset rock and blocks placement onto that square', async () => {
     render(<App />);
 
-    await screen.findByText(/10 \/ 10 units placed/i);
+    await screen.findByText(/11 \/ 11 units placed/i);
     const rockSquare = screen.getByRole('button', { name: /square 5,8 contains rock terrain/i });
 
     expect(rockSquare).toBeDisabled();
@@ -2942,7 +3074,7 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByText(/10 \/ 10 units placed/i);
+    await screen.findByText(/11 \/ 11 units placed/i);
     await user.selectOptions(screen.getByRole('combobox', { name: /dm style/i }), 'balanced');
     const batchSizeInput = screen.getByRole('spinbutton', { name: /batch size/i });
     await user.clear(batchSizeInput);
@@ -2960,7 +3092,7 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByText(/10 \/ 10 units placed/i);
+    await screen.findByText(/11 \/ 11 units placed/i);
     await user.selectOptions(screen.getByRole('combobox', { name: /dm style/i }), 'balanced');
     const batchSizeInput = screen.getByRole('spinbutton', { name: /batch size/i });
     await user.clear(batchSizeInput);
@@ -2979,7 +3111,7 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByText(/10 \/ 10 units placed/i);
+    await screen.findByText(/11 \/ 11 units placed/i);
     const batchSizeInput = screen.getByRole('spinbutton', { name: /batch size/i });
     await user.clear(batchSizeInput);
     await user.type(batchSizeInput, '2');

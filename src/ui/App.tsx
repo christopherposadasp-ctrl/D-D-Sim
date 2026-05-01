@@ -76,6 +76,12 @@ const EMPTY_FOOTPRINTS: Record<string, { width: number; height: number }> = Obje
   FIGHTER_IDS.map((fighterId) => [fighterId, MEDIUM_FOOTPRINT])
 );
 
+function createNewSeed(): string {
+  const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `level5-party-${timestamp}-${suffix}`;
+}
+
 interface AppProps {
   initialEnemyCatalog?: EnemyCatalogResponse | null;
   initialPlayerCatalog?: PlayerCatalogResponse | null;
@@ -394,7 +400,7 @@ export function App(props: AppProps = {}) {
         placementValidation={placementValidation}
         placementStatusText={placementStatusText}
         error={state.error}
-        onSeedChange={(value) => dispatch({ type: 'setSeed', value })}
+        onGenerateSeed={() => dispatch({ type: 'setSeed', value: createNewSeed() })}
         onBatchSizeChange={(value) => dispatch({ type: 'setBatchSize', value })}
         onEnemyPresetChange={(value) => dispatch({ type: 'setEnemyPreset', value })}
         onPlayerPresetChange={(value) => dispatch({ type: 'setPlayerPreset', value })}

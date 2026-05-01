@@ -3987,9 +3987,13 @@ ACTIVE_ENEMY_PRESET_IDS: tuple[str, ...] = (
     "bugbear_dragnet",
     "deadwatch_phalanx",
     "captains_crossfire",
+    "berserker_overrun",
+    "hobgoblin_command_screen",
+    "skyhunter_pincer",
+    "reaction_bastion",
 )
 
-DEFAULT_ENEMY_PRESET_ID = "goblin_screen"
+DEFAULT_ENEMY_PRESET_ID = "skyhunter_pincer"
 
 
 def clone_attacks(source: dict[str, WeaponProfile]) -> dict[str, WeaponProfile]:

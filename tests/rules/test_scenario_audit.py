@@ -29,6 +29,10 @@ def test_active_scenario_ids_exclude_giant_toad_solo() -> None:
         "bugbear_dragnet",
         "deadwatch_phalanx",
         "captains_crossfire",
+        "berserker_overrun",
+        "hobgoblin_command_screen",
+        "skyhunter_pincer",
+        "reaction_bastion",
     )
     assert "giant_toad_solo" not in get_active_scenario_ids()
 

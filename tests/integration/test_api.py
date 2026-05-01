@@ -23,6 +23,10 @@ ACTIVE_SCENARIO_IDS = [
     "bugbear_dragnet",
     "deadwatch_phalanx",
     "captains_crossfire",
+    "berserker_overrun",
+    "hobgoblin_command_screen",
+    "skyhunter_pincer",
+    "reaction_bastion",
 ]
 
 CURRENT_MARSH_PREDATORS_UNITS = [
@@ -85,14 +89,12 @@ def test_enemy_catalog_exposes_fixed_rock_for_each_preset() -> None:
     assert response.status_code == 200
     payload = response.json()
     for preset in payload["enemyPresets"]:
-        assert preset["terrainFeatures"] == [
-            {
-                "featureId": "rock_1",
-                "kind": "rock",
-                "position": {"x": 5, "y": 8},
-                "footprint": {"width": 1, "height": 1},
-            }
-        ]
+        assert {
+            "featureId": "rock_1",
+            "kind": "rock",
+            "position": {"x": 5, "y": 8},
+            "footprint": {"width": 1, "height": 1},
+        } in preset["terrainFeatures"]
 
 
 def test_enemy_catalog_exposes_frozen_active_scenario_surface() -> None:
@@ -103,7 +105,7 @@ def test_enemy_catalog_exposes_frozen_active_scenario_surface() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert [preset["id"] for preset in payload["enemyPresets"]] == ACTIVE_SCENARIO_IDS
-    assert len(payload["enemyPresets"]) == 11
+    assert len(payload["enemyPresets"]) == 15
 
     presets_by_id = {preset["id"]: preset for preset in payload["enemyPresets"]}
     assert presets_by_id["marsh_predators"]["units"] == CURRENT_MARSH_PREDATORS_UNITS

@@ -822,6 +822,29 @@ button {
   font-family: 'Courier New', monospace;
 }
 
+.seed-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.seed-control code {
+  overflow: hidden;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 252, 246, 0.78);
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-button {
+  min-height: 42px;
+  padding: 0 16px;
+}
+
 .presentation-shell {
   gap: 28px;
 }
@@ -894,6 +917,10 @@ button {
 
   .button-row {
     flex-direction: column;
+  }
+
+  .seed-control {
+    grid-template-columns: 1fr;
   }
 
   .placement-unit-list {

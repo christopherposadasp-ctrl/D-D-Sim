@@ -556,7 +556,7 @@ interface ControlsPanelProps {
   placementValidation: PlacementValidationResult;
   placementStatusText: string;
   error: string | null;
-  onSeedChange: (value: string) => void;
+  onGenerateSeed: () => void;
   onBatchSizeChange: (value: string) => void;
   onEnemyPresetChange: (value: string) => void;
   onPlayerPresetChange: (value: string) => void;
@@ -592,14 +592,15 @@ export function ControlsPanel(props: ControlsPanelProps) {
       </div>
 
       <div className="control-grid">
-        <label className="field">
+        <div className="field">
           <span>Seed</span>
-          <input
-            value={props.seedInput}
-            onChange={(event) => props.onSeedChange(event.target.value)}
-            placeholder="Enter deterministic seed"
-          />
-        </label>
+          <div className="seed-control">
+            <code>{props.seedInput}</code>
+            <button type="button" className="secondary-button compact-button" onClick={props.onGenerateSeed}>
+              New Seed
+            </button>
+          </div>
+        </div>
 
         <label className="field">
           <span>Batch Size</span>
