@@ -14,6 +14,7 @@
 Run these from the repo root through the PowerShell wrapper:
 
 ```powershell
+.\scripts\dev.ps1 app
 .\scripts\dev.ps1 check-fast
 .\scripts\dev.ps1 daily-housekeeping
 .\scripts\dev.ps1 party-validation
@@ -37,6 +38,7 @@ Run these from the repo root through the PowerShell wrapper:
 
 Direct equivalents:
 
+- `app`: starts `py -3.13 -m uvicorn backend.api.app:app --reload` and `npm run dev` from one PowerShell window
 - `check-fast`: `py -3.13 -m ruff check backend tests scripts` and `py -3.13 -m pytest -q -m "not slow" tests\golden tests\rules tests\integration`
 - `daily-housekeeping`: `py -3.13 .\scripts\run_daily_housekeeping.py`
 - `party-validation`: `py -3.13 .\scripts\run_party_validation.py`

@@ -95,7 +95,31 @@ py -3.13 -m pip install -e .[dev]
 npm install
 ```
 
-Start the Python backend in one PowerShell window:
+Start the app from one PowerShell window:
+
+```powershell
+.\scripts\dev.ps1 app
+```
+
+Then open the Vite URL shown in the terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+The presentation replay page is available at:
+
+```text
+http://localhost:5173/presentation
+```
+
+The backend API docs are available while the app command is running:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+If the one-window command fails, use the fallback two-window flow. Start the Python backend in one PowerShell window:
 
 ```powershell
 py -3.13 -m uvicorn backend.api.app:app --reload
@@ -113,12 +137,6 @@ Open the Vite URL shown in the frontend terminal, usually:
 http://localhost:5173
 ```
 
-The backend API docs are available while the backend is running:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
 Use Python `3.12+`; this project is normally run with Python `3.13`. Run tests and scripts from the repo root, not from your user folder, or pytest will scan unrelated files.
 
 ## Frontend Commands
@@ -128,7 +146,7 @@ npm install
 npm run dev
 ```
 
-The frontend now sends simulation requests to the Python backend through the Vite dev proxy, so run the API server in a second PowerShell window before using the UI.
+The frontend sends simulation requests to the Python backend through the Vite dev proxy. Prefer `.\scripts\dev.ps1 app` for local use, or run the API server separately before using `npm run dev`.
 
 Build and test:
 
@@ -150,6 +168,7 @@ py -3.13 -m pip install -e .[dev]
 Use the PowerShell task runner for the standard checks:
 
 ```powershell
+.\scripts\dev.ps1 app
 .\scripts\dev.ps1 check-fast
 .\scripts\dev.ps1 daily-housekeeping
 .\scripts\dev.ps1 party-validation
@@ -173,6 +192,7 @@ Use the PowerShell task runner for the standard checks:
 
 These map to:
 
+- `app`: start the Python backend and React frontend from one PowerShell window; press `Ctrl+C` to stop both
 - `check-fast`: `ruff` plus the non-slow backend `pytest` suite
 - `daily-housekeeping`: conservative repo status, doc-drift, and safe commit recommendation report with no automatic staging or commits
 - `party-validation`: focused current-party validation for `martial_mixed_party` against `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, and `berserker_overrun`
@@ -283,7 +303,19 @@ Swagger/OpenAPI docs are then available at:
 
 ## Local Development Flow
 
-Use two PowerShell windows from the repo root:
+Prefer the one-window local app command:
+
+```powershell
+.\scripts\dev.ps1 app
+```
+
+This starts the Python backend, waits for `/health`, starts the Vite frontend, and prints:
+
+- `http://localhost:5173/`
+- `http://localhost:5173/presentation`
+- `http://127.0.0.1:8000/docs`
+
+Use the fallback two-window flow from the repo root when debugging either server separately:
 
 ```powershell
 py -3.13 -m uvicorn backend.api.app:app --reload

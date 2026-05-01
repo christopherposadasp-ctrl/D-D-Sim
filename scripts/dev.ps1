@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("check-fast", "daily-housekeeping", "party-validation", "pc-tuning-sample", "audit-quick", "audit-full", "audit-health", "audit-validation", "fighter-audit-quick", "fighter-audit-full", "barbarian-audit-quick", "barbarian-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability", "pass3-clarity")]
+    [ValidateSet("app", "check-fast", "daily-housekeeping", "party-validation", "pc-tuning-sample", "audit-quick", "audit-full", "audit-health", "audit-validation", "fighter-audit-quick", "fighter-audit-full", "barbarian-audit-quick", "barbarian-audit-full", "rogue-audit-quick", "rogue-audit-full", "class-audit-slices", "behavior-diagnostics", "nightly-audit", "pass2-stability", "pass3-clarity")]
     [string]$Task,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -84,6 +84,90 @@ function Invoke-Step {
     }
 }
 
+function Stop-ProcessTree {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId
+    )
+
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue)
+    foreach ($child in $children) {
+        Stop-ProcessTree -ProcessId $child.ProcessId
+    }
+
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $process) {
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Wait-ForHttpOk {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+                return $true
+            }
+        }
+        catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    return $false
+}
+
+function Invoke-App {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$PythonCommand
+    )
+
+    $backendParts = Build-PythonCommandParts $PythonCommand @("-m", "uvicorn", "backend.api.app:app", "--reload")
+    $backendCommand = $backendParts[0]
+    $backendArguments = @()
+    if ($backendParts.Count -gt 1) {
+        $backendArguments = $backendParts[1..($backendParts.Count - 1)]
+    }
+
+    Write-Host "Starting Python backend..."
+    Write-Host ">" ($backendParts -join " ")
+    $backendProcess = Start-Process -FilePath $backendCommand -ArgumentList $backendArguments -WorkingDirectory $repoRoot -NoNewWindow -PassThru
+
+    try {
+        if (-not (Wait-ForHttpOk -Uri "http://127.0.0.1:8000/health" -TimeoutSeconds 20)) {
+            throw "Backend did not respond at http://127.0.0.1:8000/health within 20 seconds."
+        }
+
+        Write-Host ""
+        Write-Host "Frontend:     http://localhost:5173/"
+        Write-Host "Presentation: http://localhost:5173/presentation"
+        Write-Host "API docs:     http://127.0.0.1:8000/docs"
+        Write-Host "Press Ctrl+C to stop both servers."
+        Write-Host ""
+
+        & npm run dev
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
+    finally {
+        if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
+            Write-Host ""
+            Write-Host "Stopping Python backend..."
+            Stop-ProcessTree -ProcessId $backendProcess.Id
+        }
+    }
+}
+
 Push-Location $repoRoot
 try {
     $pythonCommand = Resolve-PythonCommand
@@ -93,6 +177,9 @@ try {
     }
 
     switch ($Task) {
+        "app" {
+            Invoke-App -PythonCommand $pythonCommand
+        }
         "check-fast" {
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "ruff", "check", "backend", "tests", "scripts"))
             Invoke-Step -CommandParts (Build-PythonCommandParts $pythonCommand @("-m", "pytest", "-q", "-m", "not slow", "tests\\golden", "tests\\rules", "tests\\integration"))
