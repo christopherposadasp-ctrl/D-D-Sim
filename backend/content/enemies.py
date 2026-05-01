@@ -139,6 +139,7 @@ class EnemyPresetDefinition:
 goblin_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=0, wis=-1, cha=-1)
 kobold_warrior_ability_mods = AbilityModifiers(str=-2, dex=2, con=-1, int=-1, wis=-2, cha=-1)
 kobold_scale_sorcerer_ability_mods = AbilityModifiers(str=-2, dex=2, con=2, int=0, wis=-1, cha=2)
+kobold_dragonshield_ability_mods = AbilityModifiers(str=1, dex=2, con=2, int=-1, wis=-1, cha=0)
 bandit_ability_mods = AbilityModifiers(str=1, dex=1, con=0, int=0, wis=0, cha=0)
 guard_ability_mods = AbilityModifiers(str=1, dex=1, con=1, int=0, wis=0, cha=0)
 scout_ability_mods = AbilityModifiers(str=0, dex=2, con=1, int=0, wis=1, cha=0)
@@ -1542,6 +1543,60 @@ MONSTER_DEFINITIONS.update(
             ),
             default_melee_attack_action_id="melee_attack",
             default_ranged_attack_action_id="ranged_attack",
+        ),
+        "kobold_dragonshield": MonsterDefinition(
+            base_creature_id="kobold_dragonshield",
+            variant_id="kobold_dragonshield",
+            display_name="Kobold Dragonshield",
+            combat_role="kobold_dragonshield",
+            ai_profile_id="line_holder",
+            max_hp=44,
+            ac=15,
+            speed=20,
+            initiative_mod=2,
+            passive_perception=11,
+            ability_mods=kobold_dragonshield_ability_mods,
+            size_category="small",
+            footprint=medium_footprint,
+            damage_resistances=("cold",),
+            attacks={
+                "spear": WeaponProfile(
+                    id="spear",
+                    display_name="Spear",
+                    attack_bonus=3,
+                    ability_modifier=1,
+                    damage_dice=[DiceSpec(count=1, sides=6)],
+                    damage_modifier=1,
+                    damage_type="piercing",
+                    kind="melee",
+                ),
+                "spear_throw": WeaponProfile(
+                    id="spear_throw",
+                    display_name="Spear",
+                    attack_bonus=3,
+                    ability_modifier=1,
+                    damage_dice=[DiceSpec(count=1, sides=6)],
+                    damage_modifier=1,
+                    damage_type="piercing",
+                    kind="ranged",
+                    range=WeaponRange(normal=20, long=60),
+                ),
+            },
+            tags=("dragon", "kobold", "melee"),
+            action_ids=("melee_attack", "ranged_attack", "multiattack"),
+            trait_ids=("pack_tactics", "sunlight_sensitivity", "heart_of_the_dragon"),
+            attack_actions=(
+                melee_attack_action("spear", "Spear"),
+                ranged_attack_action("spear_throw", "Spear"),
+                repeated_choice_attack_action(
+                    "multiattack",
+                    "Multiattack",
+                    ("spear", "spear_throw"),
+                    2,
+                ),
+            ),
+            default_melee_attack_action_id="multiattack",
+            default_ranged_attack_action_id="multiattack",
         ),
         "kobold_scale_sorcerer": MonsterDefinition(
             base_creature_id="kobold_scale_sorcerer",
@@ -3808,6 +3863,7 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "jackal",
     "goblin_minion",
     "kobold_warrior",
+    "kobold_dragonshield",
     "kobold_scale_sorcerer",
     "skeleton",
     "zombie",

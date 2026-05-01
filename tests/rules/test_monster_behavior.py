@@ -92,6 +92,8 @@ FIXED_ATTACK_CASES = (
     ("goblin_minion", "dagger_throw", [3], ["piercing"], [5]),
     ("kobold_warrior", "dagger", [3], ["piercing"], [5]),
     ("kobold_warrior", "dagger_throw", [3], ["piercing"], [5]),
+    ("kobold_dragonshield", "spear", [3], ["piercing"], [4]),
+    ("kobold_dragonshield", "spear_throw", [3], ["piercing"], [4]),
     ("kobold_scale_sorcerer", "dagger", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "dagger_throw", [3], ["piercing"], [5]),
     ("kobold_scale_sorcerer", "chromatic_bolt", [3, 4], ["acid"], [9]),
@@ -528,6 +530,63 @@ def test_kobold_warrior_pack_tactics_grants_thrown_dagger_advantage() -> None:
 
     assert unit_has_trait(encounter.units["E1"], "pack_tactics")
     assert unit_has_trait(encounter.units["E1"], "sunlight_sensitivity")
+    assert attack.resolved_totals["attackMode"] == "advantage"
+    assert "pack_tactics" in attack.raw_rolls["advantageSources"]
+    assert [component.damage_type for component in attack.damage_details.damage_components] == ["piercing"]
+
+
+def test_kobold_dragonshield_uses_spear_in_melee_multiattack() -> None:
+    encounter = build_monster_benchmark_encounter("kobold_dragonshield")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "spear"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["spear", "spear"]
+
+
+def test_kobold_dragonshield_uses_thrown_spear_when_melee_unreachable() -> None:
+    encounter = build_monster_benchmark_encounter("kobold_dragonshield")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=9, y=5)
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].max_hp = 100
+    encounter.units["F1"].current_hp = 100
+
+    decision, events = run_actor_turn(encounter, "E1")
+    attacks = enemy_attack_events(events)
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "spear_throw"}
+    assert [event.damage_details.weapon_id for event in attacks] == ["spear_throw", "spear_throw"]
+
+
+def test_kobold_dragonshield_pack_tactics_and_metadata_traits_are_wired() -> None:
+    encounter = build_monster_benchmark_encounter("kobold_dragonshield")
+    defeat_other_units(encounter, "E1", "E2", "F1")
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["E2"].position = GridPosition(x=6, y=5)
+    encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="spear_throw",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 16], damage_rolls=[3]),
+        ),
+    )
+
+    assert unit_has_trait(encounter.units["E1"], "pack_tactics")
+    assert unit_has_trait(encounter.units["E1"], "sunlight_sensitivity")
+    assert unit_has_trait(encounter.units["E1"], "heart_of_the_dragon")
+    assert encounter.units["E1"].damage_resistances == ("cold",)
     assert attack.resolved_totals["attackMode"] == "advantage"
     assert "pack_tactics" in attack.raw_rolls["advantageSources"]
     assert [component.damage_type for component in attack.damage_details.damage_components] == ["piercing"]

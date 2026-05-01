@@ -45,6 +45,14 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
         display_name="Sunlight Sensitivity",
         description="This creature is sensitive to bright sunlight; lighting is not modeled by the live simulator.",
     ),
+    "heart_of_the_dragon": MonsterTraitDefinition(
+        trait_id="heart_of_the_dragon",
+        display_name="Heart of the Dragon",
+        description=(
+            "This creature can bolster nearby kobolds against fear and paralysis; "
+            "the trait is metadata-only in the live simulator."
+        ),
+    ),
     "aura_of_authority": MonsterTraitDefinition(
         trait_id="aura_of_authority",
         display_name="Aura of Authority",
