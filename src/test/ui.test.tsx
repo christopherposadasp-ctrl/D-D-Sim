@@ -2822,6 +2822,69 @@ describe('App', () => {
               : input.url;
         const config = init?.body ? (JSON.parse(String(init.body)) as EncounterConfig) : null;
 
+        if (
+          requestUrl.endsWith(
+            '/presentation/frostfall_courtyard_party_victory_fireball_haste_seed_frostfall-heroic-0006.json',
+          )
+        ) {
+          const savedReplay = buildEncounterResult({
+            seed: 'frostfall-heroic-0006',
+            enemyPresetId: 'frostfall_courtyard',
+            playerPresetId: 'martial_mixed_party',
+            playerBehavior: 'smart',
+            monsterBehavior: 'balanced',
+            batchSize: 1,
+          });
+          savedReplay.finalState.winner = 'fighters';
+          savedReplay.replayFrames.splice(1, 0, {
+            index: 1,
+            round: 1,
+            activeCombatantId: 'E3',
+            state: buildEncounterState(
+              savedReplay.finalState.seed,
+              savedReplay.finalState.playerBehavior,
+              savedReplay.finalState.monsterBehavior,
+              1,
+            ),
+            events: [
+              {
+                round: 1,
+                actorId: 'E3',
+                targetIds: [],
+                eventType: 'turn_start',
+                rawRolls: {},
+                resolvedTotals: {},
+                movementDetails: null,
+                damageDetails: null,
+                conditionDeltas: [],
+                textSummary: 'E3 starts turn 1.',
+              },
+              {
+                round: 1,
+                actorId: 'E3',
+                targetIds: [],
+                eventType: 'skip',
+                rawRolls: {},
+                resolvedTotals: {},
+                movementDetails: null,
+                damageDetails: null,
+                conditionDeltas: [],
+                textSummary: 'E3 skips its turn: Dead units do not act.',
+              },
+            ],
+          });
+          savedReplay.replayFrames.forEach((frame, index) => {
+            frame.index = index;
+          });
+
+          return new Response(JSON.stringify({ result: savedReplay }), {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+        }
+
         if (requestUrl.endsWith('/api/encounters/run')) {
           return new Response(JSON.stringify(buildEncounterResult(config!)), {
             status: 200,
@@ -3050,14 +3113,21 @@ describe('App', () => {
   });
 
   it('renders the fixed presentation replay page', async () => {
+    const user = userEvent.setup();
     render(<PresentationReplay />);
 
-    expect(await screen.findByRole('heading', { name: /Captain's Crossfire/i })).toBeInTheDocument();
-    expect(screen.getByText(/presentation-heroic-victory-001/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Frostfall Courtyard/i })).toBeInTheDocument();
+    expect(screen.getByText(/frostfall-heroic-0006/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Party Victory/i)).toBeInTheDocument();
+    expect(screen.getByText(/Kobolds draw the party into a frozen ruined courtyard/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Smart/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Balanced/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/F1 moves into range/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /next frame/i })).toBeEnabled();
+    expect(screen.getAllByText(/Boromir the Fighter moves into range/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/F1 moves into range/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /next frame/i }));
+    expect(screen.queryByText(/Dead units do not act/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Boromir the Fighter attacks Kobold Warrior 1/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /previous frame/i })).toBeEnabled();
     expect(screen.getByRole('link', { name: /open simulator/i })).toHaveAttribute('href', '/');
   });
 

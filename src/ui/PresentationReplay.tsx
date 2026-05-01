@@ -2,6 +2,7 @@ import { startTransition, useEffect, useState } from 'react';
 
 import { inspectPlacementsForUnitIds } from '../shared/sim/spatial';
 import type {
+  CombatEvent,
   EnemyCatalogResponse,
   EncounterConfig,
   GridPosition,
@@ -28,7 +29,14 @@ import {
   getPlayerPreset,
   getTerrainFeaturesForPreset
 } from './catalog';
-import { PRESENTATION_REPLAY_CONFIG, PRESENTATION_SAVED_REPLAY } from './presentationConfig';
+import {
+  PRESENTATION_REPLAY_CONFIG,
+  PRESENTATION_SAVED_REPLAY_URL,
+  PRESENTATION_SCENARIO_DESCRIPTION,
+  PRESENTATION_SCENARIO_DISPLAY_NAME,
+  PRESENTATION_TERRAIN_FEATURES,
+  PRESENTATION_UNIT_DISPLAY_NAMES
+} from './presentationConfig';
 
 const AUTOPLAY_INTERVAL_MS = 900;
 
@@ -102,7 +110,98 @@ function getFrameNarration(frame: ReplayFrame | null): string {
     return 'Replay is ready for the next frame.';
   }
 
-  return frame.events.map((event) => event.textSummary).join(' ');
+  return frame.events.map((event) => formatPresentationText(event.textSummary)).join(' ');
+}
+
+function getVisibleEventCount(encounter: RunEncounterResult | null, replayIndex: number, currentFrame: ReplayFrame | null): number {
+  const serializedCombatLogLength = currentFrame?.state.combatLog.length ?? 0;
+
+  if (serializedCombatLogLength > 0 || !encounter) {
+    return serializedCombatLogLength;
+  }
+
+  return encounter.replayFrames
+    .slice(0, replayIndex + 1)
+    .reduce((eventCount, frame) => eventCount + frame.events.length, 0);
+}
+
+function formatUnitDisplayName(unitId: string): string {
+  return PRESENTATION_UNIT_DISPLAY_NAMES[unitId] ?? unitId;
+}
+
+function formatPresentationText(text: string): string {
+  return Object.entries(PRESENTATION_UNIT_DISPLAY_NAMES)
+    .sort(([leftId], [rightId]) => rightId.length - leftId.length)
+    .reduce(
+      (formattedText, [unitId, displayName]) =>
+        formattedText.replace(new RegExp(`\\b${unitId}\\b`, 'g'), displayName),
+      text
+    );
+}
+
+function formatPresentationEvent(event: CombatEvent): CombatEvent {
+  return {
+    ...event,
+    actorId: formatUnitDisplayName(event.actorId),
+    targetIds: event.targetIds.map(formatUnitDisplayName),
+    textSummary: formatPresentationText(event.textSummary),
+    conditionDeltas: event.conditionDeltas.map(formatPresentationText)
+  };
+}
+
+function isDeadUnitSkipFrame(frame: ReplayFrame): boolean {
+  return (
+    frame.events.length > 0 &&
+    frame.events.every(
+      (event) =>
+        event.eventType === 'turn_start' ||
+        (event.eventType === 'skip' && event.textSummary.includes('Dead units do not act.'))
+    ) &&
+    frame.events.some((event) => event.eventType === 'skip' && event.textSummary.includes('Dead units do not act.'))
+  );
+}
+
+function getNextPresentationFrameIndex(
+  encounter: RunEncounterResult,
+  currentIndex: number,
+  direction: 1 | -1
+): number {
+  let nextIndex = currentIndex + direction;
+
+  while (
+    nextIndex > 0 &&
+    nextIndex < encounter.replayFrames.length - 1 &&
+    isDeadUnitSkipFrame(encounter.replayFrames[nextIndex])
+  ) {
+    nextIndex += direction;
+  }
+
+  return Math.min(Math.max(nextIndex, 0), encounter.replayFrames.length - 1);
+}
+
+function formatPresentationFrame(frame: ReplayFrame | null): ReplayFrame | null {
+  if (!frame) {
+    return null;
+  }
+
+  return {
+    ...frame,
+    activeCombatantId: formatUnitDisplayName(frame.activeCombatantId),
+    events: frame.events.map(formatPresentationEvent)
+  };
+}
+
+function formatPresentationUnit(unit: UnitState): UnitState {
+  const displayName = PRESENTATION_UNIT_DISPLAY_NAMES[unit.id];
+
+  if (!displayName) {
+    return unit;
+  }
+
+  return {
+    ...unit,
+    templateName: displayName
+  };
 }
 
 function buildPresentationConfig(
@@ -118,6 +217,30 @@ function buildPresentationConfig(
       PRESENTATION_REPLAY_CONFIG.playerPresetId
     )
   };
+}
+
+type SavedPresentationReplayPayload = RunEncounterResult | { result: RunEncounterResult };
+
+function getSavedReplayFromPayload(payload: SavedPresentationReplayPayload): RunEncounterResult {
+  if ('result' in payload) {
+    return payload.result;
+  }
+
+  return payload;
+}
+
+async function loadSavedPresentationReplay(): Promise<RunEncounterResult | null> {
+  if (!PRESENTATION_SAVED_REPLAY_URL) {
+    return null;
+  }
+
+  const response = await fetch(PRESENTATION_SAVED_REPLAY_URL);
+
+  if (!response.ok) {
+    throw new Error(`Saved replay request failed with status ${response.status}.`);
+  }
+
+  return getSavedReplayFromPayload((await response.json()) as SavedPresentationReplayPayload);
 }
 
 export function PresentationReplay() {
@@ -138,7 +261,8 @@ export function PresentationReplay() {
           getPlayerCatalogRequest()
         ]);
         const replay =
-          PRESENTATION_SAVED_REPLAY ?? (await runEncounterRequest(buildPresentationConfig(loadedEnemyCatalog, loadedPlayerCatalog)));
+          (await loadSavedPresentationReplay()) ??
+          (await runEncounterRequest(buildPresentationConfig(loadedEnemyCatalog, loadedPlayerCatalog)));
 
         if (cancelled) {
           return;
@@ -182,7 +306,7 @@ export function PresentationReplay() {
           return currentIndex;
         }
 
-        return currentIndex + 1;
+        return getNextPresentationFrameIndex(encounter, currentIndex, 1);
       });
     }, AUTOPLAY_INTERVAL_MS);
 
@@ -190,11 +314,13 @@ export function PresentationReplay() {
   }, [encounter, isAutoplaying]);
 
   const currentFrame = encounter?.replayFrames[replayIndex] ?? null;
+  const displayCurrentFrame = formatPresentationFrame(currentFrame);
   const initialFrame = encounter?.replayFrames[0] ?? null;
   const currentState = currentFrame?.state ?? initialFrame?.state ?? null;
   const orderedUnits = currentState ? sortUnits(currentState.units) : [];
-  const visibleEventCount = currentFrame?.state.combatLog.length ?? 0;
-  const timelineEvents = encounter?.events.slice(0, visibleEventCount) ?? [];
+  const displayOrderedUnits = orderedUnits.map(formatPresentationUnit);
+  const visibleEventCount = getVisibleEventCount(encounter, replayIndex, currentFrame);
+  const timelineEvents = encounter?.events.slice(0, visibleEventCount).map(formatPresentationEvent) ?? [];
   const movementEvents = currentFrame?.events.filter((event) => event.eventType === 'move') ?? [];
   const highlightedPath = combineMovementPaths(
     movementEvents
@@ -202,13 +328,15 @@ export function PresentationReplay() {
       .filter((path) => path.length > 1)
   );
   const attackLine = getAttackLine(currentFrame, currentState);
-  const terrainFeatures = getTerrainFeaturesForPreset(enemyCatalog, PRESENTATION_REPLAY_CONFIG.enemyPresetId);
-  const activeUnitIds = getCombinedUnitIds(
+  const catalogTerrainFeatures = getTerrainFeaturesForPreset(enemyCatalog, PRESENTATION_REPLAY_CONFIG.enemyPresetId);
+  const terrainFeatures = catalogTerrainFeatures.length > 0 ? catalogTerrainFeatures : PRESENTATION_TERRAIN_FEATURES;
+  const catalogActiveUnitIds = getCombinedUnitIds(
     enemyCatalog,
     PRESENTATION_REPLAY_CONFIG.enemyPresetId,
     playerCatalog,
     PRESENTATION_REPLAY_CONFIG.playerPresetId
   );
+  const activeUnitIds = catalogActiveUnitIds.length > 0 ? catalogActiveUnitIds : initialFrame?.state.initiativeOrder ?? [];
   const placements =
     enemyCatalog && playerCatalog
       ? getDefaultPlacementsForPreset(
@@ -236,19 +364,21 @@ export function PresentationReplay() {
   const setupUnits: BoardUnit[] = activeUnitIds.map((unitId) => ({
     id: unitId,
     faction: unitId.startsWith('F') ? 'fighters' : 'goblins',
-    position: placements[unitId],
+    position: placements[unitId] ?? initialFrame?.state.units[unitId]?.position ?? undefined,
     footprint: placementFootprints[unitId] ?? MEDIUM_FOOTPRINT
   }));
   const scenario = getEnemyPreset(enemyCatalog, PRESENTATION_REPLAY_CONFIG.enemyPresetId);
   const party = getPlayerPreset(playerCatalog, PRESENTATION_REPLAY_CONFIG.playerPresetId);
-  const replaySource = PRESENTATION_SAVED_REPLAY ? 'Saved replay' : 'Local backend fixed seed';
+  const scenarioDisplayName = scenario?.displayName ?? PRESENTATION_SCENARIO_DISPLAY_NAME;
+  const scenarioDescription = scenario?.description ?? PRESENTATION_SCENARIO_DESCRIPTION;
+  const replaySource = PRESENTATION_SAVED_REPLAY_URL ? 'Saved replay' : 'Local backend fixed seed';
 
-  function goToFrame(nextIndex: number): void {
+  function goToAdjacentPresentationFrame(direction: 1 | -1): void {
     if (!encounter) {
       return;
     }
 
-    setReplayIndex(Math.min(Math.max(nextIndex, 0), encounter.replayFrames.length - 1));
+    setReplayIndex((currentIndex) => getNextPresentationFrameIndex(encounter, currentIndex, direction));
   }
 
   return (
@@ -256,7 +386,7 @@ export function PresentationReplay() {
       <section className="hero presentation-hero">
         <div className="hero-copy">
           <span className="eyebrow">Presentation Replay</span>
-          <h1>{scenario?.displayName ?? 'Fixed Scenario Replay'}</h1>
+          <h1>{scenarioDisplayName}</h1>
           <p>
             A prepared smart-party replay against a Balanced DM. This page is built for the final demo: fixed seed,
             fixed party, fixed scenario, and frame-by-frame narration.
@@ -274,8 +404,9 @@ export function PresentationReplay() {
           <h2>Replay Controls</h2>
           <p>
             {party?.displayName ?? PRESENTATION_REPLAY_CONFIG.playerPresetId} vs{' '}
-            {scenario?.displayName ?? PRESENTATION_REPLAY_CONFIG.enemyPresetId}
+            {scenarioDisplayName}
           </p>
+          <p>{scenarioDescription}</p>
         </div>
 
         <div className="status-stage">
@@ -305,7 +436,12 @@ export function PresentationReplay() {
         </div>
 
         <div className="button-row">
-          <button type="button" className="secondary-button" onClick={() => goToFrame(replayIndex - 1)} disabled={!encounter || replayIndex === 0}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => goToAdjacentPresentationFrame(-1)}
+            disabled={!encounter || replayIndex === 0}
+          >
             Previous Frame
           </button>
           <button type="button" className="primary-button" onClick={() => setIsAutoplaying((value) => !value)} disabled={!encounter}>
@@ -314,7 +450,7 @@ export function PresentationReplay() {
           <button
             type="button"
             className="secondary-button"
-            onClick={() => goToFrame(replayIndex + 1)}
+            onClick={() => goToAdjacentPresentationFrame(1)}
             disabled={!encounter || replayIndex >= encounter.replayFrames.length - 1}
           >
             Next Frame
@@ -353,11 +489,11 @@ export function PresentationReplay() {
           onPlacementCellClick={() => undefined}
         />
 
-        <CurrentFramePanel currentFrame={currentFrame} />
+        <CurrentFramePanel currentFrame={displayCurrentFrame} />
       </section>
 
       <section className="grid-layout">
-        <UnitStatePanel orderedUnits={orderedUnits} />
+        <UnitStatePanel orderedUnits={displayOrderedUnits} />
         <TimelinePanel timelineEvents={timelineEvents} />
       </section>
     </main>
