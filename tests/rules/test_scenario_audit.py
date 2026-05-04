@@ -293,6 +293,14 @@ def test_frostfall_courtyard_scenario_definition_is_staged_without_expectations(
     assert definition.audit_expectation_ids == ()
 
 
+def test_frostfall_courtyard_variant_scenario_definition_is_staged_without_expectations() -> None:
+    definition = get_scenario_definition("frostfall_courtyard_variant")
+
+    assert definition.display_name == "Frostfall Courtyard Variant"
+    assert definition.enemy_preset_id == "frostfall_courtyard_variant"
+    assert definition.audit_expectation_ids == ()
+
+
 def test_audit_scenario_supports_staged_berserker_overrun() -> None:
     row = audit_scenario(
         "berserker_overrun",

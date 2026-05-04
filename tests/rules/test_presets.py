@@ -371,6 +371,37 @@ def test_frostfall_courtyard_boss_arrives_at_round_three() -> None:
     assert result.state.pending_enemy_arrivals == []
 
 
+def test_frostfall_courtyard_variant_uses_alternate_starting_layout() -> None:
+    encounter = create_encounter(
+        EncounterConfig(seed="frostfall-variant-layout", enemy_preset_id="frostfall_courtyard_variant")
+    )
+
+    assert {unit_id: unit.position.model_dump() for unit_id, unit in encounter.units.items()} == {
+        "F1": {"x": 4, "y": 12},
+        "F2": {"x": 1, "y": 11},
+        "F3": {"x": 1, "y": 8},
+        "F4": {"x": 5, "y": 11},
+        "E1": {"x": 12, "y": 1},
+        "E2": {"x": 12, "y": 2},
+        "E3": {"x": 12, "y": 3},
+        "E4": {"x": 12, "y": 4},
+        "E5": {"x": 13, "y": 4},
+        "E6": {"x": 14, "y": 4},
+        "E7": {"x": 15, "y": 5},
+        "E8": {"x": 13, "y": 3},
+        "E9": {"x": 14, "y": 2},
+        "E10": {"x": 15, "y": 1},
+        "E11": {"x": 15, "y": 3},
+        "E12": {"x": 13, "y": 1},
+        "E13": {"x": 14, "y": 1},
+        "E14": {"x": 15, "y": 2},
+        "E15": {"x": 4, "y": 15},
+        "E16": {"x": 3, "y": 15},
+    }
+    assert encounter.pending_enemy_arrivals[0].unit_id == "E17"
+    assert encounter.pending_enemy_arrivals[0].position.model_dump() == {"x": 9, "y": 8}
+
+
 def test_preset_layout_rejects_missing_active_unit() -> None:
     with pytest.raises(ValueError, match="Missing placements"):
         create_encounter(

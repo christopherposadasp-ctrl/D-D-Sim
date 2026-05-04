@@ -1,8 +1,8 @@
 import type { EncounterConfig, TerrainFeature } from '../shared/sim/types';
 
 export const PRESENTATION_REPLAY_CONFIG = {
-  seed: 'frostfall-heroic-0006',
-  enemyPresetId: 'frostfall_courtyard',
+  seed: 'frostfall-variant-0034',
+  enemyPresetId: 'frostfall_courtyard_variant',
   playerPresetId: 'martial_mixed_party',
   playerBehavior: 'smart',
   monsterBehavior: 'balanced',
@@ -11,12 +11,12 @@ export const PRESENTATION_REPLAY_CONFIG = {
 
 // When set, the presentation page loads this fixed replay instead of rerunning the backend.
 export const PRESENTATION_SAVED_REPLAY_URL =
-  '/presentation/frostfall_courtyard_party_victory_fireball_haste_seed_frostfall-heroic-0006.json';
+  '/presentation/frostfall_courtyard_variant_party_victory_fireball_haste_paladin_pickup_low_hp_seed_frostfall-variant-0034.json';
 
-export const PRESENTATION_SCENARIO_DISPLAY_NAME = 'Frostfall Courtyard';
+export const PRESENTATION_SCENARIO_DISPLAY_NAME = 'Frostfall Courtyard Variant';
 
 export const PRESENTATION_SCENARIO_DESCRIPTION =
-  'Kobolds draw the party into a frozen ruined courtyard before the white dragon boss descends through the storm.';
+  'A tuned alternate Frostfall Courtyard run where the party wins narrowly after the dragon descends into the frozen ruins.';
 
 export const PRESENTATION_TERRAIN_FEATURES = [
   {

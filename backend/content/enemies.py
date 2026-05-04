@@ -3993,6 +3993,45 @@ ENEMY_PRESETS: dict[str, EnemyPresetDefinition] = {
             ),
         ),
     ),
+    "frostfall_courtyard_variant": EnemyPresetDefinition(
+        preset_id="frostfall_courtyard_variant",
+        display_name="Frostfall Courtyard Variant",
+        description="A working copy of Frostfall Courtyard for tuning alternate kobold and dragon layouts.",
+        units=(
+            EnemyPresetUnit("E1", "kobold_warrior", GridPosition(x=12, y=1)),
+            EnemyPresetUnit("E2", "kobold_warrior", GridPosition(x=12, y=2)),
+            EnemyPresetUnit("E3", "kobold_warrior", GridPosition(x=12, y=3)),
+            EnemyPresetUnit("E4", "kobold_warrior", GridPosition(x=12, y=4)),
+            EnemyPresetUnit("E5", "kobold_warrior", GridPosition(x=13, y=4)),
+            EnemyPresetUnit("E6", "kobold_warrior", GridPosition(x=14, y=4)),
+            EnemyPresetUnit("E7", "kobold_warrior", GridPosition(x=15, y=5)),
+            EnemyPresetUnit("E8", "kobold_warrior", GridPosition(x=13, y=3)),
+            EnemyPresetUnit("E9", "kobold_scale_sorcerer", GridPosition(x=14, y=2)),
+            EnemyPresetUnit("E10", "kobold_scale_sorcerer", GridPosition(x=15, y=1)),
+            EnemyPresetUnit("E11", "kobold_warrior", GridPosition(x=15, y=3)),
+            EnemyPresetUnit("E12", "kobold_warrior", GridPosition(x=13, y=1)),
+            EnemyPresetUnit("E13", "kobold_dragonshield", GridPosition(x=14, y=1)),
+            EnemyPresetUnit("E14", "kobold_dragonshield", GridPosition(x=15, y=2)),
+            EnemyPresetUnit("E15", "kobold_dragonshield", GridPosition(x=4, y=15)),
+            EnemyPresetUnit("E16", "kobold_dragonshield", GridPosition(x=3, y=15)),
+        ),
+        terrain_features=build_frozen_courtyard_terrain_features(),
+        player_placements={
+            "F1": GridPosition(x=4, y=12),
+            "F2": GridPosition(x=1, y=11),
+            "F3": GridPosition(x=1, y=8),
+            "F4": GridPosition(x=5, y=11),
+        },
+        delayed_units=(
+            DelayedEnemyPresetUnit(
+                "E17",
+                "young_white_dragon_boss",
+                GridPosition(x=9, y=8),
+                arrival_round=3,
+                resource_pools={"opening_landing_uses": 0},
+            ),
+        ),
+    ),
 }
 
 BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (

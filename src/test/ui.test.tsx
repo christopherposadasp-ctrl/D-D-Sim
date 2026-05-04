@@ -2824,12 +2824,12 @@ describe('App', () => {
 
         if (
           requestUrl.endsWith(
-            '/presentation/frostfall_courtyard_party_victory_fireball_haste_seed_frostfall-heroic-0006.json',
+            '/presentation/frostfall_courtyard_variant_party_victory_fireball_haste_paladin_pickup_low_hp_seed_frostfall-variant-0034.json',
           )
         ) {
           const savedReplay = buildEncounterResult({
-            seed: 'frostfall-heroic-0006',
-            enemyPresetId: 'frostfall_courtyard',
+            seed: 'frostfall-variant-0034',
+            enemyPresetId: 'frostfall_courtyard_variant',
             playerPresetId: 'martial_mixed_party',
             playerBehavior: 'smart',
             monsterBehavior: 'balanced',
@@ -3116,10 +3116,10 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<PresentationReplay />);
 
-    expect(await screen.findByRole('heading', { name: /Frostfall Courtyard/i })).toBeInTheDocument();
-    expect(screen.getByText(/frostfall-heroic-0006/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Frostfall Courtyard Variant/i })).toBeInTheDocument();
+    expect(screen.getByText(/frostfall-variant-0034/i)).toBeInTheDocument();
     expect(await screen.findByText(/Party Victory/i)).toBeInTheDocument();
-    expect(screen.getByText(/Kobolds draw the party into a frozen ruined courtyard/i)).toBeInTheDocument();
+    expect(screen.getByText(/party wins narrowly after the dragon descends/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Smart/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Balanced/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Boromir the Fighter moves into range/i).length).toBeGreaterThan(0);

@@ -154,6 +154,13 @@ SCENARIO_DEFINITIONS: dict[str, ScenarioDefinition] = {
         enemy_preset_id="frostfall_courtyard",
         audit_expectation_ids=(),
     ),
+    "frostfall_courtyard_variant": ScenarioDefinition(
+        scenario_id="frostfall_courtyard_variant",
+        display_name="Frostfall Courtyard Variant",
+        description=ENEMY_PRESETS["frostfall_courtyard_variant"].description,
+        enemy_preset_id="frostfall_courtyard_variant",
+        audit_expectation_ids=(),
+    ),
 }
 
 ACTIVE_SCENARIO_IDS: tuple[str, ...] = ACTIVE_ENEMY_PRESET_IDS
