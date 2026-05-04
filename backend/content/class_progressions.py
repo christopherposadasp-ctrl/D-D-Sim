@@ -83,7 +83,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
     ): ClassProgressionDefinition(
         class_id="rogue",
         level=1,
-        feature_ids=("sneak_attack", "expertise_stealth"),
+        feature_ids=("sneak_attack", "expertise_stealth", "weapon_mastery"),
         resource_pools={},
         attack_count=1,
         feature_scalars={"sneak_attack_d6": 1},
@@ -94,7 +94,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
     ): ClassProgressionDefinition(
         class_id="rogue",
         level=2,
-        feature_ids=("sneak_attack", "expertise_stealth", "cunning_action"),
+        feature_ids=("sneak_attack", "expertise_stealth", "weapon_mastery", "cunning_action"),
         resource_pools={},
         attack_count=1,
         feature_scalars={"sneak_attack_d6": 1},
@@ -108,6 +108,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
         feature_ids=(
             "sneak_attack",
             "expertise_stealth",
+            "weapon_mastery",
             "cunning_action",
             "steady_aim",
             "assassinate",
@@ -126,6 +127,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
         feature_ids=(
             "sneak_attack",
             "expertise_stealth",
+            "weapon_mastery",
             "cunning_action",
             "steady_aim",
             "assassinate",
@@ -145,6 +147,7 @@ CLASS_PROGRESSIONS: dict[tuple[str, int], ClassProgressionDefinition] = {
         feature_ids=(
             "sneak_attack",
             "expertise_stealth",
+            "weapon_mastery",
             "cunning_action",
             "steady_aim",
             "assassinate",

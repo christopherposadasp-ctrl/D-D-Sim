@@ -230,6 +230,9 @@ player_weapons: dict[str, WeaponProfile] = {
     ),
 }
 
+rogue_vex_shortbow = player_weapons["shortbow"].model_copy(update={"mastery": "vex"}, deep=True)
+rogue_vex_rapier = player_weapons["rapier"].model_copy(update={"mastery": "vex"}, deep=True)
+
 fighter_level4_weapons: dict[str, WeaponProfile] = {
     "greatsword": player_weapons["greatsword"].model_copy(
         update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
@@ -283,7 +286,7 @@ paladin_level5_weapons: dict[str, WeaponProfile] = {
 }
 
 rogue_level4_weapons: dict[str, WeaponProfile] = {
-    "shortbow": player_weapons["shortbow"].model_copy(
+    "shortbow": rogue_vex_shortbow.model_copy(
         update={"attack_bonus": 6, "ability_modifier": 4, "damage_modifier": 4},
         deep=True,
     ),
@@ -476,9 +479,10 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         size_category="medium",
         footprint=medium_footprint,
         attacks={
-            "shortbow": player_weapons["shortbow"],
+            "shortbow": rogue_vex_shortbow,
             "shortsword": player_weapons["shortsword"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -499,9 +503,10 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         size_category="medium",
         footprint=medium_footprint,
         attacks={
-            "shortbow": player_weapons["shortbow"],
+            "shortbow": rogue_vex_shortbow,
             "shortsword": player_weapons["shortsword"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -522,9 +527,10 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         size_category="medium",
         footprint=medium_footprint,
         attacks={
-            "shortbow": player_weapons["shortbow"],
+            "shortbow": rogue_vex_shortbow,
             "shortsword": player_weapons["shortsword"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -548,6 +554,7 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
             "shortbow": rogue_level4_weapons["shortbow"],
             "shortsword": rogue_level4_weapons["shortsword"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -571,6 +578,7 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
             "shortbow": rogue_level5_weapons["shortbow"],
             "shortsword": rogue_level5_weapons["shortsword"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="shortsword",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -591,9 +599,10 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         size_category="medium",
         footprint=medium_footprint,
         attacks={
-            "rapier": player_weapons["rapier"],
+            "rapier": rogue_vex_rapier,
             "shortbow": player_weapons["shortbow"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="rapier",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -614,9 +623,10 @@ PLAYER_LOADOUTS: dict[str, PlayerLoadoutDefinition] = {
         size_category="medium",
         footprint=medium_footprint,
         attacks={
-            "rapier": player_weapons["rapier"],
+            "rapier": rogue_vex_rapier,
             "shortbow": player_weapons["shortbow"],
         },
+        extra_feature_ids=("weapon_mastery_vex",),
         default_melee_weapon_id="rapier",
         default_ranged_weapon_id="shortbow",
         medicine_modifier=1,
@@ -1037,9 +1047,10 @@ PLAYER_LOADOUTS.update(
             size_category="medium",
             footprint=medium_footprint,
             attacks={
-                "shortbow": player_weapons["shortbow"],
+                "shortbow": rogue_vex_shortbow,
                 "shortsword": player_weapons["shortsword"],
             },
+            extra_feature_ids=("weapon_mastery_vex",),
             default_melee_weapon_id="shortsword",
             default_ranged_weapon_id="shortbow",
             medicine_modifier=1,

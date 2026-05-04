@@ -871,6 +871,10 @@ def test_player_preset_selection_changes_loaded_party_builds() -> None:
     assert rogue.resources.handaxes == 0
     assert "sneak_attack" in rogue.feature_ids
     assert "expertise_stealth" in rogue.feature_ids
+    assert "weapon_mastery" in rogue.feature_ids
+    assert "weapon_mastery_vex" in rogue.feature_ids
+    assert rogue.attacks["rapier"].mastery == "vex"
+    assert rogue.attacks["shortbow"].mastery is None
     assert rogue.combat_skill_modifiers == {"stealth": 7}
 
 
@@ -890,7 +894,10 @@ def test_level2_rogue_ranged_build_uses_cunning_action_metadata() -> None:
     assert rogue.template_name == "Level 2 Ranged Rogue Sample Build"
     assert "sneak_attack" in rogue.feature_ids
     assert "expertise_stealth" in rogue.feature_ids
+    assert "weapon_mastery" in rogue.feature_ids
+    assert "weapon_mastery_vex" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
+    assert rogue.attacks["shortbow"].mastery == "vex"
     assert rogue.combat_skill_modifiers == {"stealth": 7}
 
 
@@ -910,7 +917,11 @@ def test_level2_rogue_melee_build_uses_cunning_action_metadata() -> None:
     assert rogue.template_name == "Level 2 Melee Rogue Sample Build"
     assert "sneak_attack" in rogue.feature_ids
     assert "expertise_stealth" in rogue.feature_ids
+    assert "weapon_mastery" in rogue.feature_ids
+    assert "weapon_mastery_vex" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
+    assert rogue.attacks["rapier"].mastery == "vex"
+    assert rogue.attacks["shortbow"].mastery is None
 
 
 def test_level3_ranged_assassin_rogue_build_uses_assassin_metadata() -> None:
@@ -932,10 +943,13 @@ def test_level3_ranged_assassin_rogue_build_uses_assassin_metadata() -> None:
     assert tuple(sorted(rogue.attacks.keys())) == ("shortbow", "shortsword")
     assert "sneak_attack" in rogue.feature_ids
     assert "expertise_stealth" in rogue.feature_ids
+    assert "weapon_mastery" in rogue.feature_ids
+    assert "weapon_mastery_vex" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
     assert "steady_aim" in rogue.feature_ids
     assert "assassinate" in rogue.feature_ids
     assert "assassin_tools" in rogue.feature_ids
+    assert rogue.attacks["shortbow"].mastery == "vex"
     assert unit_has_granted_bonus_action(rogue, "steady_aim") is True
     assert rogue.combat_skill_modifiers == {"stealth": 7}
 
@@ -964,11 +978,14 @@ def test_level4_ranged_assassin_rogue_build_uses_sharpshooter_metadata() -> None
     assert rogue.attacks["shortsword"].damage_modifier == 4
     assert "sneak_attack" in rogue.feature_ids
     assert "expertise_stealth" in rogue.feature_ids
+    assert "weapon_mastery" in rogue.feature_ids
+    assert "weapon_mastery_vex" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
     assert "steady_aim" in rogue.feature_ids
     assert "assassinate" in rogue.feature_ids
     assert "assassin_tools" in rogue.feature_ids
     assert "sharpshooter" in rogue.feature_ids
+    assert rogue.attacks["shortbow"].mastery == "vex"
     assert rogue.combat_skill_modifiers == {"stealth": 8}
 
 
@@ -996,6 +1013,8 @@ def test_level5_ranged_assassin_rogue_build_uses_cunning_strike_and_uncanny_dodg
     assert rogue.attacks["shortsword"].damage_modifier == 4
     assert "sneak_attack" in rogue.feature_ids
     assert "expertise_stealth" in rogue.feature_ids
+    assert "weapon_mastery" in rogue.feature_ids
+    assert "weapon_mastery_vex" in rogue.feature_ids
     assert "cunning_action" in rogue.feature_ids
     assert "steady_aim" in rogue.feature_ids
     assert "assassinate" in rogue.feature_ids
@@ -1003,6 +1022,7 @@ def test_level5_ranged_assassin_rogue_build_uses_cunning_strike_and_uncanny_dodg
     assert "sharpshooter" in rogue.feature_ids
     assert "cunning_strike" in rogue.feature_ids
     assert "uncanny_dodge" in rogue.feature_ids
+    assert rogue.attacks["shortbow"].mastery == "vex"
     assert unit_has_granted_cunning_strike(rogue, "poison") is True
     assert unit_has_granted_cunning_strike(rogue, "trip") is True
     assert unit_has_granted_cunning_strike(rogue, "withdraw") is True

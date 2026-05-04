@@ -6684,6 +6684,184 @@ def test_vex_expires_at_end_of_attackers_next_turn_if_unused() -> None:
     assert any(effect.kind == "vex" for effect in encounter.units["F1"].temporary_effects) is False
 
 
+def test_rogue_shortbow_vex_grants_advantage_and_enables_sneak_attack() -> None:
+    encounter = create_encounter(build_level2_rogue_config("rogue-shortbow-vex"))
+    defeat_other_enemies(encounter, "E4")
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F2"].position = GridPosition(x=1, y=5)
+    encounter.units["F3"].position = GridPosition(x=1, y=6)
+    encounter.units["E4"].position = GridPosition(x=5, y=1)
+    encounter.units["E4"].current_hp = 40
+
+    first_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[4]),
+        ),
+    )
+    second_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[4, 16], damage_rolls=[3], advantage_damage_rolls=[5]),
+        ),
+    )
+
+    assert first_attack.damage_details.mastery_applied == "vex"
+    assert second_attack.resolved_totals["attackMode"] == "advantage"
+    assert "vex" in second_attack.raw_rolls["advantageSources"]
+    assert any(component.damage_type == "precision" for component in second_attack.damage_details.damage_components)
+    assert "F1's vex advantage is consumed on this attack roll." in second_attack.condition_deltas
+
+
+def test_rogue_shortbow_vex_is_target_specific_and_consumed_on_miss() -> None:
+    encounter = create_encounter(build_level2_rogue_config("rogue-shortbow-vex-target-specific"))
+    defeat_other_enemies(encounter, "E4", "E5")
+    encounter.units["F1"].position = GridPosition(x=1, y=1)
+    encounter.units["F2"].position = GridPosition(x=1, y=5)
+    encounter.units["F3"].position = GridPosition(x=1, y=6)
+    encounter.units["E4"].position = GridPosition(x=5, y=1)
+    encounter.units["E5"].position = GridPosition(x=5, y=3)
+    encounter.units["E4"].current_hp = 40
+    encounter.units["E5"].current_hp = 40
+
+    resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[4]),
+        ),
+    )
+    different_target_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E5",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[2]),
+        ),
+    )
+    missed_vex_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="shortbow",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[2, 3]),
+        ),
+    )
+
+    assert different_target_attack.resolved_totals["attackMode"] == "normal"
+    assert "vex" not in different_target_attack.raw_rolls["advantageSources"]
+    assert missed_vex_attack.resolved_totals["attackMode"] == "advantage"
+    assert "vex" in missed_vex_attack.raw_rolls["advantageSources"]
+    assert missed_vex_attack.resolved_totals["hit"] is False
+    assert any(effect.kind == "vex" for effect in encounter.units["F1"].temporary_effects) is False
+
+
+def test_melee_rogue_rapier_vex_grants_advantage_and_enables_sneak_attack() -> None:
+    encounter = create_encounter(
+        build_level2_rogue_config("rogue-rapier-vex", player_preset_id="rogue_level2_melee_trio")
+    )
+    defeat_other_enemies(encounter, "E4")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=1, y=5)
+    encounter.units["F3"].position = GridPosition(x=1, y=6)
+    encounter.units["E4"].position = GridPosition(x=6, y=5)
+    encounter.units["E4"].current_hp = 40
+
+    first_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="rapier",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[4]),
+        ),
+    )
+    second_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="rapier",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[4, 16], damage_rolls=[3], advantage_damage_rolls=[5]),
+        ),
+    )
+
+    assert first_attack.damage_details.mastery_applied == "vex"
+    assert second_attack.resolved_totals["attackMode"] == "advantage"
+    assert "vex" in second_attack.raw_rolls["advantageSources"]
+    assert any(component.damage_type == "precision" for component in second_attack.damage_details.damage_components)
+    assert "F1's vex advantage is consumed on this attack roll." in second_attack.condition_deltas
+
+
+def test_melee_rogue_rapier_vex_is_target_specific_and_consumed_on_miss() -> None:
+    encounter = create_encounter(
+        build_level2_rogue_config("rogue-rapier-vex-target-specific", player_preset_id="rogue_level2_melee_trio")
+    )
+    defeat_other_enemies(encounter, "E4", "E5")
+    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["F2"].position = GridPosition(x=1, y=5)
+    encounter.units["F3"].position = GridPosition(x=1, y=6)
+    encounter.units["E4"].position = GridPosition(x=6, y=5)
+    encounter.units["E5"].position = GridPosition(x=5, y=6)
+    encounter.units["E4"].current_hp = 40
+    encounter.units["E5"].current_hp = 40
+
+    resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="rapier",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[14], damage_rolls=[4]),
+        ),
+    )
+    different_target_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E5",
+            weapon_id="rapier",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[2]),
+        ),
+    )
+    missed_vex_attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="F1",
+            target_id="E4",
+            weapon_id="rapier",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[2, 3]),
+        ),
+    )
+
+    assert different_target_attack.resolved_totals["attackMode"] == "normal"
+    assert "vex" not in different_target_attack.raw_rolls["advantageSources"]
+    assert missed_vex_attack.resolved_totals["attackMode"] == "advantage"
+    assert "vex" in missed_vex_attack.raw_rolls["advantageSources"]
+    assert missed_vex_attack.resolved_totals["hit"] is False
+    assert any(effect.kind == "vex" for effect in encounter.units["F1"].temporary_effects) is False
+
+
 def test_rage_bonus_action_can_extend_an_existing_rage() -> None:
     encounter = create_encounter(build_barbarian_config("barbarian-rage-upkeep"))
     resolve_bonus_action(encounter, "F1", {"kind": "rage", "timing": "before_action"})
