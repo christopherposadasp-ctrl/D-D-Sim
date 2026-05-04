@@ -152,6 +152,55 @@ def build_batch_run_plan(batch_size: int, monster_behavior: str) -> tuple[tuple[
     return tuple((behavior, runs_by_behavior[behavior]) for behavior in ("kind", "balanced", "evil") if runs_by_behavior[behavior] > 0)
 
 
+def build_batch_execution_details(
+    batch_plan: tuple[tuple[str, int], ...],
+    force_serial: bool,
+    worker_count: int | None,
+) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    for monster_behavior, run_count in batch_plan:
+        execution_plan = resolve_batch_execution_plan(
+            run_count,
+            force_serial=force_serial,
+            worker_count=worker_count,
+        )
+        details.append(
+            {
+                "monsterBehavior": monster_behavior,
+                "runCount": run_count,
+                "executionMode": execution_plan.execution_mode,
+                "workerCount": execution_plan.worker_count,
+            }
+        )
+    return details
+
+
+def summarize_execution_details(execution_details: list[dict[str, Any]]) -> tuple[str, int]:
+    if not execution_details:
+        return "serial", 1
+
+    execution_modes = {str(detail["executionMode"]) for detail in execution_details}
+    worker_count = max(int(detail["workerCount"]) for detail in execution_details)
+    execution_mode = execution_modes.pop() if len(execution_modes) == 1 else "mixed"
+    return execution_mode, worker_count
+
+
+def summarize_batch_rows_execution(batch_rows: list[dict[str, Any]]) -> tuple[str, int]:
+    execution_details: list[dict[str, Any]] = []
+    for row in batch_rows:
+        row_details = row.get("executionDetails")
+        if row_details:
+            execution_details.extend(row_details)
+        else:
+            execution_details.append(
+                {
+                    "executionMode": row.get("executionMode", "serial"),
+                    "workerCount": row.get("workerCount", 1),
+                }
+            )
+    return summarize_execution_details(execution_details)
+
+
 def weighted_average(weighted_values: list[tuple[int | float | None, int]]) -> int | float | None:
     total_weight = sum(weight for _, weight in weighted_values if weight > 0)
     if total_weight <= 0:
@@ -385,7 +434,9 @@ def batch_summary_to_row(
     elapsed_seconds: float,
     execution_mode: str,
     worker_count: int,
+    execution_details: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    details_by_behavior = {detail["monsterBehavior"]: detail for detail in execution_details}
     behavior_breakdown = [
         {
             "monsterBehavior": combination.monster_behavior,
@@ -399,6 +450,8 @@ def batch_summary_to_row(
             "dumbRunCount": combination.dumb_run_count,
             "averageRounds": combination.average_rounds,
             "averagePartyDead": combination.average_fighter_deaths,
+            "executionMode": details_by_behavior.get(combination.monster_behavior, {}).get("executionMode"),
+            "workerCount": details_by_behavior.get(combination.monster_behavior, {}).get("workerCount"),
         }
         for combination in (summary.combination_summaries or [])
     ]
@@ -419,6 +472,7 @@ def batch_summary_to_row(
         "averagePartyDead": summary.average_fighter_deaths,
         "executionMode": execution_mode,
         "workerCount": worker_count,
+        "executionDetails": execution_details,
         "elapsedSeconds": round(elapsed_seconds, 3),
         "status": "pass" if summary.total_runs > 0 else "fail",
         "behaviorBreakdown": behavior_breakdown,
@@ -443,11 +497,20 @@ def run_batch_health(
         seed = f"party-validation-{player_preset_id}-{scenario_id}-batch"
         batch_plan = build_batch_run_plan(batch_size, monster_behavior)
         total_runs = sum(run_count for _, run_count in batch_plan)
-        execution_plan = resolve_batch_execution_plan(total_runs, force_serial=force_serial, worker_count=worker_count)
-        print(
-            f"[{scenario_id}] batch health: {total_runs} run(s), "
-            f"{execution_plan.execution_mode}, {execution_plan.worker_count} worker(s)"
-        )
+        execution_details = build_batch_execution_details(batch_plan, force_serial, worker_count)
+        execution_mode, resolved_worker_count = summarize_execution_details(execution_details)
+        if len(execution_details) == 1:
+            print(
+                f"[{scenario_id}] batch health: {total_runs} run(s), "
+                f"{execution_mode}, {resolved_worker_count} worker(s)"
+            )
+        else:
+            print(f"[{scenario_id}] batch health: {total_runs} run(s), {monster_behavior} split")
+            for detail in execution_details:
+                print(
+                    f"  - {detail['monsterBehavior']}: {detail['runCount']} run(s), "
+                    f"{detail['executionMode']}, {detail['workerCount']} worker(s)"
+                )
         start_time = time.perf_counter()
         sub_summaries: list[BatchSummary] = []
         for sub_behavior, sub_batch_size in batch_plan:
@@ -473,8 +536,9 @@ def run_batch_health(
             scenario_id,
             summary,
             elapsed_seconds,
-            execution_plan.execution_mode,
-            execution_plan.worker_count,
+            execution_mode,
+            resolved_worker_count,
+            execution_details,
         )
         rows.append(row)
         if row["status"] == "fail":
@@ -593,8 +657,8 @@ def format_markdown_report(payload: dict[str, Any]) -> str:
             "",
             "## Batch Health",
             "",
-            "| scenarioId | playerWinRate | enemyWinRate | smart | dumb | avgRounds | elapsedSeconds | status |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| scenarioId | playerWinRate | enemyWinRate | smart | dumb | avgRounds | execution | elapsedSeconds | status |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
         ]
     )
     for row in payload["batchRows"]:
@@ -602,6 +666,7 @@ def format_markdown_report(payload: dict[str, Any]) -> str:
             f"| `{row['scenarioId']}` | {format_rate(row['playerWinRate'])} | "
             f"{format_rate(row['enemyWinRate'])} | {format_rate(row['smartPlayerWinRate'])} | "
             f"{format_rate(row['dumbPlayerWinRate'])} | {row['averageRounds']} | "
+            f"`{row['executionMode']}`, {row['workerCount']} worker(s) | "
             f"{row['elapsedSeconds']} | `{row['status']}` |"
         )
 
@@ -657,7 +722,8 @@ def format_console_summary(payload: dict[str, Any]) -> str:
             f"smart {format_rate(row['smartPlayerWinRate'])}, "
             f"dumb {format_rate(row['dumbPlayerWinRate'])}, "
             f"avg rounds {row['averageRounds']}, "
-            f"avg party dead {row['averagePartyDead']}"
+            f"avg party dead {row['averagePartyDead']}, "
+            f"execution {row['executionMode']}, {row['workerCount']} worker(s)"
         )
         for breakdown in row.get("behaviorBreakdown", []):
             lines.append(
@@ -667,7 +733,9 @@ def format_console_summary(payload: dict[str, Any]) -> str:
                 f"players {format_rate(breakdown['playerWinRate'])}, "
                 f"enemies {format_rate(breakdown['enemyWinRate'])}, "
                 f"avg rounds {breakdown['averageRounds']}, "
-                f"avg party dead {breakdown['averagePartyDead']}"
+                f"avg party dead {breakdown['averagePartyDead']}, "
+                f"execution {breakdown.get('executionMode', 'unknown')}, "
+                f"{breakdown.get('workerCount', '?')} worker(s)"
             )
 
     return "\n".join(lines)
@@ -689,11 +757,6 @@ def main() -> None:
         remainder_percent=args.lay_on_hands_remainder_percent,
     )
     total_runs = args.batch_size * len(scenario_ids)
-    execution_plan = resolve_batch_execution_plan(
-        args.batch_size,
-        force_serial=args.serial,
-        worker_count=args.workers,
-    )
 
     print(
         f"Running party validation for {args.player_preset} across {len(scenario_ids)} scenario(s): "
@@ -725,13 +788,14 @@ def main() -> None:
     )
     feature_evidence = build_feature_evidence(replay_results)
     issue_list = [*replay_issues, *batch_issues, *collect_feature_issues(feature_evidence)]
+    execution_mode, worker_count = summarize_batch_rows_execution(batch_rows)
 
     payload = build_report_payload(
         player_preset_id=args.player_preset,
         scenario_ids=scenario_ids,
         batch_size=args.batch_size,
-        execution_mode=execution_plan.execution_mode,
-        worker_count=execution_plan.worker_count,
+        execution_mode=execution_mode,
+        worker_count=worker_count,
         total_runs=total_runs,
         elapsed_seconds=batch_elapsed_seconds,
         rules_gate=rules_gate,

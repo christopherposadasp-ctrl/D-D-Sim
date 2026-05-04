@@ -60,6 +60,22 @@ def test_party_validation_combined_batch_plan_preserves_requested_total_runs() -
     assert run_party_validation.build_batch_run_plan(300, "balanced") == (("balanced", 300),)
 
 
+def test_party_validation_reports_actual_combined_sub_batch_execution() -> None:
+    batch_plan = run_party_validation.build_batch_run_plan(100, "combined")
+    execution_details = run_party_validation.build_batch_execution_details(
+        batch_plan,
+        force_serial=False,
+        worker_count=None,
+    )
+
+    assert execution_details == [
+        {"monsterBehavior": "kind", "runCount": 33, "executionMode": "serial", "workerCount": 1},
+        {"monsterBehavior": "balanced", "runCount": 34, "executionMode": "serial", "workerCount": 1},
+        {"monsterBehavior": "evil", "runCount": 33, "executionMode": "serial", "workerCount": 1},
+    ]
+    assert run_party_validation.summarize_execution_details(execution_details) == ("serial", 1)
+
+
 def test_party_validation_report_shape_is_stable(monkeypatch) -> None:
     monkeypatch.setattr(
         run_party_validation,
@@ -297,7 +313,15 @@ def test_batch_health_splits_combined_totals_evenly(monkeypatch) -> None:
     assert calls == [("kind", 100), ("balanced", 100), ("evil", 100)]
     assert rows[0]["monsterBehavior"] == "combined"
     assert rows[0]["totalRuns"] == 300
+    assert rows[0]["executionMode"] == "serial"
+    assert rows[0]["workerCount"] == 1
+    assert rows[0]["executionDetails"] == [
+        {"monsterBehavior": "kind", "runCount": 100, "executionMode": "serial", "workerCount": 1},
+        {"monsterBehavior": "balanced", "runCount": 100, "executionMode": "serial", "workerCount": 1},
+        {"monsterBehavior": "evil", "runCount": 100, "executionMode": "serial", "workerCount": 1},
+    ]
     assert [entry["monsterBehavior"] for entry in rows[0]["behaviorBreakdown"]] == ["kind", "balanced", "evil"]
+    assert [entry["executionMode"] for entry in rows[0]["behaviorBreakdown"]] == ["serial", "serial", "serial"]
     assert issues == []
 
 
