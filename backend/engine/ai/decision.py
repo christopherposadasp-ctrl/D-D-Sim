@@ -17,6 +17,8 @@ from backend.content.player_loadouts import get_player_primary_melee_weapon_id, 
 from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     DragonBreathActionDefinition,
+    SINGLE_TARGET_SAVE_DAMAGE_ACTIONS,
+    SingleTargetSaveDamageActionDefinition,
 )
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.ai.profiles import get_monster_ai_profile
@@ -1407,6 +1409,9 @@ def get_attack_mode_for_context(
 
     if attacker.faction == "goblins" and unit_is_bloodied(attacker) and unit_has_trait(attacker, "bloodied_frenzy"):
         advantage_sources.append("bloodied_frenzy")
+
+    if attacker.faction == "goblins" and unit_is_bloodied(attacker) and unit_has_trait(attacker, "bloodied_fury"):
+        advantage_sources.append("bloodied_fury")
 
     if unit_has_reckless_attack_effect(attacker) and weapon.attack_ability == "str":
         advantage_sources.append("reckless_attack")
@@ -5887,6 +5892,67 @@ def get_line_holder_decision(state: EncounterState, actor: UnitState) -> TurnDec
     return TurnDecision(action={"kind": "skip", "reason": "No legal movement remains."})
 
 
+def get_available_single_target_save_damage_action(
+    actor: UnitState,
+) -> SingleTargetSaveDamageActionDefinition | None:
+    try:
+        definition = get_monster_definition_for_unit(actor)
+    except ValueError:
+        return None
+    for action_id in definition.special_action_ids:
+        action = SINGLE_TARGET_SAVE_DAMAGE_ACTIONS.get(action_id)
+        if action:
+            return action
+    return None
+
+
+def single_target_save_damage_action_can_target(
+    state: EncounterState,
+    actor: UnitState,
+    target: UnitState,
+    action: SingleTargetSaveDamageActionDefinition,
+) -> bool:
+    if not actor.position or not target.position:
+        return False
+    distance = get_min_chebyshev_distance_between_footprints(
+        actor.position,
+        get_unit_footprint(actor),
+        target.position,
+        get_unit_footprint(target),
+    )
+    return distance <= action.range_squares
+
+
+def get_single_target_save_damage_decision(state: EncounterState, actor: UnitState) -> TurnDecision | None:
+    action = get_available_single_target_save_damage_action(actor)
+    if not action:
+        return None
+
+    conscious_targets = get_conscious_fighter_targets(state)
+    conscious_target_ids = {target.id for target in conscious_targets}
+    prioritized_targets = get_ranked_attack_targets(state, actor)
+    melee_weapon_id = get_enemy_melee_weapon_id(actor)
+    adjacent_conscious = get_adjacent_conscious_fighters(state, actor)
+    if adjacent_conscious:
+        adjacent_target_ids = {unit.id for unit in adjacent_conscious}
+        adjacent_prioritized_targets = [target for target in prioritized_targets if target.id in adjacent_target_ids]
+        if adjacent_prioritized_targets:
+            commit_to_melee(actor)
+            return TurnDecision(
+                action={"kind": "attack", "target_id": adjacent_prioritized_targets[0].id, "weapon_id": melee_weapon_id}
+            )
+
+    for target in prioritized_targets:
+        if target.id not in conscious_target_ids:
+            continue
+        if single_target_save_damage_action_can_target(state, actor, target, action):
+            return TurnDecision(
+                action={"kind": "special_action", "action_id": action.action_id, "target_id": target.id}
+            )
+
+    return None
+
+
 def sort_pack_hunter_targets(state: EncounterState, actor: UnitState, units: list[UnitState]) -> list[UnitState]:
     if state.monster_behavior == "kind":
         return sort_kind_targets(state, actor, units)
@@ -6777,7 +6843,13 @@ def choose_turn_decision(state: EncounterState, actor_id: str) -> TurnDecision:
     if monster_profile.profile_id == "pack_hunter":
         return get_pack_hunter_decision(state, actor)
 
+    single_target_save_damage_decision = get_single_target_save_damage_decision(state, actor)
+    if single_target_save_damage_decision:
+        return single_target_save_damage_decision
+
     if uses_ranged_monster_ai(actor):
+        if get_optional_enemy_ranged_weapon_id(actor) is None:
+            return get_enemy_melee_decision(state, actor)
         if is_committed_to_melee(actor):
             return get_enemy_melee_decision(state, actor)
         return get_enemy_ranged_decision(state, actor)

@@ -25,6 +25,7 @@ from backend.engine.combat.engine import (
     resolve_legendary_freezing_burst,
     resolve_legendary_frightful_presence,
     resolve_scorching_ray,
+    resolve_special_action_events,
 )
 from backend.engine.models.state import (
     CommandedEffect,
@@ -75,6 +76,8 @@ FIXED_ATTACK_CASES = (
     ("crab", "claw", [], ["bludgeoning"], [1]),
     ("baboon", "bite", [3], ["piercing"], [2]),
     ("grimlock", "bone_cudgel", [4, 3], ["bludgeoning", "psychic"], [7, 3]),
+    ("satyr", "hooves", [2], ["bludgeoning"], [5]),
+    ("boar", "gore", [4], ["piercing"], [5]),
     ("tough", "heavy_crossbow", [5], ["piercing"], [6]),
     ("tough", "mace", [4], ["bludgeoning"], [6]),
     ("axe_beak", "beak", [5], ["slashing"], [7]),
@@ -256,6 +259,164 @@ def test_remaining_monster_attack_math_with_fixed_rolls(
         assert attack.resolved_totals["attackMode"] == "advantage"
         assert attack.raw_rolls["attackRolls"] == attack_rolls
         assert "aura_of_authority" in attack.raw_rolls["advantageSources"]
+
+
+def test_satyr_uses_mockery_at_range_and_hooves_when_adjacent() -> None:
+    ranged_encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(ranged_encounter, "E1", "F1")
+    ranged_encounter.units["E1"].position = GridPosition(x=12, y=5)
+    ranged_encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    ranged_decision = choose_turn_decision(ranged_encounter, "E1")
+
+    assert ranged_decision.action == {"kind": "special_action", "action_id": "mockery", "target_id": "F1"}
+
+    melee_encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(melee_encounter, "E1", "F1")
+    melee_encounter.units["E1"].position = GridPosition(x=8, y=5)
+    melee_encounter.units["F1"].position = GridPosition(x=7, y=5)
+
+    melee_decision = choose_turn_decision(melee_encounter, "E1")
+
+    assert melee_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "hooves"}
+
+
+def test_satyr_mockery_failed_save_deals_fixed_psychic_damage_and_success_deals_none() -> None:
+    failed_encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(failed_encounter, "E1", "F1")
+    failed_encounter.units["E1"].position = GridPosition(x=12, y=5)
+    failed_encounter.units["F1"].position = GridPosition(x=7, y=5)
+    starting_hp = failed_encounter.units["F1"].current_hp
+
+    failed_events = resolve_special_action_events(
+        failed_encounter,
+        "E1",
+        {"kind": "special_action", "action_id": "mockery", "target_id": "F1"},
+        overrides=AttackRollOverrides(save_rolls=[1], damage_rolls=[4]),
+    )
+    failed_attacks = enemy_attack_events(failed_events)
+
+    assert [event.event_type for event in failed_events[:2]] == ["phase_change", "saving_throw"]
+    assert failed_events[1].resolved_totals["success"] is False
+    assert failed_attacks[0].damage_details.weapon_id == "mockery"
+    assert failed_attacks[0].damage_details.damage_components[0].damage_type == "psychic"
+    assert failed_attacks[0].damage_details.total_damage == 6
+    assert failed_encounter.units["F1"].current_hp == starting_hp - 6
+
+    success_encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(success_encounter, "E1", "F1")
+    success_encounter.units["E1"].position = GridPosition(x=12, y=5)
+    success_encounter.units["F1"].position = GridPosition(x=7, y=5)
+    starting_hp = success_encounter.units["F1"].current_hp
+
+    success_events = resolve_special_action_events(
+        success_encounter,
+        "E1",
+        {"kind": "special_action", "action_id": "mockery", "target_id": "F1"},
+        overrides=AttackRollOverrides(save_rolls=[18], damage_rolls=[4]),
+    )
+
+    assert success_events[1].resolved_totals["success"] is True
+    assert enemy_attack_events(success_events) == []
+    assert success_encounter.units["F1"].current_hp == starting_hp
+
+
+def test_satyr_hooves_pushes_medium_targets_but_not_large_targets() -> None:
+    encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=5, y=5)
+    encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    attack, _ = resolve_attack(
+        encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="hooves",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[2]),
+        ),
+    )
+
+    assert attack.damage_details.attack_riders_applied == ["push_away_on_hit"]
+    assert encounter.units["F1"].position == GridPosition(x=8, y=5)
+    assert "F1 is pushed 10 feet away from E1." in attack.condition_deltas
+
+    large_encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(large_encounter, "E1", "F1")
+    large_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    large_encounter.units["F1"].position = GridPosition(x=6, y=5)
+    large_encounter.units["F1"].size_category = "large"
+    large_encounter.units["F1"].footprint = Footprint(width=2, height=2)
+
+    large_attack, _ = resolve_attack(
+        large_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="hooves",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[2]),
+        ),
+    )
+
+    assert large_attack.damage_details.attack_riders_applied is None
+    assert large_encounter.units["F1"].position == GridPosition(x=6, y=5)
+
+
+def test_boar_bloodied_fury_grants_attack_advantage_but_not_save_advantage() -> None:
+    normal_encounter = build_monster_benchmark_encounter("boar")
+    defeat_other_units(normal_encounter, "E1", "F1")
+    normal_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    normal_encounter.units["F1"].position = GridPosition(x=6, y=5)
+
+    normal_attack, _ = resolve_attack(
+        normal_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="gore",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[18], damage_rolls=[4]),
+        ),
+    )
+
+    assert normal_attack.resolved_totals["attackMode"] == "normal"
+    assert "bloodied_fury" not in normal_attack.raw_rolls["advantageSources"]
+
+    bloodied_encounter = build_monster_benchmark_encounter("boar")
+    defeat_other_units(bloodied_encounter, "E1", "F1")
+    bloodied_encounter.units["E1"].position = GridPosition(x=5, y=5)
+    bloodied_encounter.units["F1"].position = GridPosition(x=6, y=5)
+    bloodied_encounter.units["E1"].current_hp = bloodied_encounter.units["E1"].max_hp // 2
+
+    bloodied_attack, _ = resolve_attack(
+        bloodied_encounter,
+        ResolveAttackArgs(
+            attacker_id="E1",
+            target_id="F1",
+            weapon_id="gore",
+            savage_attacker_available=False,
+            overrides=AttackRollOverrides(attack_rolls=[3, 18], damage_rolls=[4]),
+        ),
+    )
+    save_event = resolve_saving_throw(
+        bloodied_encounter,
+        ResolveSavingThrowArgs(
+            actor_id="E1",
+            ability="wis",
+            dc=12,
+            reason="Bloodied Fury save regression",
+            overrides=SavingThrowOverrides(save_rolls=[3, 18]),
+        ),
+    )
+
+    assert bloodied_attack.resolved_totals["attackMode"] == "advantage"
+    assert bloodied_attack.raw_rolls["attackRolls"] == [3, 18]
+    assert "bloodied_fury" in bloodied_attack.raw_rolls["advantageSources"]
+    assert save_event.resolved_totals["saveMode"] == "normal"
+    assert save_event.raw_rolls["savingThrowRolls"] == [3]
+    assert "bloodied_fury" not in save_event.raw_rolls["advantageSources"]
 
 
 def test_hobgoblin_captain_aura_grants_self_attack_advantage() -> None:
@@ -607,8 +768,8 @@ def test_kobold_dragonshield_uses_spear_in_melee_multiattack() -> None:
 def test_kobold_dragonshield_uses_thrown_spear_when_melee_unreachable() -> None:
     encounter = build_monster_benchmark_encounter("kobold_dragonshield")
     defeat_other_units(encounter, "E1", "F1")
-    encounter.units["E1"].position = GridPosition(x=9, y=5)
-    encounter.units["F1"].position = GridPosition(x=5, y=5)
+    encounter.units["E1"].position = GridPosition(x=10, y=5)
+    encounter.units["F1"].position = GridPosition(x=3, y=5)
     encounter.units["F1"].max_hp = 100
     encounter.units["F1"].current_hp = 100
 
@@ -3883,6 +4044,13 @@ def test_ranged_skirmishers_open_with_ranged_weapon_on_clean_shot(variant_id: st
 
     decision, events = run_actor_turn(encounter, "E1")
     attacks = enemy_attack_events(events)
+
+    if expectation.opening_weapon_id in expectation.special_action_ids:
+        assert decision.action == {"kind": "special_action", "action_id": expectation.opening_weapon_id, "target_id": "F1"}
+        assert any(event.event_type == "saving_throw" for event in events)
+        if attacks:
+            assert attacks[0].damage_details.weapon_id == expectation.opening_weapon_id
+        return
 
     assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": expectation.opening_weapon_id}
     weapon_ids = [event.damage_details.weapon_id for event in attacks]

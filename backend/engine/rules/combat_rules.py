@@ -46,6 +46,7 @@ from backend.engine.models.state import (
     HiddenEffect,
     MasteryType,
     MovementDetails,
+    OnHitEffect,
     PoisonedEffect,
     RageEffect,
     RecklessAttackEffect,
@@ -91,14 +92,17 @@ from backend.engine.rules.spatial import (
     build_position_index,
     can_attempt_hide_from_position,
     chebyshev_distance,
+    get_blocking_terrain_features_for_position,
     get_attack_context,
     get_hide_passive_perception_dc,
     get_line_squares,
     get_min_chebyshev_distance_between_footprints,
+    get_occupants_for_position,
     get_occupied_squares_for_position,
     get_unit_footprint,
     has_line_of_sight_between_units,
     is_active_grapple,
+    is_within_bounds,
 )
 from backend.engine.utils.helpers import unit_can_take_reactions, unit_sort_key
 from backend.engine.utils.rng import roll_die
@@ -2515,6 +2519,56 @@ def is_within_max_target_size(target_size: str, max_target_size: str | None) -> 
     return size_order[target_size] <= size_order[max_target_size]
 
 
+def sign(value: int) -> int:
+    if value > 0:
+        return 1
+    if value < 0:
+        return -1
+    return 0
+
+
+def apply_push_away_on_hit(
+    state: EncounterState,
+    attacker_id: str,
+    target_id: str,
+    effect: OnHitEffect,
+) -> tuple[bool, str | None]:
+    attacker = state.units[attacker_id]
+    target = state.units[target_id]
+    if target.conditions.dead or target.current_hp <= 0 or target.conditions.unconscious:
+        return False, None
+    if not is_within_max_target_size(target.size_category, effect.max_target_size):
+        return False, None
+    if not attacker.position or not target.position:
+        return False, None
+
+    delta_x = sign(target.position.x - attacker.position.x)
+    delta_y = sign(target.position.y - attacker.position.y)
+    if delta_x == 0 and delta_y == 0:
+        return False, None
+
+    distance_squares = effect.distance_squares or 1
+    current = target.position
+    moved_squares = 0
+    for _ in range(distance_squares):
+        candidate = GridPosition(x=current.x + delta_x, y=current.y + delta_y)
+        if not is_within_bounds(candidate, get_unit_footprint(target)):
+            break
+        position_index = build_position_index(state)
+        if get_blocking_terrain_features_for_position(state, candidate, get_unit_footprint(target), position_index):
+            break
+        if get_occupants_for_position(state, candidate, get_unit_footprint(target), [target_id], position_index):
+            break
+        current = candidate
+        moved_squares += 1
+
+    if moved_squares == 0:
+        return False, None
+
+    target.position = current
+    return True, f"{target_id} is pushed {moved_squares * 5} feet away from {attacker_id}."
+
+
 def apply_on_hit_effects(
     state: EncounterState,
     attacker_id: str,
@@ -2598,6 +2652,14 @@ def apply_on_hit_effects(
             condition_deltas.append(
                 f"{target_id} is harried by {attacker_id}; the next attack roll against it has advantage."
             )
+            continue
+
+        if effect.kind == "push_away_on_hit":
+            pushed, delta = apply_push_away_on_hit(state, attacker_id, target_id, effect)
+            if pushed:
+                applied_riders.append("push_away_on_hit")
+                if delta:
+                    condition_deltas.append(delta)
 
     return applied_riders, condition_deltas
 
@@ -3145,6 +3207,9 @@ def get_attack_mode(
 
     if attacker.faction == "goblins" and unit_has_trait(attacker, "bloodied_frenzy") and unit_is_bloodied(attacker):
         advantage_sources.append("bloodied_frenzy")
+
+    if attacker.faction == "goblins" and unit_has_trait(attacker, "bloodied_fury") and unit_is_bloodied(attacker):
+        advantage_sources.append("bloodied_fury")
 
     if "aura_of_authority" not in advantage_sources and unit_benefits_from_aura_of_authority(state, attacker):
         advantage_sources.append("aura_of_authority")
