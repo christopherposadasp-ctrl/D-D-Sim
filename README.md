@@ -66,6 +66,7 @@ The working roadmap and design decisions are tracked in:
 - [docs/V4_ARCHITECTURE.md](docs/V4_ARCHITECTURE.md)
 - [docs/CONTENT_BACKLOG.md](docs/CONTENT_BACKLOG.md)
 - [docs/PLAYER_CLASS_IMPLEMENTATION.md](docs/PLAYER_CLASS_IMPLEMENTATION.md)
+- [docs/TECHNICAL_PAPER_SOURCE_GUIDE.md](docs/TECHNICAL_PAPER_SOURCE_GUIDE.md)
 
 ## Repository Layout
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import subprocess
 import sys
 import time
@@ -49,6 +51,29 @@ DEFAULT_REPLAY_SMOKE_RUNS = 2
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "party_validation"
 DEFAULT_JSON_PATH = DEFAULT_REPORT_DIR / "party_validation_latest.json"
 DEFAULT_MARKDOWN_PATH = DEFAULT_REPORT_DIR / "party_validation_latest.md"
+DEFAULT_CSV_PATH = DEFAULT_REPORT_DIR / "party_validation_latest.csv"
+SUMMARY_TABLE_HEADERS = (
+    "Scenario",
+    "Players",
+    "Enemies",
+    "Smart",
+    "Dumb",
+    "Kind Players",
+    "Kind Enemies",
+    "Kind Smart",
+    "Kind Dumb",
+    "Balanced Players",
+    "Balanced Enemies",
+    "Balanced Smart",
+    "Balanced Dumb",
+    "Evil Players",
+    "Evil Enemies",
+    "Evil Smart",
+    "Evil Dumb",
+    "Avg Rounds",
+    "Avg Party Dead",
+)
+DM_BEHAVIORS = ("kind", "balanced", "evil")
 RULES_GATE_TARGETS = (
     "tests/rules/test_player_framework.py",
     "tests/rules/test_ai.py",
@@ -89,6 +114,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Print the final JSON payload to stdout.")
     parser.add_argument("--json-path", type=Path, default=DEFAULT_JSON_PATH, help="Write the JSON report here.")
     parser.add_argument("--markdown-path", type=Path, default=DEFAULT_MARKDOWN_PATH, help="Write the Markdown report here.")
+    parser.add_argument("--csv-path", type=Path, default=DEFAULT_CSV_PATH, help="Write the summary CSV report here.")
     parser.add_argument(
         "--lay-on-hands-downed-percent",
         type=int,
@@ -622,6 +648,71 @@ def format_rate(value: object) -> str:
     return "-"
 
 
+def format_decimal(value: object) -> str:
+    if isinstance(value, int | float):
+        return f"{float(value):.2f}"
+    return "-"
+
+
+def behavior_breakdown_by_dm_style(row: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    breakdown_by_behavior = {
+        str(breakdown["monsterBehavior"]): breakdown
+        for breakdown in row.get("behaviorBreakdown", [])
+    }
+    monster_behavior = str(row.get("monsterBehavior", ""))
+    if monster_behavior in DM_BEHAVIORS and monster_behavior not in breakdown_by_behavior:
+        breakdown_by_behavior[monster_behavior] = row
+    return breakdown_by_behavior
+
+
+def build_batch_summary_table_rows(payload: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for row in payload.get("batchRows", []):
+        breakdown_by_behavior = behavior_breakdown_by_dm_style(row)
+        display_row = {
+            "Scenario": str(row["scenarioId"]),
+            "Players": format_rate(row["playerWinRate"]),
+            "Enemies": format_rate(row["enemyWinRate"]),
+            "Smart": format_rate(row["smartPlayerWinRate"]),
+            "Dumb": format_rate(row["dumbPlayerWinRate"]),
+            "Avg Rounds": format_decimal(row["averageRounds"]),
+            "Avg Party Dead": format_decimal(row["averagePartyDead"]),
+        }
+        for behavior in DM_BEHAVIORS:
+            breakdown = breakdown_by_behavior.get(behavior, {})
+            label = "Balanced" if behavior == "balanced" else behavior.title()
+            display_row[f"{label} Players"] = format_rate(breakdown.get("playerWinRate"))
+            display_row[f"{label} Enemies"] = format_rate(breakdown.get("enemyWinRate"))
+            display_row[f"{label} Smart"] = format_rate(breakdown.get("smartPlayerWinRate"))
+            display_row[f"{label} Dumb"] = format_rate(breakdown.get("dumbPlayerWinRate"))
+        rows.append(display_row)
+    return rows
+
+
+def format_batch_summary_table(payload: dict[str, Any]) -> str:
+    rows = build_batch_summary_table_rows(payload)
+    if not rows:
+        return "Batch summary table: no completed batch rows."
+
+    lines = [
+        "Batch summary table:",
+        "| " + " | ".join(SUMMARY_TABLE_HEADERS) + " |",
+        "| " + " | ".join("---" for _ in SUMMARY_TABLE_HEADERS) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(row.get(header, "-") for header in SUMMARY_TABLE_HEADERS) + " |")
+    return "\n".join(lines)
+
+
+def format_batch_summary_csv(payload: dict[str, Any]) -> str:
+    rows = build_batch_summary_table_rows(payload)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=SUMMARY_TABLE_HEADERS, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
+
+
 def format_markdown_report(payload: dict[str, Any]) -> str:
     lines = [
         "# Party Validation",
@@ -669,6 +760,9 @@ def format_markdown_report(payload: dict[str, Any]) -> str:
             f"`{row['executionMode']}`, {row['workerCount']} worker(s) | "
             f"{row['elapsedSeconds']} | `{row['status']}` |"
         )
+
+    lines.extend(["", "## Batch Health Cross-Tab", ""])
+    lines.extend(format_batch_summary_table(payload).splitlines()[1:])
 
     lines.extend(
         [
@@ -807,11 +901,18 @@ def main() -> None:
     )
     markdown_report = format_markdown_report(payload)
     console_summary = format_console_summary(payload)
+    console_table = format_batch_summary_table(payload)
+    csv_report = format_batch_summary_csv(payload)
     write_json_report(args.json_path, payload)
     write_text_report(args.markdown_path, markdown_report)
+    write_text_report(args.csv_path, csv_report)
     print(console_summary)
+    print(console_table)
+    print("Batch summary CSV:")
+    print(csv_report.rstrip())
     print(f"Wrote JSON report: {args.json_path}")
     print(f"Wrote Markdown report: {args.markdown_path}")
+    print(f"Wrote CSV report: {args.csv_path}")
     print(f"Overall status: {payload['overallStatus']}")
     if args.json:
         import json
