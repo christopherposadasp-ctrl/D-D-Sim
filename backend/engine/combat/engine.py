@@ -130,15 +130,15 @@ from backend.engine.rules.spatial import (
     get_blocking_terrain_features_for_position,
     get_melee_reach_squares,
     get_min_chebyshev_distance_between_footprints,
-    get_occupied_squares_for_position,
     get_occupants_for_position,
+    get_occupied_squares_for_position,
     get_reachable_squares,
     get_swallow_source_id,
     get_unit_footprint,
     has_line_of_sight_between_units,
     is_active_grapple,
-    is_within_bounds,
     is_unit_swallowed,
+    is_within_bounds,
     path_provokes_opportunity_attack,
 )
 from backend.engine.utils.helpers import (

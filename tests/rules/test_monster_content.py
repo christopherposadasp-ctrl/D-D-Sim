@@ -30,7 +30,7 @@ from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SRD_CREATURES_WORKBOOK = REPO_ROOT / "docs" / "reference" / "srd_Creatures_Trimmed_V4.xlsx"
+SRD_CREATURES_WORKBOOK = REPO_ROOT / "docs" / "srd_Creatures_Trimmed_V4.xlsx"
 
 
 def serialize_damage_components(
