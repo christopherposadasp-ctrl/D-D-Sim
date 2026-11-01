@@ -1,0 +1,2020 @@
+{
+  "scenarioId": "frostfall_courtyard_variant",
+  "scenarioName": "Frostfall Courtyard Variant",
+  "description": "A frozen ruined courtyard where kobolds screen the party before a young white dragon enters from the storm on round 3.",
+  "playerPresetId": "martial_mixed_party",
+  "seed": "frostfall-variant-0034",
+  "playerBehavior": "smart",
+  "monsterBehavior": "balanced",
+  "sourceFileType": "simulation_result_with_replay",
+  "loadMode": "initial_state_with_delayed_boss",
+  "notes": [
+    "Use initialState from result.replayFrames[0].state, not result.finalState.",
+    "result.finalState is round 6 after combat resolution, so many enemies are dead.",
+    "E17 is a delayed boss arrival on round 3 at (9,8).",
+    "Enemy display names and spriteKeys have been mapped to the new sprite types."
+  ],
+  "spriteRoleMap": {
+    "kobold_warrior": "reptilian_warrior_in_battle_stance.png",
+    "kobold_scale_sorcerer": "reptilian_warrior_in_pixel_art.png",
+    "kobold_dragonshield": "enemy.png",
+    "young_white_dragon_boss": "boss_white_dragon.png"
+  },
+  "delayedArrivals": [
+    {
+      "round": 3,
+      "unitId": "E17",
+      "combatRole": "young_white_dragon_boss",
+      "templateName": "Young White Dragon Boss",
+      "position": {
+        "x": 9,
+        "y": 8
+      },
+      "initiativeScore": 15,
+      "unit": {
+        "id": "E17",
+        "faction": "goblins",
+        "combatRole": "young_white_dragon_boss",
+        "templateName": "Young White Dragon Boss",
+        "roleTags": [],
+        "currentHp": 178,
+        "maxHp": 178,
+        "temporaryHitPoints": 0,
+        "ac": 18,
+        "speed": 40,
+        "effectiveSpeed": 40,
+        "initiativeMod": 3,
+        "initiativeScore": 15,
+        "abilityMods": {
+          "str": 4,
+          "dex": 0,
+          "con": 4,
+          "int": -2,
+          "wis": 0,
+          "cha": 1
+        },
+        "passivePerception": 16,
+        "sizeCategory": "huge",
+        "footprint": {
+          "width": 3,
+          "height": 3
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 9,
+          "y": 8
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "rend": {
+            "id": "rend",
+            "displayName": "Rend",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "damageDice": [],
+            "damageModifier": 0,
+            "damageComponents": [
+              {
+                "damageType": "slashing",
+                "damageDice": [
+                  {
+                    "count": 2,
+                    "sides": 6
+                  }
+                ],
+                "damageModifier": 4
+              },
+              {
+                "damageType": "cold",
+                "damageDice": [
+                  {
+                    "count": 1,
+                    "sides": 4
+                  }
+                ],
+                "damageModifier": 0
+              }
+            ],
+            "kind": "melee",
+            "reach": 10
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "young_white_dragon_boss"
+      }
+    }
+  ],
+  "initialState": {
+    "seed": "frostfall-variant-0034",
+    "playerBehavior": "smart",
+    "monsterBehavior": "balanced",
+    "rngState": 1772187126,
+    "round": 1,
+    "initiativeOrder": [
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "E1",
+      "E10",
+      "E11",
+      "E12",
+      "E13",
+      "E14",
+      "E15",
+      "E16",
+      "E2",
+      "E3",
+      "E4",
+      "E5",
+      "E6",
+      "E7",
+      "E8",
+      "E9"
+    ],
+    "initiativeScores": {
+      "F1": 13,
+      "F2": 11,
+      "F3": 10,
+      "F4": 10,
+      "E1": 9,
+      "E2": 9,
+      "E3": 9,
+      "E4": 9,
+      "E5": 9,
+      "E6": 9,
+      "E7": 9,
+      "E8": 9,
+      "E9": 9,
+      "E10": 9,
+      "E11": 9,
+      "E12": 9,
+      "E13": 9,
+      "E14": 9,
+      "E15": 9,
+      "E16": 9
+    },
+    "activeCombatantIndex": 0,
+    "units": {
+      "F1": {
+        "id": "F1",
+        "faction": "fighters",
+        "combatRole": "fighter",
+        "templateName": "Level 5 Fighter Battle Master Sample Build",
+        "roleTags": [],
+        "currentHp": 50,
+        "maxHp": 50,
+        "temporaryHitPoints": 0,
+        "ac": 18,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 1,
+        "initiativeScore": 13,
+        "abilityMods": {
+          "str": 4,
+          "dex": 1,
+          "con": 2,
+          "int": 0,
+          "wis": -1,
+          "cha": 1
+        },
+        "passivePerception": 11,
+        "sizeCategory": "medium",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 3,
+          "javelins": 8,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 1,
+          "superiorityDice": 4,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 4,
+          "y": 12
+        },
+        "temporaryEffects": [
+          {
+            "kind": "aid",
+            "sourceId": "F2",
+            "hpBonus": 5,
+            "remainingRounds": 4800
+          }
+        ],
+        "reactionAvailable": true,
+        "attacks": {
+          "greatsword": {
+            "id": "greatsword",
+            "displayName": "Greatsword",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "str",
+            "damageDice": [
+              {
+                "count": 2,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "slashing",
+            "mastery": "graze",
+            "kind": "melee",
+            "twoHanded": true
+          },
+          "flail": {
+            "id": "flail",
+            "displayName": "Flail",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "str",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 8
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "bludgeoning",
+            "mastery": "sap",
+            "kind": "melee"
+          },
+          "javelin": {
+            "id": "javelin",
+            "displayName": "Javelin",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "str",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "piercing",
+            "mastery": "slow",
+            "kind": "ranged",
+            "range": {
+              "normal": 30,
+              "long": 120
+            },
+            "resourcePoolId": "javelins"
+          }
+        },
+        "medicineModifier": -1
+      },
+      "F2": {
+        "id": "F2",
+        "faction": "fighters",
+        "combatRole": "paladin",
+        "templateName": "Level 5 Paladin Sample Build",
+        "roleTags": [
+          "healer"
+        ],
+        "currentHp": 54,
+        "maxHp": 54,
+        "temporaryHitPoints": 0,
+        "ac": 21,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 0,
+        "initiativeScore": 11,
+        "abilityMods": {
+          "str": 4,
+          "dex": 0,
+          "con": 3,
+          "int": -1,
+          "wis": 0,
+          "cha": 2
+        },
+        "passivePerception": 10,
+        "sizeCategory": "medium",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 5,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 4,
+          "spellSlotsLevel2": 1,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 25,
+          "channelDivinityUses": 2
+        },
+        "position": {
+          "x": 1,
+          "y": 11
+        },
+        "temporaryEffects": [
+          {
+            "kind": "aid",
+            "sourceId": "F2",
+            "hpBonus": 5,
+            "remainingRounds": 4800
+          }
+        ],
+        "reactionAvailable": true,
+        "attacks": {
+          "longsword": {
+            "id": "longsword",
+            "displayName": "Longsword",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "str",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 8
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "slashing",
+            "mastery": "sap",
+            "kind": "melee"
+          },
+          "javelin": {
+            "id": "javelin",
+            "displayName": "Javelin",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "str",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "piercing",
+            "mastery": "slow",
+            "kind": "ranged",
+            "range": {
+              "normal": 30,
+              "long": 120
+            },
+            "resourcePoolId": "javelins"
+          }
+        },
+        "medicineModifier": 2
+      },
+      "F3": {
+        "id": "F3",
+        "faction": "fighters",
+        "combatRole": "rogue",
+        "templateName": "Level 5 Ranged Assassin Rogue Sample Build",
+        "roleTags": [],
+        "currentHp": 42,
+        "maxHp": 42,
+        "temporaryHitPoints": 0,
+        "ac": 16,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 4,
+        "initiativeScore": 10,
+        "abilityMods": {
+          "str": 0,
+          "dex": 4,
+          "con": 2,
+          "int": 1,
+          "wis": 1,
+          "cha": -1
+        },
+        "passivePerception": 11,
+        "sizeCategory": "medium",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 1,
+          "y": 8
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "shortbow": {
+            "id": "shortbow",
+            "displayName": "Shortbow",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "dex",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "piercing",
+            "mastery": "vex",
+            "kind": "ranged",
+            "range": {
+              "normal": 80,
+              "long": 320
+            }
+          },
+          "shortsword": {
+            "id": "shortsword",
+            "displayName": "Shortsword",
+            "attackBonus": 7,
+            "abilityModifier": 4,
+            "attackAbility": "dex",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 4,
+            "damageType": "piercing",
+            "kind": "melee",
+            "finesse": true
+          }
+        },
+        "medicineModifier": 1
+      },
+      "F4": {
+        "id": "F4",
+        "faction": "fighters",
+        "combatRole": "wizard",
+        "templateName": "Level 5 Evoker Wizard Sample Build",
+        "roleTags": [
+          "caster"
+        ],
+        "currentHp": 37,
+        "maxHp": 37,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 10,
+        "abilityMods": {
+          "str": -1,
+          "dex": 2,
+          "con": 2,
+          "int": 4,
+          "wis": 1,
+          "cha": 0
+        },
+        "passivePerception": 11,
+        "sizeCategory": "medium",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 3,
+          "spellSlotsLevel2": 3,
+          "spellSlotsLevel3": 2,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 5,
+          "y": 11
+        },
+        "temporaryEffects": [
+          {
+            "kind": "aid",
+            "sourceId": "F2",
+            "hpBonus": 5,
+            "remainingRounds": 4800
+          }
+        ],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "attackAbility": "dex",
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee",
+            "finesse": true
+          }
+        },
+        "medicineModifier": 1
+      },
+      "E1": {
+        "id": "E1",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 12,
+          "y": 1
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E2": {
+        "id": "E2",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 12,
+          "y": 2
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E3": {
+        "id": "E3",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 12,
+          "y": 3
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E4": {
+        "id": "E4",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 12,
+          "y": 4
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E5": {
+        "id": "E5",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 13,
+          "y": 4
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E6": {
+        "id": "E6",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 14,
+          "y": 4
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E7": {
+        "id": "E7",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 15,
+          "y": 5
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E8": {
+        "id": "E8",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 13,
+          "y": 3
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E9": {
+        "id": "E9",
+        "faction": "goblins",
+        "combatRole": "kobold_scale_sorcerer",
+        "templateName": "Kobold Scale Sorcerer",
+        "roleTags": [
+          "caster"
+        ],
+        "currentHp": 27,
+        "maxHp": 27,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": 2,
+          "int": 0,
+          "wis": -1,
+          "cha": 2
+        },
+        "passivePerception": 9,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 14,
+          "y": 2
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          },
+          "dagger_throw": {
+            "id": "dagger_throw",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "ranged",
+            "range": {
+              "normal": 20,
+              "long": 60
+            }
+          },
+          "chromatic_bolt": {
+            "id": "chromatic_bolt",
+            "displayName": "Chromatic Bolt",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 2,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "acid",
+            "selectableDamageTypes": [
+              "acid",
+              "cold",
+              "fire",
+              "lightning",
+              "poison",
+              "thunder"
+            ],
+            "kind": "ranged",
+            "range": {
+              "normal": 60,
+              "long": 60
+            }
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_scale_sorcerer"
+      },
+      "E10": {
+        "id": "E10",
+        "faction": "goblins",
+        "combatRole": "kobold_scale_sorcerer",
+        "templateName": "Kobold Scale Sorcerer",
+        "roleTags": [
+          "caster"
+        ],
+        "currentHp": 27,
+        "maxHp": 27,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": 2,
+          "int": 0,
+          "wis": -1,
+          "cha": 2
+        },
+        "passivePerception": 9,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 15,
+          "y": 1
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          },
+          "dagger_throw": {
+            "id": "dagger_throw",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "ranged",
+            "range": {
+              "normal": 20,
+              "long": 60
+            }
+          },
+          "chromatic_bolt": {
+            "id": "chromatic_bolt",
+            "displayName": "Chromatic Bolt",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 2,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "acid",
+            "selectableDamageTypes": [
+              "acid",
+              "cold",
+              "fire",
+              "lightning",
+              "poison",
+              "thunder"
+            ],
+            "kind": "ranged",
+            "range": {
+              "normal": 60,
+              "long": 60
+            }
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_scale_sorcerer"
+      },
+      "E11": {
+        "id": "E11",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 15,
+          "y": 3
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E12": {
+        "id": "E12",
+        "faction": "goblins",
+        "combatRole": "kobold_warrior",
+        "templateName": "Kobold Warrior",
+        "roleTags": [],
+        "currentHp": 7,
+        "maxHp": 7,
+        "temporaryHitPoints": 0,
+        "ac": 14,
+        "speed": 30,
+        "effectiveSpeed": 30,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": -2,
+          "dex": 2,
+          "con": -1,
+          "int": -1,
+          "wis": -2,
+          "cha": -1
+        },
+        "passivePerception": 8,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 13,
+          "y": 1
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "dagger": {
+            "id": "dagger",
+            "displayName": "Dagger",
+            "attackBonus": 4,
+            "abilityModifier": 2,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 4
+              }
+            ],
+            "damageModifier": 2,
+            "damageType": "piercing",
+            "kind": "melee"
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_warrior"
+      },
+      "E13": {
+        "id": "E13",
+        "faction": "goblins",
+        "combatRole": "kobold_dragonshield",
+        "templateName": "Kobold Dragonshield",
+        "roleTags": [],
+        "currentHp": 44,
+        "maxHp": 44,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 20,
+        "effectiveSpeed": 20,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": 1,
+          "dex": 2,
+          "con": 2,
+          "int": -1,
+          "wis": -1,
+          "cha": 0
+        },
+        "passivePerception": 11,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 14,
+          "y": 1
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "spear": {
+            "id": "spear",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "melee"
+          },
+          "spear_throw": {
+            "id": "spear_throw",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "ranged",
+            "range": {
+              "normal": 20,
+              "long": 60
+            }
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_dragonshield"
+      },
+      "E14": {
+        "id": "E14",
+        "faction": "goblins",
+        "combatRole": "kobold_dragonshield",
+        "templateName": "Kobold Dragonshield",
+        "roleTags": [],
+        "currentHp": 44,
+        "maxHp": 44,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 20,
+        "effectiveSpeed": 20,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": 1,
+          "dex": 2,
+          "con": 2,
+          "int": -1,
+          "wis": -1,
+          "cha": 0
+        },
+        "passivePerception": 11,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 15,
+          "y": 2
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "spear": {
+            "id": "spear",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "melee"
+          },
+          "spear_throw": {
+            "id": "spear_throw",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "ranged",
+            "range": {
+              "normal": 20,
+              "long": 60
+            }
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_dragonshield"
+      },
+      "E15": {
+        "id": "E15",
+        "faction": "goblins",
+        "combatRole": "kobold_dragonshield",
+        "templateName": "Kobold Dragonshield",
+        "roleTags": [],
+        "currentHp": 44,
+        "maxHp": 44,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 20,
+        "effectiveSpeed": 20,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": 1,
+          "dex": 2,
+          "con": 2,
+          "int": -1,
+          "wis": -1,
+          "cha": 0
+        },
+        "passivePerception": 11,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 4,
+          "y": 15
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "spear": {
+            "id": "spear",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "melee"
+          },
+          "spear_throw": {
+            "id": "spear_throw",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "ranged",
+            "range": {
+              "normal": 20,
+              "long": 60
+            }
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_dragonshield"
+      },
+      "E16": {
+        "id": "E16",
+        "faction": "goblins",
+        "combatRole": "kobold_dragonshield",
+        "templateName": "Kobold Dragonshield",
+        "roleTags": [],
+        "currentHp": 44,
+        "maxHp": 44,
+        "temporaryHitPoints": 0,
+        "ac": 15,
+        "speed": 20,
+        "effectiveSpeed": 20,
+        "initiativeMod": 2,
+        "initiativeScore": 9,
+        "abilityMods": {
+          "str": 1,
+          "dex": 2,
+          "con": 2,
+          "int": -1,
+          "wis": -1,
+          "cha": 0
+        },
+        "passivePerception": 11,
+        "sizeCategory": "small",
+        "footprint": {
+          "width": 1,
+          "height": 1
+        },
+        "conditions": {
+          "unconscious": false,
+          "prone": false,
+          "dead": false
+        },
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "stable": false,
+        "resources": {
+          "secondWindUses": 0,
+          "javelins": 0,
+          "rageUses": 0,
+          "handaxes": 0,
+          "actionSurgeUses": 0,
+          "superiorityDice": 0,
+          "focusPoints": 0,
+          "uncannyMetabolismUses": 0,
+          "spellSlotsLevel1": 0,
+          "spellSlotsLevel2": 0,
+          "spellSlotsLevel3": 0,
+          "layOnHandsPoints": 0,
+          "channelDivinityUses": 0
+        },
+        "position": {
+          "x": 3,
+          "y": 15
+        },
+        "temporaryEffects": [],
+        "reactionAvailable": true,
+        "attacks": {
+          "spear": {
+            "id": "spear",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "melee"
+          },
+          "spear_throw": {
+            "id": "spear_throw",
+            "displayName": "Spear",
+            "attackBonus": 3,
+            "abilityModifier": 1,
+            "damageDice": [
+              {
+                "count": 1,
+                "sides": 6
+              }
+            ],
+            "damageModifier": 1,
+            "damageType": "piercing",
+            "kind": "ranged",
+            "range": {
+              "normal": 20,
+              "long": 60
+            }
+          }
+        },
+        "medicineModifier": -1,
+        "spriteKey": "kobold_dragonshield"
+      }
+    },
+    "combatLog": [],
+    "winner": null,
+    "terminalState": "ongoing",
+    "rescueSubphase": false
+  },
+  "replayReference": {
+    "winner": "fighters",
+    "finalRound": 6,
+    "eventCount": 358,
+    "replayFrameCount": 109,
+    "wizardFirstTurnRequiredSpell": "fireball",
+    "wizardSecondTurnRequiredSpell": "haste"
+  }
+}

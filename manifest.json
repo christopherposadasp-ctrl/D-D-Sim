@@ -1,0 +1,322 @@
+{
+  "source": "C:\\Users\\posad\\OneDrive\\Desktop\\OR_Prog\\Codex\\D&D Sim\\archive\\snapshots\\2026-05-31_D-D-Sim-GUI-download",
+  "snapshotId": "2026-05-31_D-D-Sim-GUI-download",
+  "historicalSnapshotDate": "2026-05-31",
+  "recordedArchiveDate": "2026-08-13",
+  "dateEvidence": "Dates recorded by the existing archive README; not independently reconstructed.",
+  "partialSnapshot": true,
+  "fileCount": 62,
+  "totalBytes": 20504990,
+  "files": [
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/_preserved_node_modules_generated_state/.vite/deps/_metadata.json",
+      "bytes": 1101,
+      "sha256": "037d3a38ee7fc857f1649f8baeceb8a5e56dede4f6df173251bcdaeb03b92202"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/_preserved_node_modules_generated_state/.vite/vitest/results.json",
+      "bytes": 103,
+      "sha256": "eec3ff57a638b209a626750615d6078b55f7b473b5cdeb1cb2edfceaedbd1da5"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/assets/index-BHc53obT.js",
+      "bytes": 269587,
+      "sha256": "3897d742126c2d67548665573f42091acba2824695bc466ab029db5e35b9911b"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/assets/index-DV-JDR6e.css",
+      "bytes": 71575,
+      "sha256": "29b70c2db66b3a5bf441b40b06d7bebca868efd20028a06b460a8b995f504bf2"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/battlespace.png",
+      "bytes": 3648750,
+      "sha256": "d59c3462e9b496cc36abebb583079f45d6912a7b710e3506054c6ba62aa384cd"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/index.html",
+      "bytes": 435,
+      "sha256": "228a756186746417b47b74e57379d4465518306325e0f005626056a96478a6db"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/boss_white_dragon.png",
+      "bytes": 493733,
+      "sha256": "23ded673503cabbfbdee97d754d25684bb6b854091ee1a22092a9aa0aa0d3dea"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/centaurTrooper.png",
+      "bytes": 220401,
+      "sha256": "88b9d31c916b0b5f8d15d676d77e095010aa686ea10620a3746fd3f1ec7b6fa7"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/crouching_dragon_humanoid_mage_sprite.png",
+      "bytes": 289040,
+      "sha256": "4094b862894fae3345a1463433dbf14f8fc89c2646941577af5b63dcf28d4195"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/dead_white_dragon.png",
+      "bytes": 2517851,
+      "sha256": "9f27313d08781e89b98aad6dc7697a47c596957e3bba3e6eca3c776acdf65b65"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/dragon.png",
+      "bytes": 392734,
+      "sha256": "8642c99a2d8ac2bbf7584e6ac6a64b4df99aaabfa31cb12ab16308d397ad534a"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/enemy.png",
+      "bytes": 186866,
+      "sha256": "57a654cc30d61f3c060681d1c77acc63ac85cc520f73646eebe901e445108fac"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/fighter.png",
+      "bytes": 193312,
+      "sha256": "fd394ff0b9f8500aeb2864130ecd172e2c202780406169a1ce48e42835c3e3a1"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/fireball.svg",
+      "bytes": 1598,
+      "sha256": "b278b4d9cd570e67fc0e1b39df1874e0ed3266b56ae4af8baea7ab92af769483"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/majestic_ice_dragon_in_pixel_art.png",
+      "bytes": 493733,
+      "sha256": "23ded673503cabbfbdee97d754d25684bb6b854091ee1a22092a9aa0aa0d3dea"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/paladin.png",
+      "bytes": 201007,
+      "sha256": "0b7a40af3d77cd9fd4f1393b8fcc0dc2384d606599d846b22e94badff1edd6cc"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/reptilian_warrior_in_battle_stance.png",
+      "bytes": 271895,
+      "sha256": "d5b711348ed5ae83f83cb37c6a65ab8f9df430615ff69c3e5f16edcca0bd6896"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/reptilian_warrior_in_pixel_art.png",
+      "bytes": 240642,
+      "sha256": "0d4e679c7f2f4819f1161ffa17273a559f8c8b2ffcceee5e9488b1446746de7d"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/rogue.png",
+      "bytes": 174638,
+      "sha256": "80e1ae9f58b8c03828f1a1b9ea5528ec18a770e7edf24c1d07ff376e2a567d96"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/wizard.png",
+      "bytes": 218351,
+      "sha256": "4c0d43ada9452831efba39640737f48612c233f2ab021a8032b134950f33e856"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/dist/sprites/young_red_dragon.png",
+      "bytes": 282145,
+      "sha256": "9f728c61d505d3814778220bc9cc122f1e173c70ce7bc1aa4e3a5c3ac175f918"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/battlespace.png",
+      "bytes": 3648750,
+      "sha256": "d59c3462e9b496cc36abebb583079f45d6912a7b710e3506054c6ba62aa384cd"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/boss_white_dragon.png",
+      "bytes": 493733,
+      "sha256": "23ded673503cabbfbdee97d754d25684bb6b854091ee1a22092a9aa0aa0d3dea"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/centaurTrooper.png",
+      "bytes": 220401,
+      "sha256": "88b9d31c916b0b5f8d15d676d77e095010aa686ea10620a3746fd3f1ec7b6fa7"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/crouching_dragon_humanoid_mage_sprite.png",
+      "bytes": 289040,
+      "sha256": "4094b862894fae3345a1463433dbf14f8fc89c2646941577af5b63dcf28d4195"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/dead_white_dragon.png",
+      "bytes": 2517851,
+      "sha256": "9f27313d08781e89b98aad6dc7697a47c596957e3bba3e6eca3c776acdf65b65"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/dragon.png",
+      "bytes": 392734,
+      "sha256": "8642c99a2d8ac2bbf7584e6ac6a64b4df99aaabfa31cb12ab16308d397ad534a"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/enemy.png",
+      "bytes": 186866,
+      "sha256": "57a654cc30d61f3c060681d1c77acc63ac85cc520f73646eebe901e445108fac"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/fighter.png",
+      "bytes": 193312,
+      "sha256": "fd394ff0b9f8500aeb2864130ecd172e2c202780406169a1ce48e42835c3e3a1"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/fireball.svg",
+      "bytes": 1598,
+      "sha256": "b278b4d9cd570e67fc0e1b39df1874e0ed3266b56ae4af8baea7ab92af769483"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/majestic_ice_dragon_in_pixel_art.png",
+      "bytes": 493733,
+      "sha256": "23ded673503cabbfbdee97d754d25684bb6b854091ee1a22092a9aa0aa0d3dea"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/paladin.png",
+      "bytes": 201007,
+      "sha256": "0b7a40af3d77cd9fd4f1393b8fcc0dc2384d606599d846b22e94badff1edd6cc"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/reptilian_warrior_in_battle_stance.png",
+      "bytes": 271895,
+      "sha256": "d5b711348ed5ae83f83cb37c6a65ab8f9df430615ff69c3e5f16edcca0bd6896"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/reptilian_warrior_in_pixel_art.png",
+      "bytes": 240642,
+      "sha256": "0d4e679c7f2f4819f1161ffa17273a559f8c8b2ffcceee5e9488b1446746de7d"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/rogue.png",
+      "bytes": 174638,
+      "sha256": "80e1ae9f58b8c03828f1a1b9ea5528ec18a770e7edf24c1d07ff376e2a567d96"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/wizard.png",
+      "bytes": 218351,
+      "sha256": "4c0d43ada9452831efba39640737f48612c233f2ab021a8032b134950f33e856"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/public/sprites/young_red_dragon.png",
+      "bytes": 282145,
+      "sha256": "9f728c61d505d3814778220bc9cc122f1e173c70ce7bc1aa4e3a5c3ac175f918"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/dnd_sim_backend.egg-info/dependency_links.txt",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/dnd_sim_backend.egg-info/PKG-INFO",
+      "bytes": 419,
+      "sha256": "c2108b4e6a0b8c35f09378f241150b6bc67d1f9307d9ca0671f0ff0c616a3813"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/dnd_sim_backend.egg-info/requires.txt",
+      "bytes": 115,
+      "sha256": "a5357df188f5b820435682a8eaa52f65f0004c0c697b18cfbd5521ce8c8c2f1f"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/dnd_sim_backend.egg-info/SOURCES.txt",
+      "bytes": 238,
+      "sha256": "79926b384c7998cc44c85e2e8eb85dbe5570487884257f1e05bd35330bd853b7"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/dnd_sim_backend.egg-info/top_level.txt",
+      "bytes": 15,
+      "sha256": "46b4fd8ce10ae7186055d4837d08185fdd852d7b31cbcd6ae354aa30f965c421"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/main.tsx",
+      "bytes": 379,
+      "sha256": "f670b1f202004cab1804b07df9925b9f2f289a3084e37e1ef134e8fa5d2db217"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/shared/sim/catalog.ts",
+      "bytes": 14265,
+      "sha256": "c7eb0d8e61dd1721cf29972d2e207a7a722f5224f1edddfb3ec2a557b65cbe50"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/shared/sim/scenarioSeeds/frostfall_courtyard_variant.json",
+      "bytes": 51627,
+      "sha256": "c07586623dd2b6927c88252e5b7c467cc2c52a08c7393aef6aae5253356b01c1"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/shared/sim/scenarioSeeds.ts",
+      "bytes": 3076,
+      "sha256": "181fa33f84fba18c17daa6621dd93162a8ca64e81d51e7cdf83337c6b7982a1f"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/shared/sim/spatial.ts",
+      "bytes": 8420,
+      "sha256": "aa77ec4ec474ce0119623355f766c16f6134b7d8dadf953be66461242eed5259"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/shared/sim/types.ts",
+      "bytes": 13073,
+      "sha256": "2778eb5bd514e1dd2bb9887d7c78be0ef938ba2c19af60ce62604902c2d232d8"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/styles.css",
+      "bytes": 95123,
+      "sha256": "9a5f366ab1fcd59521e78433cca9ba5751516a9d212bf510394b3c1353166067"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/test/presentationReplayData.test.ts",
+      "bytes": 3318,
+      "sha256": "31d61b08a6e6f89aee7baabc638942b8c207b152cf065362577b7456e18792b9"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/test/replay.test.ts",
+      "bytes": 6345,
+      "sha256": "edc117fe040bbdfd5827bb47865eafc78869173e6c452c0f63ad507415bd0788"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/test/scenarioSeeds.test.ts",
+      "bytes": 1895,
+      "sha256": "f683a361b7d81318fafecad6dd7c278c8e9a6728ea7b45fbf5a07959f01167cb"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/test/spatial.test.ts",
+      "bytes": 7264,
+      "sha256": "f0e58518e8f0ca2477ba4cf753e6d276a48da3024d73ae0573974977edeb812c"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/test/ui.test.tsx",
+      "bytes": 100194,
+      "sha256": "895443707d8ddcb47526fa22cdefe31c098abba42f13f7504c98aee445df9509"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/App.tsx",
+      "bytes": 21690,
+      "sha256": "e415595eb2133f869df6ca8f7f85746a6d18c2a09e7c5b85665791957ce22a0d"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/catalog.ts",
+      "bytes": 6446,
+      "sha256": "983158a8136a8e3de87ffcd30e37817f68a14f316002d062d247ce1ed705364f"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/components.tsx",
+      "bytes": 129500,
+      "sha256": "20110d0f7e09294f45737e6d2494a3c43e7b2147cfcd54a55918481f628c9be1"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/presentationConfig.ts",
+      "bytes": 1570,
+      "sha256": "b18ff765ba98dd36decea0cd4052f345b31e2f7cbe18748145f2459d5eea0a17"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/PresentationReplay.tsx",
+      "bytes": 18481,
+      "sha256": "98eed2cf56207f995d2cfd1d41a7c024bf79a857b88696dd97a0e30c9d1bcfd3"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/presentationReplayData.ts",
+      "bytes": 3535,
+      "sha256": "4a999b7c933c96073500a59017068c88d5992d177ab6bffbc99848a3539fdc25"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/replay.ts",
+      "bytes": 5947,
+      "sha256": "5cd056d94a5e583a82fb2a434154e3a497ad256ccd74e72aa6050d7bc02eea43"
+    },
+    {
+      "path": "snapshots/2026-05-31_D-D-Sim-GUI-download/src/ui/store.ts",
+      "bytes": 15861,
+      "sha256": "a43f46b188a050d76868e6eebac2fdbe2f82063db8d0f8760933349c01bf6894"
+    }
+  ]
+}
