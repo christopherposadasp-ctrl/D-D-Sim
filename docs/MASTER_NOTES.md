@@ -17,7 +17,8 @@ It should be updated whenever one of these changes:
 - [V4 Architecture](V4_ARCHITECTURE.md)
 - [Content Backlog](CONTENT_BACKLOG.md)
 - [Player Class Implementation](PLAYER_CLASS_IMPLEMENTATION.md)
-- [Reference PDFs](reference/)
+- [SRD Reference PDF](SRD_CC_v5.2.1.pdf)
+- [Project Requirements PDF](dnd_2024_encounter_sim_prd.pdf)
 
 ## Current Snapshot
 
@@ -89,11 +90,12 @@ It should be updated whenever one of these changes:
   - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
   - Monk supported to level 2
   - Paladin supported to level 5 as an Oath of the Ancients plate-and-shield support tank
-  - Wizard supported to level 5 as an Evoker with level 3 slot metadata and Memorize Spell metadata
+  - Wizard supported to level 5 as an Evoker with live level 3 combat spells and Memorize Spell metadata
 - A narrow combat-only Wizard spell slice is also live with:
   - cantrips: `fire_bolt`, `shocking_grasp`
-  - prepared combat spells: `magic_missile`, `shield`, `burning_hands`, `scorching_ray`, `shatter`
-  - level 3 spell access and prepared-spell counts tracked as runtime metadata
+  - prepared combat spells include `magic_missile`, `shield`, `burning_hands`, `scorching_ray`, `shatter`, `fireball`, `haste`, and `counterspell`
+  - smart precombat Mage Armor and live Haste/concentration behavior
+  - spell-slot, spell-access, and prepared-spell counts tracked at runtime
 - Rogue level 2 now includes combat-only Cunning Action support with:
   - bonus-action Dash
   - bonus-action Disengage
@@ -115,7 +117,11 @@ It should be updated whenever one of these changes:
 - Pass 3 clarity is the current audit-maintainability pass; it is behavior-preserving and does not change gameplay, scenario balance, API payloads, or catalog data.
 - Phase A added the focused `party-validation` command as the default day-to-day party behavior gate.
 - Batch health checks now use the normal multicore `run_batch` path by default, capped at 8 workers, with serial mode reserved for deterministic replay/debug checks.
-- The focused party-validation scenario battery is `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`.
+- The focused party-validation scenario battery is `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`.
+- Party validation defaults to 300 total encounters per scenario with balanced players and combined DM styles; it writes JSON, Markdown, and CSV reports under `reports/party_validation/`.
+- The 15 active selector/audit scenarios are defined by `ACTIVE_ENEMY_PRESET_IDS`; the loadable Frostfall capstone presets sit outside that active list.
+- The presentation page uses the saved `frostfall_courtyard_variant` replay with seed `frostfall-variant-0034`.
+- The runnable application is on `integration`; `codex/monster-development` carries the pending content/housekeeping changes, and a reviewed release PR will bring the application to `main`.
 - Active monitored findings remain the scenario smart-under-dumb warning, Rogue notes, and mixed-party Fighter/Barbarian warnings documented in the audit reports.
 - Active waivers remain for dedicated Monk, Wizard, and Monster audit runners until those focused runners are implemented.
 
@@ -189,8 +195,8 @@ It should be updated whenever one of these changes:
 
 ### Current Working Version
 
-- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Paladin is live to level 5 as an Oath of the Ancients support tank with Extra Attack, Sentinel, level 2 Bless, and Aid rules support; Wizard is live to level 5 as an Evoker metadata upgrade; Barbarian, melee Rogue, and Monk remain live up to level 2
-- Wizard level 5 is live as a narrow combat-only spellcasting slice plus level 3 metadata, not a full `V4.4` spell framework rollout
+- Current class path: Fighter is live to level 5 as a Battle Master; ranged Rogue is live to level 5 as an Assassin; Paladin is live to level 5 as an Oath of the Ancients support tank with Extra Attack, Sentinel, level 2 Bless, and Aid rules support; Wizard is live to level 5 as an Evoker with live level 3 combat spells; Barbarian, melee Rogue, and Monk remain live up to level 2
+- Wizard level 5 is live as a focused combat spellcasting slice with Fireball, Haste, Counterspell, and level 3 resources; broader `V4.4` spellcasting remains deferred
 - Immediate project path is now focused on one presentation-ready level 5 party rather than broad class coverage:
   - Fighter: Battle Master
   - ranged Rogue: Assassin
@@ -497,7 +503,7 @@ Plan to represent content with:
 - `backend/` Python engine and API
 - `tests/` Python golden, rules, and API tests
 - `docs/` project notes and references
-- `docs/reference/` PDFs and source reference material
+- `docs/` PDFs and source reference workbooks
 
 ### Planned V4 Layout
 
