@@ -1,0 +1,252 @@
+{
+  "sourceCheckout": "C:\\Users\\posad\\OneDrive\\Desktop\\OR_Prog\\_Archive\\D&D_0db8_Automation_Repo_2026-07-09",
+  "publishedSnapshotCommit": "66315e4a675ce5c4e3617589ceec52a3a346f943",
+  "originalCommit": "4b2af799851e37b4ad40dbf71c6c5473b72779ca",
+  "artifactFileCount": 13,
+  "totalBytes": 58246,
+  "files": [
+    {
+      "path": "_git_index",
+      "bytes": 668,
+      "sha256": "2d62e819f7a1699d2f9f725f5210925d27b3448f6d46555a65782c503e788edd"
+    },
+    {
+      "path": "_git_objects/1b/371f6aaf253b2ddbb5b7f10201d517e948a7c9",
+      "bytes": 7702,
+      "sha256": "55589b46ee3b8f7a6d1627dbeedd2b6c05587962bbb454da76fe9f26da29ab30"
+    },
+    {
+      "path": "_git_objects/2e/8cd0b81f5a7abfcf48a0a7569f649b92875ada",
+      "bytes": 51,
+      "sha256": "ccdbbf81026915a54d849cc1448fea37d573c03a6cc212d365b2ad8496fd4453"
+    },
+    {
+      "path": "_git_objects/34/d54106faecde06bf38b2deb8385787fb4e81da",
+      "bytes": 6542,
+      "sha256": "58ef883f2de010a709ab4d23c9c0ce8acad8c55b99897260d95ba0eaf051b1be"
+    },
+    {
+      "path": "_git_objects/4b/2af799851e37b4ad40dbf71c6c5473b72779ca",
+      "bytes": 163,
+      "sha256": "3acecd64bed89e3449071e22e052371e3fc9ed861d5cdfc762e5ad1040043e2f"
+    },
+    {
+      "path": "_git_objects/4c/810ad9db7bf097462e774bcf57b647dccca79d",
+      "bytes": 55,
+      "sha256": "e41da2dbdf33a9c31b5f55431d086a56974a5b1ecae8e3f99b5a90b9ff5b5e38"
+    },
+    {
+      "path": "_git_objects/5c/6b67f754c7bdc4f0b7ad228a9d9ad751fa89ad",
+      "bytes": 107,
+      "sha256": "0c8b54a0a14ddda44f800c5bf13f7bb6b6f45125eb5cd7effd397551cce40772"
+    },
+    {
+      "path": "_git_objects/6c/c7cea1dd721f97398d7057b0157ed8f22f7618",
+      "bytes": 25263,
+      "sha256": "ba908b90f656e9cdaa74e7039a030a72497385e6f32f7b103c6431aa01fd0c81"
+    },
+    {
+      "path": "_git_objects/75/fd47d8291877a28591e3cb8065badbb77be401",
+      "bytes": 47,
+      "sha256": "4daed70d5d811636e42a962ac7d33e8900c816408ff2e8758a73a970c7a0a177"
+    },
+    {
+      "path": "_git_objects/79/49b5934524f342e88c8dc7c7b2b90c904ee248",
+      "bytes": 49,
+      "sha256": "5a8ab2a3186d0a31e4b052c84e482e12eeb82c8b0808723af65fd949949cf326"
+    },
+    {
+      "path": "_git_objects/99/36f34a60a5c62ff5ec518fea948d5202e9a3fb",
+      "bytes": 17417,
+      "sha256": "f8b430bea1aaf40311b18411866679f856445e80d0ed45fb81e2be8a5305b177"
+    },
+    {
+      "path": "_git_objects/d5/837f0bcea7631f3171f691db47f66ea4b4a36c",
+      "bytes": 108,
+      "sha256": "74854fc75b811490bc20f01621b54b975a350a2cf1bb4d15735bdb548f99f27c"
+    },
+    {
+      "path": "_git_objects/e8/dc51f9105ba3216d22b3f9cb5685cf18168e2b",
+      "bytes": 74,
+      "sha256": "9a572204592e87cd3468e5814a8b5ca958649c38010a00b6f6ae68f5c041ce39"
+    }
+  ],
+  "originalIndex": {
+    "version": 2,
+    "checksumValid": true,
+    "entryCount": 4,
+    "entries": [
+      {
+        "path": "backend/content/enemies.py",
+        "gitBlobId": "9936f34a60a5c62ff5ec518fea948d5202e9a3fb",
+        "stage": 0
+      },
+      {
+        "path": "docs/reference/srd_Creatures_Trimmed_V4.xlsx",
+        "gitBlobId": "6cc7cea1dd721f97398d7057b0157ed8f22f7618",
+        "stage": 0
+      },
+      {
+        "path": "tests/rules/monster_expectations.py",
+        "gitBlobId": "34d54106faecde06bf38b2deb8385787fb4e81da",
+        "stage": 0
+      },
+      {
+        "path": "tests/rules/test_monster_behavior.py",
+        "gitBlobId": "1b371f6aaf253b2ddbb5b7f10201d517e948a7c9",
+        "stage": 0
+      }
+    ]
+  },
+  "originalGitObjects": [
+    {
+      "path": "_git_objects/1b/371f6aaf253b2ddbb5b7f10201d517e948a7c9",
+      "gitObjectId": "1b371f6aaf253b2ddbb5b7f10201d517e948a7c9",
+      "type": "blob",
+      "uncompressedBytes": 50040,
+      "hashValid": true
+    },
+    {
+      "path": "_git_objects/2e/8cd0b81f5a7abfcf48a0a7569f649b92875ada",
+      "gitObjectId": "2e8cd0b81f5a7abfcf48a0a7569f649b92875ada",
+      "type": "tree",
+      "uncompressedBytes": 36,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "40000",
+          "name": "reference",
+          "gitObjectId": "e8dc51f9105ba3216d22b3f9cb5685cf18168e2b"
+        }
+      ]
+    },
+    {
+      "path": "_git_objects/34/d54106faecde06bf38b2deb8385787fb4e81da",
+      "gitObjectId": "34d54106faecde06bf38b2deb8385787fb4e81da",
+      "type": "blob",
+      "uncompressedBytes": 52611,
+      "hashValid": true
+    },
+    {
+      "path": "_git_objects/4b/2af799851e37b4ad40dbf71c6c5473b72779ca",
+      "gitObjectId": "4b2af799851e37b4ad40dbf71c6c5473b72779ca",
+      "type": "commit",
+      "uncompressedBytes": 242,
+      "hashValid": true,
+      "commitText": "tree 5c6b67f754c7bdc4f0b7ad228a9d9ad751fa89ad\nauthor Codex Automation <codex-automation@example.com> 1777029814 -0700\ncommitter Codex Automation <codex-automation@example.com> 1777029814 -0700\n\nAdd warrior veteran and knight CR3 monster pair\n"
+    },
+    {
+      "path": "_git_objects/4c/810ad9db7bf097462e774bcf57b647dccca79d",
+      "gitObjectId": "4c810ad9db7bf097462e774bcf57b647dccca79d",
+      "type": "tree",
+      "uncompressedBytes": 38,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "100644",
+          "name": "enemies.py",
+          "gitObjectId": "9936f34a60a5c62ff5ec518fea948d5202e9a3fb"
+        }
+      ]
+    },
+    {
+      "path": "_git_objects/5c/6b67f754c7bdc4f0b7ad228a9d9ad751fa89ad",
+      "gitObjectId": "5c6b67f754c7bdc4f0b7ad228a9d9ad751fa89ad",
+      "type": "tree",
+      "uncompressedBytes": 97,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "40000",
+          "name": "backend",
+          "gitObjectId": "7949b5934524f342e88c8dc7c7b2b90c904ee248"
+        },
+        {
+          "mode": "40000",
+          "name": "docs",
+          "gitObjectId": "2e8cd0b81f5a7abfcf48a0a7569f649b92875ada"
+        },
+        {
+          "mode": "40000",
+          "name": "tests",
+          "gitObjectId": "75fd47d8291877a28591e3cb8065badbb77be401"
+        }
+      ]
+    },
+    {
+      "path": "_git_objects/6c/c7cea1dd721f97398d7057b0157ed8f22f7618",
+      "gitObjectId": "6cc7cea1dd721f97398d7057b0157ed8f22f7618",
+      "type": "blob",
+      "uncompressedBytes": 28022,
+      "hashValid": true
+    },
+    {
+      "path": "_git_objects/75/fd47d8291877a28591e3cb8065badbb77be401",
+      "gitObjectId": "75fd47d8291877a28591e3cb8065badbb77be401",
+      "type": "tree",
+      "uncompressedBytes": 32,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "40000",
+          "name": "rules",
+          "gitObjectId": "d5837f0bcea7631f3171f691db47f66ea4b4a36c"
+        }
+      ]
+    },
+    {
+      "path": "_git_objects/79/49b5934524f342e88c8dc7c7b2b90c904ee248",
+      "gitObjectId": "7949b5934524f342e88c8dc7c7b2b90c904ee248",
+      "type": "tree",
+      "uncompressedBytes": 34,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "40000",
+          "name": "content",
+          "gitObjectId": "4c810ad9db7bf097462e774bcf57b647dccca79d"
+        }
+      ]
+    },
+    {
+      "path": "_git_objects/99/36f34a60a5c62ff5ec518fea948d5202e9a3fb",
+      "gitObjectId": "9936f34a60a5c62ff5ec518fea948d5202e9a3fb",
+      "type": "blob",
+      "uncompressedBytes": 112651,
+      "hashValid": true
+    },
+    {
+      "path": "_git_objects/d5/837f0bcea7631f3171f691db47f66ea4b4a36c",
+      "gitObjectId": "d5837f0bcea7631f3171f691db47f66ea4b4a36c",
+      "type": "tree",
+      "uncompressedBytes": 103,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "100644",
+          "name": "monster_expectations.py",
+          "gitObjectId": "34d54106faecde06bf38b2deb8385787fb4e81da"
+        },
+        {
+          "mode": "100644",
+          "name": "test_monster_behavior.py",
+          "gitObjectId": "1b371f6aaf253b2ddbb5b7f10201d517e948a7c9"
+        }
+      ]
+    },
+    {
+      "path": "_git_objects/e8/dc51f9105ba3216d22b3f9cb5685cf18168e2b",
+      "gitObjectId": "e8dc51f9105ba3216d22b3f9cb5685cf18168e2b",
+      "type": "tree",
+      "uncompressedBytes": 57,
+      "hashValid": true,
+      "children": [
+        {
+          "mode": "100644",
+          "name": "srd_Creatures_Trimmed_V4.xlsx",
+          "gitObjectId": "6cc7cea1dd721f97398d7057b0157ed8f22f7618"
+        }
+      ]
+    }
+  ]
+}
