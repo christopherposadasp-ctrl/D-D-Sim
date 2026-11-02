@@ -35,7 +35,13 @@ AttackId: TypeAlias = str
 SizeCategory: TypeAlias = Literal["tiny", "small", "medium", "large", "huge", "gargantuan"]
 TerrainFeatureKind: TypeAlias = Literal["rock", "boulder", "column", "low_wall"]
 MasteryType: TypeAlias = Literal["graze", "sap", "slow", "cleave", "vex"]
-AttackRiderType: TypeAlias = Literal["prone_on_hit", "grapple_on_hit", "grapple_and_restrain", "harry_target"]
+AttackRiderType: TypeAlias = Literal[
+    "prone_on_hit",
+    "grapple_on_hit",
+    "grapple_and_restrain",
+    "harry_target",
+    "push_away_on_hit",
+]
 AttackMode: TypeAlias = Literal["normal", "advantage", "disadvantage"]
 EventType: TypeAlias = Literal[
     "turn_start",
@@ -159,6 +165,7 @@ class OnHitEffect(CamelModel):
     kind: AttackRiderType
     escape_dc: int | None = None
     max_target_size: SizeCategory | None = None
+    distance_squares: int | None = None
 
 
 class WeaponProfile(CamelModel):

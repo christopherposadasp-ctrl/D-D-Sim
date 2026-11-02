@@ -361,6 +361,61 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         benchmark_preset_id="grimlock_benchmark",
         benchmark_count=9,
     ),
+    "satyr": MonsterExpectation(
+        ai_profile_id="ranged_skirmisher",
+        max_hp=31,
+        ac=13,
+        speed=40,
+        initiative_mod=3,
+        passive_perception=12,
+        size_category="medium",
+        footprint=(1, 1),
+        ability_mods={"str": 1, "dex": 3, "con": 0, "int": 1, "wis": 0, "cha": 2},
+        trait_ids=("magic_resistance",),
+        attacks={
+            "hooves": AttackExpectation(
+                kind="melee",
+                attack_bonus=5,
+                ability_modifier=3,
+                damage_modifier=3,
+                damage_type="bludgeoning",
+                damage_dice=((1, 4),),
+            )
+        },
+        opening_weapon_id="mockery",
+        melee_fallback_weapon_id="hooves",
+        special_mechanics=("magic_resistance", "mockery", "push_away_on_hit"),
+        benchmark_preset_id="satyr_benchmark",
+        benchmark_count=3,
+        special_action_ids=("mockery",),
+    ),
+    "boar": MonsterExpectation(
+        ai_profile_id="melee_brute",
+        max_hp=13,
+        ac=11,
+        speed=40,
+        initiative_mod=0,
+        passive_perception=9,
+        size_category="medium",
+        footprint=(1, 1),
+        ability_mods={"str": 1, "dex": 0, "con": 2, "int": -4, "wis": -1, "cha": -3},
+        trait_ids=("bloodied_fury", "charge"),
+        attacks={
+            "gore": AttackExpectation(
+                kind="melee",
+                attack_bonus=3,
+                ability_modifier=1,
+                damage_modifier=1,
+                damage_type="piercing",
+                damage_dice=((1, 6),),
+            )
+        },
+        opening_weapon_id="gore",
+        melee_fallback_weapon_id="gore",
+        special_mechanics=("bloodied_fury", "charge_metadata"),
+        benchmark_preset_id="boar_benchmark",
+        benchmark_count=8,
+    ),
     "tough": MonsterExpectation(
         ai_profile_id="ranged_skirmisher",
         max_hp=32,
@@ -844,6 +899,7 @@ MONSTER_EXPECTATIONS: dict[str, MonsterExpectation] = {
         size_category="medium",
         footprint=(1, 1),
         ability_mods={"str": 3, "dex": 0, "con": 3, "int": -3, "wis": 0, "cha": -2},
+        trait_ids=(),
         movement_modes=("walk", "burrow", "climb"),
         damage_resistances=("cold",),
         attacks={
@@ -2529,5 +2585,5 @@ MULTI_SQUARE_MONSTER_IDS: tuple[str, ...] = tuple(
 MELEE_ONLY_MONSTER_IDS: tuple[str, ...] = tuple(
     monster_id
     for monster_id, expectation in MONSTER_EXPECTATIONS.items()
-    if all(attack.kind == "melee" for attack in expectation.attacks.values())
+    if all(attack.kind == "melee" for attack in expectation.attacks.values()) and not expectation.special_action_ids
 )

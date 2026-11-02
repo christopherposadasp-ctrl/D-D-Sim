@@ -21,13 +21,13 @@ This repository now contains:
 
 ## Live Content Snapshot
 
-Current live martial class support:
+Current live class support:
 
 - Fighter supported to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
 - Barbarian supported to level 2
 - Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk supported to level 2
-- Wizard supported to level 5 as an Evoker with level 3 slot metadata, Memorize Spell metadata, Potent Cantrip, Scorching Ray, Shatter, and Mage Armor metadata/manual support
+- Wizard supported to level 5 as an Evoker with live Fireball, Haste, Counterspell, Scorching Ray, Shatter, Potent Cantrip, smart precombat Mage Armor, and Memorize Spell metadata
 - Paladin supported to level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
 
 Current default player preset:
@@ -38,7 +38,7 @@ Current default player preset:
 - level 5 ranged Assassin rogue
 - level 5 Evoker wizard
 
-Active enemy presets:
+Active enemy presets from `ACTIVE_ENEMY_PRESET_IDS` in `backend/content/enemies.py`:
 
 - `goblin_screen`
 - `bandit_ambush`
@@ -51,6 +51,21 @@ Active enemy presets:
 - `bugbear_dragnet`
 - `deadwatch_phalanx`
 - `captains_crossfire`
+- `berserker_overrun`
+- `hobgoblin_command_screen`
+- `skyhunter_pincer`
+- `reaction_bastion`
+
+The focused party-validation battery is `reaction_bastion`, `skyhunter_pincer`,
+`hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`.
+Its defaults are 300 total encounters per scenario, balanced players, and combined
+DM styles. Combined validation divides those 300 encounters among the three DM
+styles; it does not run 300 encounters for each style.
+
+`frostfall_courtyard` and `frostfall_courtyard_variant` are loadable capstone
+presets outside the active selector/audit list. The presentation page uses the
+saved variant replay with seed `frostfall-variant-0034`. Backend-only fixtures,
+such as `giant_toad_solo` and monster benchmark presets, are not active scenarios.
 
 ## Planned Direction
 
@@ -66,6 +81,7 @@ The working roadmap and design decisions are tracked in:
 - [docs/V4_ARCHITECTURE.md](docs/V4_ARCHITECTURE.md)
 - [docs/CONTENT_BACKLOG.md](docs/CONTENT_BACKLOG.md)
 - [docs/PLAYER_CLASS_IMPLEMENTATION.md](docs/PLAYER_CLASS_IMPLEMENTATION.md)
+- [docs/TECHNICAL_PAPER_SOURCE_GUIDE.md](docs/TECHNICAL_PAPER_SOURCE_GUIDE.md)
 
 ## Repository Layout
 
@@ -75,16 +91,20 @@ The working roadmap and design decisions are tracked in:
 - `tests/` Python golden, rules, and integration tests
 - `scripts/run_code_health_audit.py` manual code-health and benchmark audit
 - `docs/` planning, notes, and reference material
-- `docs/reference/` source PDFs and static reference documents
+- `docs/` also holds the SRD PDF, project requirements PDF, and reference workbooks
+- `archive/README.md` historical GUI snapshot provenance and backup location
 
 For new class work, start with [docs/PLAYER_CLASS_IMPLEMENTATION.md](docs/PLAYER_CLASS_IMPLEMENTATION.md).
 
 ## Quick Start
 
-Use PowerShell from the folder where you want the project:
+The runnable application is on `integration`; `codex/monster-development`
+contains the pending content and housekeeping updates. The default `main`
+branch remains the early scaffold until the release PR is merged. For now,
+clone the application branch explicitly from PowerShell:
 
 ```powershell
-git clone https://github.com/christopherposadasp-ctrl/D-D-Sim.git
+git clone --branch integration https://github.com/christopherposadasp-ctrl/D-D-Sim.git
 Set-Location '.\D-D-Sim'
 ```
 
@@ -212,6 +232,11 @@ These map to:
 - `nightly-audit`: the nightly layered audit protocol; Fighter/Barbarian rotating coverage uses segmented class slices
 - `pass2-stability`: the deterministic replay/batch and async stability gate
 - `pass3-clarity`: the clarity, docs, report, and audit-maintainability gate
+
+Party validation writes `party_validation_latest.json`,
+`party_validation_latest.md`, and `party_validation_latest.csv` under the ignored
+`reports/party_validation/` directory. The CSV contains the aggregate and
+Kind/Balanced/Evil outcome columns also shown in the console and Markdown table.
 
 The task runner passes through extra arguments to the underlying script. Examples:
 

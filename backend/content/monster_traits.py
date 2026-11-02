@@ -71,10 +71,31 @@ MONSTER_TRAITS: dict[str, MonsterTraitDefinition] = {
         display_name="Jumper",
         description="This creature uses Dexterity for jump distance; tactical jumping is not modeled by the live simulator.",
     ),
+    "magic_resistance": MonsterTraitDefinition(
+        trait_id="magic_resistance",
+        display_name="Magic Resistance",
+        description=(
+            "This creature has advantage on saving throws against spells and magical effects; "
+            "the trait is metadata-only until magical save sources are tagged consistently."
+        ),
+    ),
     "bloodied_frenzy": MonsterTraitDefinition(
         trait_id="bloodied_frenzy",
         display_name="Bloodied Frenzy",
         description="While Bloodied, this creature has advantage on attack rolls and saving throws.",
+    ),
+    "bloodied_fury": MonsterTraitDefinition(
+        trait_id="bloodied_fury",
+        display_name="Bloodied Fury",
+        description="While Bloodied, this creature has advantage on attack rolls.",
+    ),
+    "charge": MonsterTraitDefinition(
+        trait_id="charge",
+        display_name="Charge",
+        description=(
+            "This creature can make stronger charge attacks in the source stat block; "
+            "movement-path charge riders are metadata-only in the live simulator."
+        ),
     ),
     "rampage": MonsterTraitDefinition(
         trait_id="rampage",

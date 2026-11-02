@@ -110,7 +110,7 @@ Use V4.2 to establish the player-content framework:
 - Barbarian is live to level 2
 - Rogue is live to level 5 for the ranged Assassin path and level 2 for the melee path
 - Monk is live to level 2 in `V4.2-C`
-- Wizard is live to level 5 as an Evoker with level 3 slot metadata, `fire_bolt`, `shocking_grasp`, `magic_missile`, `shield`, `burning_hands`, `scorching_ray`, `shatter`, Potent Cantrip, Mage Armor metadata/manual support, Memorize Spell metadata, and tracked spell access counts
+- Wizard is live to level 5 as an Evoker with `fire_bolt`, `shocking_grasp`, `magic_missile`, `shield`, `burning_hands`, `scorching_ray`, `shatter`, `fireball`, `haste`, `counterspell`, Potent Cantrip, smart precombat Mage Armor, Memorize Spell metadata, and live spell-slot resources
 - Paladin is live to level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, concentration support, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
 - The current default mixed party is:
   - level 5 Battle Master fighter
@@ -138,16 +138,17 @@ The immediate project path is narrower than the broad V4 class roadmap. The goal
 |---|---|---|---|
 | Fighter | Battle Master | live to level 5 | great-weapon striker baseline |
 | Ranged Rogue | Assassin | live to level 5 | keep ranged-first rogue identity |
-| Wizard | Evoker | live to level 5 | combat spellcasting priority with level 3 metadata |
+| Wizard | Evoker | live to level 5 | Fireball, Haste, Counterspell, concentration, and level 3 slots |
 | Paladin | Oath of the Ancients | live to level 5 | durable support/frontline role with Extra Attack and level 2 Bless |
 | Cleric | Life Domain | stretch | add only if the core four-character scope is complete |
 
 ### Validation Policy
 
 - Default development gate: `.\scripts\dev.ps1 check-fast` and `.\scripts\dev.ps1 party-validation`.
-- Focused scenario battery: `hobgoblin_kill_box`, `bugbear_dragnet`, and `deadwatch_phalanx`.
+- Focused scenario battery: `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`.
+- Party-validation defaults: 300 total encounters per scenario, balanced players, and combined DM styles. Reports include JSON, Markdown, and CSV output.
 - Broad scenario/class/nightly audits remain available for major checkpoints, but they are not the default inner loop.
-- Presentation scenario design waits until the core level 5 party is implemented.
+- The core level 5 party and Frostfall capstone are implemented. `/presentation` plays the saved `frostfall_courtyard_variant` seed `frostfall-variant-0034`; both Frostfall presets remain outside the 15 active selector/audit scenarios.
 
 ## V4.3 Non-Spell Monsters Below CR 3
 

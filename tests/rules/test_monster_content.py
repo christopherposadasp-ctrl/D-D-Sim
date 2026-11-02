@@ -23,13 +23,14 @@ from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     LEGENDARY_CONE_FEAR_ACTIONS,
     LEGENDARY_SPHERE_ACTIONS,
+    SINGLE_TARGET_SAVE_DAMAGE_ACTIONS,
 )
 from backend.content.spell_definitions import get_spell_definition
 from backend.engine.models.state import WeaponDamageComponent, WeaponProfile
 from tests.rules.monster_expectations import MONSTER_EXPECTATIONS, REMAINING_MONSTER_IDS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SRD_CREATURES_WORKBOOK = REPO_ROOT / "docs" / "reference" / "srd_Creatures_Trimmed_V4.xlsx"
+SRD_CREATURES_WORKBOOK = REPO_ROOT / "docs" / "srd_Creatures_Trimmed_V4.xlsx"
 
 
 def serialize_damage_components(
@@ -216,6 +217,34 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
 
     if "bloodied_frenzy" in expectation.special_mechanics:
         assert "bloodied_frenzy" in definition.trait_ids
+
+    if "bloodied_fury" in expectation.special_mechanics:
+        assert "bloodied_fury" in definition.trait_ids
+
+    if "charge_metadata" in expectation.special_mechanics:
+        assert "charge" in definition.trait_ids
+
+    if "magic_resistance" in expectation.special_mechanics:
+        assert "magic_resistance" in definition.trait_ids
+
+    if "mockery" in expectation.special_mechanics:
+        mockery = SINGLE_TARGET_SAVE_DAMAGE_ACTIONS["mockery"]
+        assert "mockery" in definition.special_action_ids
+        assert mockery.save_ability == "wis"
+        assert mockery.save_dc == 12
+        assert mockery.range_squares == 18
+        assert mockery.damage_die_count == 1
+        assert mockery.damage_die_sides == 6
+        assert mockery.damage_modifier == 2
+        assert mockery.damage_type == "psychic"
+
+    if "push_away_on_hit" in expectation.special_mechanics:
+        hooves = definition.attacks["hooves"]
+        assert hooves.on_hit_effects is not None
+        assert [
+            (effect.kind, effect.max_target_size, effect.distance_squares)
+            for effect in hooves.on_hit_effects
+        ] == [("push_away_on_hit", "medium", 2)]
 
     if "rampage" in expectation.special_mechanics:
         assert tuple(get_unit_bonus_action_ids(runtime_unit)) == ("rampage",)
@@ -455,6 +484,22 @@ def test_remaining_monster_roster_matches_expectation_table(variant_id: str) -> 
     ("Young White Dragon", "Young Red Dragon", "Adult White Dragon", "Adult Red Dragon"),
 )
 def test_completed_dragon_workbook_rows_are_marked_modeled(creature_name: str) -> None:
+    workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
+    sheet = workbook.active
+    headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+    creature_index = headers.index("Creature")
+    modeled_index = headers.index("Modeled")
+
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        if row[creature_index] == creature_name:
+            assert row[modeled_index] == "Yes"
+            return
+
+    raise AssertionError(f"{creature_name} row not found in SRD creature workbook")
+
+
+@pytest.mark.parametrize("creature_name", ("Satyr", "Boar"))
+def test_easy_queue_workbook_rows_are_marked_modeled(creature_name: str) -> None:
     workbook = load_workbook(SRD_CREATURES_WORKBOOK, read_only=True, data_only=True)
     sheet = workbook.active
     headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]

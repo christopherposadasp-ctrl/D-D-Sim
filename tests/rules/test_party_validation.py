@@ -202,6 +202,15 @@ def test_party_validation_console_summary_includes_batch_results() -> None:
     assert "balanced: smart 20.0%, dumb 5.0%, players 12.5%, enemies 87.5%, avg rounds 4.5, avg party dead 2.0" in summary
     assert "evil: smart 10.0%, dumb 0.0%, players 5.0%, enemies 95.0%, avg rounds 4.8, avg party dead 2.5" in summary
 
+    table = run_party_validation.format_batch_summary_table(payload)
+    assert "Batch summary table:" in table
+    assert "| Scenario | Players | Enemies | Smart | Dumb |" in table
+    assert "| hobgoblin_kill_box | 12.5% | 87.5% | 20.0% | 5.0% | 20.0% | 80.0% | 30.0% | 10.0% | 12.5% | 87.5% | 20.0% | 5.0% | 5.0% | 95.0% | 10.0% | 0.0% | 4.50 | 2.00 |" in table
+
+    csv_summary = run_party_validation.format_batch_summary_csv(payload)
+    assert csv_summary.startswith("Scenario,Players,Enemies,Smart,Dumb,Kind Players,Kind Enemies")
+    assert "hobgoblin_kill_box,12.5%,87.5%,20.0%,5.0%,20.0%,80.0%,30.0%,10.0%,12.5%,87.5%,20.0%,5.0%,5.0%,95.0%,10.0%,0.0%,4.50,2.00" in csv_summary
+
 
 def test_party_validation_cli_accepts_serial_and_worker_controls(monkeypatch) -> None:
     monkeypatch.setattr(

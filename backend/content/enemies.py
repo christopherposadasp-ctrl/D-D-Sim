@@ -177,6 +177,8 @@ badger_ability_mods = AbilityModifiers(str=0, dex=0, con=3, int=-4, wis=1, cha=-
 crab_ability_mods = AbilityModifiers(str=-2, dex=0, con=1, int=-5, wis=-1, cha=-4)
 baboon_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-3, wis=1, cha=-2)
 grimlock_ability_mods = AbilityModifiers(str=3, dex=1, con=1, int=-1, wis=-1, cha=-2)
+satyr_ability_mods = AbilityModifiers(str=1, dex=3, con=0, int=1, wis=0, cha=2)
+boar_ability_mods = AbilityModifiers(str=1, dex=0, con=2, int=-4, wis=-1, cha=-3)
 hyena_ability_mods = AbilityModifiers(str=0, dex=1, con=1, int=-4, wis=1, cha=-3)
 jackal_ability_mods = AbilityModifiers(str=-1, dex=2, con=0, int=-4, wis=1, cha=-2)
 skeleton_ability_mods = AbilityModifiers(str=0, dex=3, con=2, int=-2, wis=-1, cha=-3)
@@ -1396,6 +1398,74 @@ MONSTER_DEFINITIONS.update(
             tags=("aberration", "grimlock", "melee"),
             action_ids=("melee_attack",),
             attack_actions=(melee_attack_action("bone_cudgel", "Bone Cudgel"),),
+            default_melee_attack_action_id="melee_attack",
+        ),
+        "satyr": MonsterDefinition(
+            base_creature_id="satyr",
+            variant_id="satyr",
+            display_name="Satyr",
+            combat_role="satyr",
+            ai_profile_id="ranged_skirmisher",
+            max_hp=31,
+            ac=13,
+            speed=40,
+            initiative_mod=3,
+            passive_perception=12,
+            ability_mods=satyr_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "hooves": WeaponProfile(
+                    id="hooves",
+                    display_name="Hooves",
+                    attack_bonus=5,
+                    ability_modifier=3,
+                    damage_dice=[DiceSpec(count=1, sides=4)],
+                    damage_modifier=3,
+                    damage_type="bludgeoning",
+                    kind="melee",
+                    on_hit_effects=[
+                        OnHitEffect(kind="push_away_on_hit", max_target_size="medium", distance_squares=2)
+                    ],
+                )
+            },
+            tags=("fey", "satyr", "ranged"),
+            action_ids=("melee_attack", "mockery"),
+            special_action_ids=("mockery",),
+            trait_ids=("magic_resistance",),
+            attack_actions=(melee_attack_action("hooves", "Hooves"),),
+            default_melee_attack_action_id="melee_attack",
+        ),
+        "boar": MonsterDefinition(
+            base_creature_id="boar",
+            variant_id="boar",
+            display_name="Boar",
+            combat_role="boar",
+            ai_profile_id="melee_brute",
+            max_hp=13,
+            ac=11,
+            speed=40,
+            initiative_mod=0,
+            passive_perception=9,
+            ability_mods=boar_ability_mods,
+            size_category="medium",
+            footprint=medium_footprint,
+            attacks={
+                "gore": WeaponProfile(
+                    id="gore",
+                    display_name="Gore",
+                    attack_bonus=3,
+                    ability_modifier=1,
+                    damage_dice=[DiceSpec(count=1, sides=6)],
+                    damage_modifier=1,
+                    damage_type="piercing",
+                    kind="melee",
+                )
+            },
+            tags=("beast", "boar", "melee"),
+            action_ids=("melee_attack",),
+            trait_ids=("bloodied_fury", "charge"),
+            attack_actions=(melee_attack_action("gore", "Gore"),),
             default_melee_attack_action_id="melee_attack",
         ),
         "hyena": MonsterDefinition(
@@ -4055,6 +4125,8 @@ BENCHMARK_MONSTER_VARIANT_IDS: tuple[str, ...] = (
     "crab",
     "baboon",
     "grimlock",
+    "satyr",
+    "boar",
     "hyena",
     "jackal",
     "goblin_minion",

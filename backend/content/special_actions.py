@@ -57,6 +57,19 @@ class LegendaryConeFearActionDefinition:
     duration_rounds: int
 
 
+@dataclass(frozen=True)
+class SingleTargetSaveDamageActionDefinition:
+    action_id: str
+    display_name: str
+    save_ability: str
+    save_dc: int
+    range_squares: int
+    damage_die_count: int
+    damage_die_sides: int
+    damage_modifier: int
+    damage_type: str
+
+
 SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
     "swallow": SpecialActionDefinition(
         action_id="swallow",
@@ -102,6 +115,11 @@ SPECIAL_ACTIONS: dict[str, SpecialActionDefinition] = {
         action_id="natures_wrath",
         display_name="Nature's Wrath",
         description="Channel Divinity action that restrains nearby chosen enemies with spectral vines.",
+    ),
+    "mockery": SpecialActionDefinition(
+        action_id="mockery",
+        display_name="Mockery",
+        description="Force one visible creature within 90 feet to make a Wisdom save or take psychic damage.",
     ),
 }
 
@@ -191,6 +209,21 @@ LEGENDARY_SPHERE_ACTIONS: dict[str, LegendarySphereActionDefinition] = {
         damage_die_sides=6,
         damage_type="cold",
         speed_zero_on_failed_save=True,
+    ),
+}
+
+
+SINGLE_TARGET_SAVE_DAMAGE_ACTIONS: dict[str, SingleTargetSaveDamageActionDefinition] = {
+    "mockery": SingleTargetSaveDamageActionDefinition(
+        action_id="mockery",
+        display_name="Mockery",
+        save_ability="wis",
+        save_dc=12,
+        range_squares=18,
+        damage_die_count=1,
+        damage_die_sides=6,
+        damage_modifier=2,
+        damage_type="psychic",
     ),
 }
 

@@ -22,9 +22,11 @@ from backend.content.special_actions import (
     DRAGON_BREATH_ACTIONS,
     LEGENDARY_CONE_FEAR_ACTIONS,
     LEGENDARY_SPHERE_ACTIONS,
+    SINGLE_TARGET_SAVE_DAMAGE_ACTIONS,
     DragonBreathActionDefinition,
     LegendaryConeFearActionDefinition,
     LegendarySphereActionDefinition,
+    SingleTargetSaveDamageActionDefinition,
     get_special_action,
 )
 from backend.content.spell_definitions import get_spell_definition
@@ -128,15 +130,15 @@ from backend.engine.rules.spatial import (
     get_blocking_terrain_features_for_position,
     get_melee_reach_squares,
     get_min_chebyshev_distance_between_footprints,
-    get_occupied_squares_for_position,
     get_occupants_for_position,
+    get_occupied_squares_for_position,
     get_reachable_squares,
     get_swallow_source_id,
     get_unit_footprint,
     has_line_of_sight_between_units,
     is_active_grapple,
-    is_within_bounds,
     is_unit_swallowed,
+    is_within_bounds,
     path_provokes_opportunity_attack,
 )
 from backend.engine.utils.helpers import (
@@ -1506,6 +1508,192 @@ def resolve_monster_sphere_save_action(
         if state.units[resolved_target_id].conditions.dead:
             events.extend(release_grappled_targets_from_source(state, resolved_target_id, "source_dead"))
             events.extend(release_swallowed_units_from_source(state, resolved_target_id))
+
+    return events
+
+
+def build_single_target_save_damage_component(
+    action: SingleTargetSaveDamageActionDefinition,
+    base_rolls: list[int],
+    applied_damage: int,
+) -> list[DamageComponentResult]:
+    return [
+        DamageComponentResult(
+            damage_type=action.damage_type,
+            raw_rolls=list(base_rolls),
+            adjusted_rolls=list(base_rolls),
+            subtotal=sum(base_rolls),
+            flat_modifier=action.damage_modifier,
+            total_damage=applied_damage,
+        )
+    ]
+
+
+def choose_single_target_save_damage_target_id(
+    state: EncounterState,
+    actor_id: str,
+    action: SingleTargetSaveDamageActionDefinition,
+    preferred_target_id: str | None = None,
+) -> str | None:
+    actor = state.units[actor_id]
+    prioritized_targets = get_ranked_attack_targets(state, actor, preferred_target_id=preferred_target_id)
+    position_index = build_position_index(state)
+
+    for target in prioritized_targets:
+        if not is_unit_conscious(target) or not actor.position or not target.position:
+            continue
+        distance = get_min_chebyshev_distance_between_footprints(
+            actor.position,
+            get_unit_footprint(actor),
+            target.position,
+            get_unit_footprint(target),
+        )
+        if distance > action.range_squares:
+            continue
+        if not has_line_of_sight_between_units(state, actor_id, target.id, position_index=position_index):
+            continue
+        return target.id
+
+    return None
+
+
+def resolve_single_target_save_damage_action(
+    state: EncounterState,
+    actor_id: str,
+    action: dict[str, object],
+    overrides: AttackRollOverrides | None = None,
+) -> list[CombatEvent]:
+    action_id = str(action.get("action_id") or "")
+    save_damage_action = SINGLE_TARGET_SAVE_DAMAGE_ACTIONS.get(action_id)
+    if not save_damage_action:
+        return [create_skip_event(state, actor_id, "Single-target save action is not configured.")]
+
+    actor = state.units[actor_id]
+    definition = get_monster_definition_for_unit(actor)
+    if action_id not in definition.special_action_ids:
+        return [create_skip_event(state, actor_id, f"{save_damage_action.display_name} is not available.")]
+
+    preferred_target_id = str(action["target_id"]) if isinstance(action.get("target_id"), str) else None
+    target_id = choose_single_target_save_damage_target_id(
+        state,
+        actor_id,
+        save_damage_action,
+        preferred_target_id=preferred_target_id,
+    )
+    if not target_id:
+        return [create_skip_event(state, actor_id, f"{save_damage_action.display_name} has no legal target.")]
+
+    damage_rolls_override = list(overrides.damage_rolls if overrides else [])
+    save_rolls_override = list(overrides.save_rolls if overrides else [])
+    concentration_rolls_override = list(overrides.concentration_rolls if overrides else [])
+
+    events: list[CombatEvent] = [
+        add_unit_phase_event(
+            state,
+            actor_id,
+            target_id,
+            f"{actor_id} uses {save_damage_action.display_name}.",
+            condition_deltas=[
+                f"{target_id} must make a {save_damage_action.save_ability.upper()} save against {save_damage_action.display_name}."
+            ],
+            resolved_totals={
+                "specialAction": save_damage_action.action_id,
+                "saveAbility": save_damage_action.save_ability,
+                "saveDc": save_damage_action.save_dc,
+            },
+        )
+    ]
+
+    target = state.units[target_id]
+    save_mode, _, _ = get_saving_throw_mode(target, save_damage_action.save_ability, state=state)
+    save_roll_count = 1 if save_mode == "normal" else 2
+    save_rolls = [save_rolls_override.pop(0) for _ in range(min(save_roll_count, len(save_rolls_override)))]
+    save_event = resolve_saving_throw(
+        state,
+        ResolveSavingThrowArgs(
+            actor_id=target_id,
+            ability=save_damage_action.save_ability,
+            dc=save_damage_action.save_dc,
+            reason=save_damage_action.display_name,
+            overrides=SavingThrowOverrides(save_rolls=save_rolls),
+        ),
+    )
+    save_success = bool(save_event.resolved_totals["success"])
+    save_event.resolved_totals["specialAction"] = save_damage_action.action_id
+    events.append(save_event)
+
+    if save_success:
+        return events
+
+    damage_rolls = [
+        pull_die(
+            state,
+            save_damage_action.damage_die_sides,
+            damage_rolls_override.pop(0) if damage_rolls_override else None,
+        )
+        for _ in range(save_damage_action.damage_die_count)
+    ]
+    full_damage = sum(damage_rolls) + save_damage_action.damage_modifier
+    damage_components = build_single_target_save_damage_component(save_damage_action, damage_rolls, full_damage)
+    damage_result = apply_damage(
+        state,
+        target_id,
+        damage_components,
+        False,
+        attacker_id=actor_id,
+        concentration_save_rolls=concentration_rolls_override,
+    )
+    raw_rolls = {"damageRolls": list(damage_rolls)}
+    resolved_totals = {
+        "specialAction": save_damage_action.action_id,
+        "saveAbility": save_damage_action.save_ability,
+        "saveDc": save_damage_action.save_dc,
+        "saveSucceeded": False,
+        "fullDamage": full_damage,
+    }
+    attach_damage_result_event_fields(raw_rolls, resolved_totals, damage_result)
+    events.append(
+        CombatEvent(
+            **event_base(state, actor_id),
+            target_ids=[target_id],
+            event_type="attack",
+            raw_rolls=raw_rolls,
+            resolved_totals=resolved_totals,
+            movement_details=None,
+            damage_details=DamageDetails(
+                weapon_id=save_damage_action.action_id,
+                weapon_name=save_damage_action.display_name,
+                damage_components=damage_components,
+                primary_candidate=None,
+                savage_candidate=None,
+                chosen_candidate=None,
+                critical_applied=False,
+                critical_multiplier=1,
+                flat_modifier=save_damage_action.damage_modifier,
+                advantage_bonus_candidate=None,
+                mastery_applied=None,
+                mastery_notes=None,
+                attack_riders_applied=None,
+                total_damage=full_damage,
+                resisted_damage=damage_result.resisted_damage,
+                amplified_damage=damage_result.amplified_damage or None,
+                temporary_hp_absorbed=damage_result.temporary_hp_absorbed,
+                final_damage_to_hp=damage_result.final_damage_to_hp,
+                hp_delta=damage_result.hp_delta,
+            ),
+            condition_deltas=list(damage_result.condition_deltas),
+            text_summary=(
+                f"{actor_id}'s {save_damage_action.display_name} hits {target_id} for "
+                f"{full_damage} {save_damage_action.damage_type} damage after a failed save"
+                f"{f' ({damage_result.resisted_damage} resisted)' if damage_result.resisted_damage > 0 else ''}"
+                f"{f' (+{damage_result.amplified_damage} vulnerability)' if damage_result.amplified_damage > 0 else ''}."
+            ),
+        )
+    )
+
+    if state.units[target_id].conditions.dead:
+        events.extend(release_grappled_targets_from_source(state, target_id, "source_dead"))
+        events.extend(release_swallowed_units_from_source(state, target_id))
 
     return events
 
@@ -3334,6 +3522,8 @@ def resolve_special_action_events(
         return resolve_command(state, actor_id, action, overrides)
     if get_monster_sphere_action_for_unit(state.units[actor_id], str(action.get("action_id") or "")):
         return resolve_monster_sphere_save_action(state, actor_id, action, overrides)
+    if action.get("action_id") in SINGLE_TARGET_SAVE_DAMAGE_ACTIONS:
+        return resolve_single_target_save_damage_action(state, actor_id, action, overrides)
     return [resolve_special_action(state, actor_id, action)]
 
 

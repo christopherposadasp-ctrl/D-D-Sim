@@ -63,7 +63,7 @@ Direct equivalents:
 
 - Daily housekeeping: `reports/housekeeping/daily_housekeeping_latest.json` and `reports/housekeeping/daily_housekeeping_latest.md`
 - Audit validation: `reports/audit_validation/audit_validation_latest.json` and `reports/audit_validation/audit_validation_latest.md`
-- Focused party validation: `reports/party_validation/party_validation_latest.json` and `reports/party_validation/party_validation_latest.md`
+- Focused party validation: `reports/party_validation/party_validation_latest.json`, `reports/party_validation/party_validation_latest.md`, and `reports/party_validation/party_validation_latest.csv`
 - Canonical Fighter/Barbarian class evidence: `reports/class_audit/fighter_barbarian_quick_latest.json` and `reports/class_audit/fighter_barbarian_quick_latest.md`
 - Pass 1 readiness: `reports/pass1/pass1_readiness_2026-04-23.md`
 - Scenario audit: `reports/scenario_audit_latest.json`
@@ -89,7 +89,9 @@ For normal class, AI, and focused content work, run:
 .\scripts\dev.ps1 party-validation
 ```
 
-The party-validation command uses the current `martial_mixed_party` and the focused scenario battery: `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`. It uses default parallel batch execution and writes the focused validation reports listed above.
+The party-validation command uses the current `martial_mixed_party` and the focused scenario battery: `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`. Its defaults are 300 total encounters per scenario, balanced players, and combined DM styles. Combined validation splits the requested total across Kind, Balanced, and Evil; it does not multiply that total by three. Eligible sub-batches use up to eight workers. JSON, Markdown, and CSV reports record the results; the CSV and Markdown cross-tab include the per-DM outcome columns.
+
+The active selector/audit roster is the 15-entry `ACTIVE_ENEMY_PRESET_IDS` registry. `frostfall_courtyard` is a loadable capstone used by focused validation, and `frostfall_courtyard_variant` supplies the saved presentation replay. Neither is part of the active selector/audit roster. Frontend test discovery is restricted to `src/test/`, so local historical snapshots cannot enter the normal frontend test run.
 
 For daily admin review, run:
 
