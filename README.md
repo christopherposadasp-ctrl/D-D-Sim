@@ -1,13 +1,71 @@
 # D&D Encounter Simulator
 
-This repository currently contains a TypeScript/React proof of concept encounter simulator and the planning notes for the Python-based V4 rewrite.
+This repository now contains:
+
+- the React + TypeScript frontend in `src/`
+- shared frontend simulation helpers in `src/shared/`
+- the Python simulation engine and API in `backend/`
+- golden, rules, and API tests in `tests/`
 
 ## Current State
 
-- Local-first V3 proof of concept implemented in `src/`
+- Local-first React frontend implemented in `src/`
+- Python V4.0 parity backend implemented in `backend/`
+- V4.2-A player-content foundation implemented with backend-owned class, progression, feature, loadout, and player-preset registries
+- The Python backend is the live simulation authority; the frontend consumes backend catalogs plus replay/state transport types
 - Deterministic replay and batch simulation
 - Grid combat, flanking, opportunity attacks, player behavior, and DM behavior settings
-- Browser UI built with React + Vite
+- Browser UI built with React + Vite and wired to the Python API
+- FastAPI layer for Python `run`, `batch`, async `batch-jobs`, and catalog endpoints
+- Backend-owned preset, enemy, and player catalog data consumed or exposed at runtime
+
+## Live Content Snapshot
+
+Current live class support:
+
+- Fighter supported to level 5 as a Battle Master great-weapon striker with Extra Attack and Tactical Shift
+- Barbarian supported to level 2
+- Rogue supported to level 5 for the ranged Assassin path and level 2 for the melee path
+- Monk supported to level 2
+- Wizard supported to level 5 as an Evoker with live Fireball, Haste, Counterspell, Scorching Ray, Shatter, Potent Cantrip, smart precombat Mage Armor, and Memorize Spell metadata
+- Paladin supported to level 5 as an Oath of the Ancients plate-and-shield support tank with Extra Attack, level 2 Bless, Aid rules support, Lay on Hands, Cure Wounds, Divine Smite, Channel Divinity, Nature's Wrath, and Sentinel
+
+Current default player preset:
+
+- `martial_mixed_party`
+- level 5 Battle Master fighter
+- level 5 Oath of the Ancients paladin
+- level 5 ranged Assassin rogue
+- level 5 Evoker wizard
+
+Active enemy presets from `ACTIVE_ENEMY_PRESET_IDS` in `backend/content/enemies.py`:
+
+- `goblin_screen`
+- `bandit_ambush`
+- `mixed_patrol`
+- `orc_push`
+- `wolf_harriers`
+- `marsh_predators`
+- `hobgoblin_kill_box`
+- `predator_rampage`
+- `bugbear_dragnet`
+- `deadwatch_phalanx`
+- `captains_crossfire`
+- `berserker_overrun`
+- `hobgoblin_command_screen`
+- `skyhunter_pincer`
+- `reaction_bastion`
+
+The focused party-validation battery is `reaction_bastion`, `skyhunter_pincer`,
+`hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`.
+Its defaults are 300 total encounters per scenario, balanced players, and combined
+DM styles. Combined validation divides those 300 encounters among the three DM
+styles; it does not run 300 encounters for each style.
+
+`frostfall_courtyard` and `frostfall_courtyard_variant` are loadable capstone
+presets outside the active selector/audit list. The presentation page uses the
+saved variant replay with seed `frostfall-variant-0034`. Backend-only fixtures,
+such as `giant_toad_solo` and monster benchmark presets, are not active scenarios.
 
 ## Planned Direction
 
@@ -22,19 +80,93 @@ The working roadmap and design decisions are tracked in:
 - [docs/MASTER_NOTES.md](docs/MASTER_NOTES.md)
 - [docs/V4_ARCHITECTURE.md](docs/V4_ARCHITECTURE.md)
 - [docs/CONTENT_BACKLOG.md](docs/CONTENT_BACKLOG.md)
+- [docs/PLAYER_CLASS_IMPLEMENTATION.md](docs/PLAYER_CLASS_IMPLEMENTATION.md)
+- [docs/TECHNICAL_PAPER_SOURCE_GUIDE.md](docs/TECHNICAL_PAPER_SOURCE_GUIDE.md)
 
 ## Repository Layout
 
-- `src/` current TypeScript proof of concept
+- `src/` React frontend
+- `src/shared/` frontend transport types and placement/grid helpers
+- `backend/` Python engine, rules, AI, and API
+- `tests/` Python golden, rules, and integration tests
+- `scripts/run_code_health_audit.py` manual code-health and benchmark audit
 - `docs/` planning, notes, and reference material
-- `docs/reference/` source PDFs and static reference documents
+- `docs/` also holds the SRD PDF, project requirements PDF, and reference workbooks
+- `archive/README.md` historical GUI snapshot provenance and backup location
 
-## Current Commands
+For new class work, start with [docs/PLAYER_CLASS_IMPLEMENTATION.md](docs/PLAYER_CLASS_IMPLEMENTATION.md).
+
+## Quick Start
+
+The runnable application is on `integration`; `codex/monster-development`
+contains the pending content and housekeeping updates. The default `main`
+branch remains the early scaffold until the release PR is merged. For now,
+clone the application branch explicitly from PowerShell:
+
+```powershell
+git clone --branch integration https://github.com/christopherposadasp-ctrl/D-D-Sim.git
+Set-Location '.\D-D-Sim'
+```
+
+Install the Python and frontend dependencies:
+
+```powershell
+py -3.13 -m pip install -e .[dev]
+npm install
+```
+
+Start the app from one PowerShell window:
+
+```powershell
+.\scripts\dev.ps1 app
+```
+
+Then open the Vite URL shown in the terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+The presentation replay page is available at:
+
+```text
+http://localhost:5173/presentation
+```
+
+The backend API docs are available while the app command is running:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+If the one-window command fails, use the fallback two-window flow. Start the Python backend in one PowerShell window:
+
+```powershell
+py -3.13 -m uvicorn backend.api.app:app --reload
+```
+
+Start the React frontend in a second PowerShell window:
+
+```powershell
+npm run dev
+```
+
+Open the Vite URL shown in the frontend terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+Use Python `3.12+`; this project is normally run with Python `3.13`. Run tests and scripts from the repo root, not from your user folder, or pytest will scan unrelated files.
+
+## Frontend Commands
 
 ```powershell
 npm install
 npm run dev
 ```
+
+The frontend sends simulation requests to the Python backend through the Vite dev proxy. Prefer `.\scripts\dev.ps1 app` for local use, or run the API server separately before using `npm run dev`.
 
 Build and test:
 
@@ -42,3 +174,180 @@ Build and test:
 npm run test
 npm run build
 ```
+
+## Python Commands
+
+Install Python dependencies:
+
+```powershell
+py -3.13 -m pip install -e .[dev]
+```
+
+## Named Audit Commands
+
+Use the PowerShell task runner for the standard checks:
+
+```powershell
+.\scripts\dev.ps1 app
+.\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 daily-housekeeping
+.\scripts\dev.ps1 party-validation
+.\scripts\dev.ps1 pc-tuning-sample
+.\scripts\dev.ps1 audit-quick
+.\scripts\dev.ps1 audit-full
+.\scripts\dev.ps1 audit-health
+.\scripts\dev.ps1 audit-validation
+.\scripts\dev.ps1 fighter-audit-quick
+.\scripts\dev.ps1 fighter-audit-full
+.\scripts\dev.ps1 barbarian-audit-quick
+.\scripts\dev.ps1 barbarian-audit-full
+.\scripts\dev.ps1 rogue-audit-quick
+.\scripts\dev.ps1 rogue-audit-full
+.\scripts\dev.ps1 class-audit-slices
+.\scripts\dev.ps1 behavior-diagnostics
+.\scripts\dev.ps1 nightly-audit
+.\scripts\dev.ps1 pass2-stability
+.\scripts\dev.ps1 pass3-clarity
+```
+
+These map to:
+
+- `app`: start the Python backend and React frontend from one PowerShell window; press `Ctrl+C` to stop both
+- `check-fast`: `ruff` plus the non-slow backend `pytest` suite
+- `daily-housekeeping`: conservative repo status, doc-drift, and safe commit recommendation report with no automatic staging or commits
+- `party-validation`: focused current-party validation for `martial_mixed_party` against `reaction_bastion`, `skyhunter_pincer`, `hobgoblin_command_screen`, `berserker_overrun`, and `frostfall_courtyard`
+- `pc-tuning-sample`: event-level PC tuning sample across the standard validation scenarios; every run reports current-party Fighter `F1`, Paladin `F2`, ranged Rogue `F3`, and Wizard `F4`, with the selected profile shown last in detail
+- `audit-quick`: the lighter scenario audit profile with live progress and rolling reports
+- `audit-full`: the slower full scenario audit profile
+- `audit-health`: the code-health and benchmark audit
+- `audit-validation`: measure-first report on audit command coverage, report freshness, runtime evidence, and overlap candidates
+- `fighter-audit-quick`: legacy targeted Fighter audit; use segmented slices for full Fighter matrix evidence
+- `fighter-audit-full`: legacy targeted Fighter full audit
+- `barbarian-audit-quick`: legacy targeted Barbarian audit; use segmented slices for full Barbarian matrix evidence
+- `barbarian-audit-full`: legacy targeted Barbarian full audit
+- `rogue-audit-quick`: the dedicated level 2 ranged Rogue audit
+- `rogue-audit-full`: the dedicated Rogue audit full profile
+- `class-audit-slices`: canonical timeout-safe segmented Fighter/Barbarian checkpoint evidence
+- `behavior-diagnostics`: smart-vs-dumb behavior investigation helper
+- `nightly-audit`: the nightly layered audit protocol; Fighter/Barbarian rotating coverage uses segmented class slices
+- `pass2-stability`: the deterministic replay/batch and async stability gate
+- `pass3-clarity`: the clarity, docs, report, and audit-maintainability gate
+
+Party validation writes `party_validation_latest.json`,
+`party_validation_latest.md`, and `party_validation_latest.csv` under the ignored
+`reports/party_validation/` directory. The CSV contains the aggregate and
+Kind/Balanced/Evil outcome columns also shown in the console and Markdown table.
+
+The task runner passes through extra arguments to the underlying script. Examples:
+
+```powershell
+.\scripts\dev.ps1 party-validation --workers 4
+.\scripts\dev.ps1 pc-tuning-sample --runs-per-scenario 20
+.\scripts\dev.ps1 pc-tuning-sample --profile rogue --runs-per-scenario 20
+.\scripts\dev.ps1 pc-tuning-sample --profile fighter --player-behavior both --runs-per-scenario 20
+.\scripts\dev.ps1 pc-tuning-sample --profile wizard --runs-per-scenario 20
+.\scripts\dev.ps1 audit-quick --scenario goblin_screen
+.\scripts\dev.ps1 audit-full --json
+.\scripts\dev.ps1 class-audit-slices --class both --profile quick --timeout-seconds 300 --summary-json-path .\reports\class_audit\fighter_barbarian_quick_latest.json --summary-markdown-path .\reports\class_audit\fighter_barbarian_quick_latest.md
+```
+
+Routine development should usually run:
+
+```powershell
+.\scripts\dev.ps1 check-fast
+.\scripts\dev.ps1 party-validation
+```
+
+Use the broader audit commands before major merges, broad rules changes, or release checkpoints. Fighter/Barbarian
+checkpoint evidence should use `class-audit-slices`; the monolithic Fighter/Barbarian commands are targeted legacy tools,
+not the recommended full-matrix route. Nightly Fighter/Barbarian rotating coverage also uses segmented class slices so a
+single class row can timeout without stalling the full nightly protocol.
+
+## Direct Python Commands
+
+Run the Python tests directly:
+
+```powershell
+py -3.13 -m pytest
+```
+
+Run the quick scenario audit across the active preset catalog:
+
+```powershell
+py -3.13 .\scripts\run_scenario_audit.py
+```
+
+Run the full scenario audit:
+
+```powershell
+py -3.13 .\scripts\run_scenario_audit.py --full
+```
+
+Run focused party validation directly:
+
+```powershell
+py -3.13 .\scripts\run_party_validation.py
+```
+
+Run conservative daily housekeeping directly:
+
+```powershell
+py -3.13 .\scripts\run_daily_housekeeping.py
+```
+
+Run the focused PC tuning sample directly:
+
+```powershell
+py -3.13 .\scripts\run_pc_tuning_sample.py
+py -3.13 .\scripts\run_pc_tuning_sample.py --profile rogue
+py -3.13 .\scripts\run_pc_tuning_sample.py --profile fighter --player-behavior both
+py -3.13 .\scripts\run_pc_tuning_sample.py --profile wizard
+```
+
+Run the manual code-health audit:
+
+```powershell
+py -3.13 .\scripts\run_code_health_audit.py --write-report
+```
+
+Run the Python static checks:
+
+```powershell
+py -3.13 -m ruff check backend tests scripts
+```
+
+Run the Python API locally:
+
+```powershell
+py -3.13 -m uvicorn backend.api.app:app --reload
+```
+
+Swagger/OpenAPI docs are then available at:
+
+- `http://127.0.0.1:8000/docs`
+
+## Local Development Flow
+
+Prefer the one-window local app command:
+
+```powershell
+.\scripts\dev.ps1 app
+```
+
+This starts the Python backend, waits for `/health`, starts the Vite frontend, and prints:
+
+- `http://localhost:5173/`
+- `http://localhost:5173/presentation`
+- `http://127.0.0.1:8000/docs`
+
+Use the fallback two-window flow from the repo root when debugging either server separately:
+
+```powershell
+py -3.13 -m uvicorn backend.api.app:app --reload
+```
+
+```powershell
+npm run dev
+```
+
+Then open the Vite URL shown in the terminal. The frontend will proxy `/api/*` requests to `http://127.0.0.1:8000`.

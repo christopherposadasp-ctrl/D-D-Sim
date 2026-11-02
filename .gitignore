@@ -18,3 +18,9 @@ Thumbs.db
 
 .idea/
 .vscode/
+
+tmp_*.py
+reports/
+
+# Local historical source snapshots; provenance is documented in archive/README.md.
+/archive/snapshots/
