@@ -164,8 +164,10 @@ def find_first_divergent_event(expected_events: list[object], actual_events: lis
 def review_run_case(case: FixtureCase, classification: Classification) -> dict[str, object]:
     config = EncounterConfig.model_validate(case.payload["config"])
     result = run_encounter(config)
-    actual_result = result.model_dump(by_alias=True)
-    actual_summary = summarize_encounter(result.final_state).model_dump(by_alias=True)
+    actual_result = result.model_dump(mode="json", by_alias=True)
+    actual_summary = summarize_encounter(result.final_state).model_dump(mode="json", by_alias=True)
+
+    repeat_result = run_encounter(config).model_dump(mode="json", by_alias=True)
 
     expected_result = case.payload["result"]
     expected_summary = case.payload["summary"]
@@ -201,13 +203,14 @@ def review_run_case(case: FixtureCase, classification: Classification) -> dict[s
             actual_events if isinstance(actual_events, list) else [],
         ),
         "actualResult": actual_result,
+        "deterministic": actual_result == repeat_result,
     }
 
 
 def review_batch_case(case: FixtureCase, classification: Classification) -> dict[str, object]:
     config = EncounterConfig.model_validate(case.payload["config"])
-    actual_summary = run_batch(config).model_dump(by_alias=True)
-    repeat_summary = run_batch(config).model_dump(by_alias=True)
+    actual_summary = run_batch(config).model_dump(mode="json", by_alias=True)
+    repeat_summary = run_batch(config).model_dump(mode="json", by_alias=True)
 
     expected_summary = case.payload["summary"]
     if not isinstance(expected_summary, dict):
@@ -319,8 +322,7 @@ def format_markdown(report: dict[str, object]) -> str:
                 lines.append(f"- First divergent event index: `{first_diff.get('index')}`")
                 lines.append(f"- Expected event: `{first_diff.get('expectedText')}`")
                 lines.append(f"- Actual event: `{first_diff.get('actualText')}`")
-        else:
-            lines.append(f"- Deterministic on repeat run: `{review['deterministic']}`")
+        lines.append(f"- Deterministic on repeat run: `{review['deterministic']}`")
     lines.append("")
     return "\n".join(lines)
 
@@ -355,10 +357,10 @@ def validate_fixture_write(report: dict[str, object]) -> list[str]:
     nondeterministic = [
         str(review.get("name"))
         for review in reviews
-        if review.get("kind") == "batch" and review.get("driftDetected") and not review.get("deterministic")
+        if review.get("driftDetected") and not review.get("deterministic")
     ]
     if nondeterministic:
-        errors.append(f"Batch drift was not deterministic on repeat run: {', '.join(nondeterministic)}.")
+        errors.append(f"Golden drift was not deterministic on repeat run: {', '.join(nondeterministic)}.")
 
     return errors
 
@@ -420,7 +422,7 @@ def main() -> None:
                 print(f"ERROR: {error}")
             raise SystemExit(1)
         updated_fixtures = apply_review_updates(fixtures, selected_reviews)
-        args.fixture_path.write_text(json.dumps(updated_fixtures, indent=2) + "\n", encoding="utf-8")
+        args.fixture_path.write_text(json.dumps(updated_fixtures, indent=2) + "\n", encoding="utf-8", newline="\n")
         print(f"Updated {args.fixture_path}")
 
 
