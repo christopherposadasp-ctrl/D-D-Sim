@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from backend.content.enemies import BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT, create_enemy, unit_has_trait
+from backend.content.enemies import (
+    BENCHMARK_ENEMY_PRESET_ID_BY_VARIANT,
+    build_rock_terrain_feature,
+    create_enemy,
+    unit_has_trait,
+)
 from backend.engine import create_encounter
 from backend.engine.ai.decision import choose_turn_decision
 from backend.engine.ai.profiles import get_monster_ai_profile
@@ -55,6 +60,7 @@ from backend.engine.rules.spatial import (
     get_min_chebyshev_distance_between_footprints,
     get_occupied_squares_for_position,
     get_unit_footprint,
+    has_line_of_sight_between_units,
 )
 from tests.rules.monster_expectations import (
     MELEE_ONLY_MONSTER_IDS,
@@ -279,6 +285,41 @@ def test_satyr_uses_mockery_at_range_and_hooves_when_adjacent() -> None:
     melee_decision = choose_turn_decision(melee_encounter, "E1")
 
     assert melee_decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "hooves"}
+
+
+@pytest.mark.parametrize("monster_behavior", ("kind", "balanced", "evil"))
+def test_satyr_moves_around_rock_when_mockery_target_is_occluded(monster_behavior: str) -> None:
+    encounter = build_monster_benchmark_encounter("satyr", monster_behavior=monster_behavior)
+    defeat_other_units(encounter, "E1", "F1")
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=3, y=8)
+    encounter.terrain_features = [build_rock_terrain_feature()]
+    assert not has_line_of_sight_between_units(encounter, "E1", "F1")
+
+    decision, events = run_actor_turn(encounter, "E1")
+
+    assert decision.action == {"kind": "attack", "target_id": "F1", "weapon_id": "hooves"}
+    assert decision.pre_action_movement is not None
+    assert encounter.units["E1"].position != GridPosition(x=8, y=8)
+    assert [event.damage_details.weapon_id for event in enemy_attack_events(events)] == ["hooves"]
+    assert not any("Mockery has no legal target" in event.text_summary for event in events)
+
+
+def test_satyr_chooses_visible_mockery_target_over_occluded_priority_target() -> None:
+    encounter = build_monster_benchmark_encounter("satyr")
+    defeat_other_units(encounter, "E1", "F1", "F2")
+    encounter.units["F2"] = encounter.units["F1"].model_copy(deep=True, update={"id": "F2"})
+    encounter.units["E1"].position = GridPosition(x=8, y=8)
+    encounter.units["F1"].position = GridPosition(x=3, y=8)
+    encounter.units["F1"].current_hp = 1
+    encounter.units["F2"].position = GridPosition(x=7, y=5)
+    encounter.terrain_features = [build_rock_terrain_feature()]
+    assert not has_line_of_sight_between_units(encounter, "E1", "F1")
+    assert has_line_of_sight_between_units(encounter, "E1", "F2")
+
+    decision = choose_turn_decision(encounter, "E1")
+
+    assert decision.action == {"kind": "special_action", "action_id": "mockery", "target_id": "F2"}
 
 
 def test_satyr_mockery_failed_save_deals_fixed_psychic_damage_and_success_deals_none() -> None:

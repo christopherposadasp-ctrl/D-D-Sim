@@ -77,6 +77,7 @@ from backend.engine.rules.spatial import (
     get_swallow_source_id,
     get_unit_footprint,
     get_units_with_positions,
+    has_line_of_sight_between_units,
     is_within_bounds,
     path_provokes_opportunity_attack,
 )
@@ -5920,7 +5921,9 @@ def single_target_save_damage_action_can_target(
         target.position,
         get_unit_footprint(target),
     )
-    return distance <= action.range_squares
+    if distance > action.range_squares:
+        return False
+    return has_line_of_sight_between_units(state, actor.id, target.id)
 
 
 def get_single_target_save_damage_decision(state: EncounterState, actor: UnitState) -> TurnDecision | None:
